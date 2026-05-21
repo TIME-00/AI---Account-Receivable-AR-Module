@@ -1,0 +1,77 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Base Styles ──────────────────────────────────────────────────────── */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+  }
+
+  body {
+    @apply bg-white text-slate-800 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300 hover:bg-slate-400;
+  }
+
+  /* Focus visible ring */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-brand-500/50 ring-offset-2 ring-offset-white;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-brand-100 text-brand-900;
+  }
+}
+
+/* ─── Utility Classes ──────────────────────────────────────────────────── */
+
+@layer utilities {
+  /* Glass morphism — adapted for light mode */
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-slate-200/80;
+  }
+
+  .glass-card {
+    @apply rounded-xl bg-white/80 backdrop-blur-xl border border-slate-200/80 shadow-sm shadow-slate-200/50;
+  }
+
+  /* Chart container */
+  .chart-container {
+    @apply rounded-xl border border-slate-200/80 bg-white/80 p-5 backdrop-blur-sm shadow-sm;
+  }
+}
+
+/* ─── Component Overrides ──────────────────────────────────────────────── */
+
+@layer components {
+  /* Premium input style — light mode */
+  .input-premium {
+    @apply h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800
+    placeholder:text-slate-400 transition-all
+    focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/30;
+  }
+
+  /* Card with subtle hover */
+  .card-interactive {
+    @apply glass-card transition-all duration-300 hover:shadow-md hover:shadow-slate-200/80 hover:-translate-y-0.5 hover:border-slate-300;
+  }
+}
