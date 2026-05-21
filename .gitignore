@@ -35,7 +35,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Backups
+# Backups / dumps
 backups/
 *.dump
 *.backup
@@ -43,9 +43,3 @@ backups/
 
 # Zip / backup files
 *.zip
-
-# Backups
-backups/
-*.dump
-*.backup
-*.sql.gz
