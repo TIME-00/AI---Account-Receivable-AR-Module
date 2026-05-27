@@ -50,33 +50,32 @@ export function ReceiptFormPayment({ form, bankAccounts, isCheque }: ReceiptForm
           />
         </div>
 
-        {/* Bank Account */}
+        {/* Bank Account — Sprint F1: Uses NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-slate-600">
-            Bank Account <span className="text-red-400">*</span>
+            Bank Account
+            <span className="ml-1 text-[10px] text-slate-400">(Sprint F1 — env-configured)</span>
           </label>
-          <Controller
-            control={form.control}
-            name="bank_account_id"
-            render={({ field }) => (
-              <select
-                {...field}
-                className={cn(
-                  "h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-800",
-                  "focus:outline-none focus:ring-1 focus:ring-brand-500",
-                  form.formState.errors.bank_account_id ? "border-red-500" : "border-slate-300"
-                )}
-              >
-                <option value="">Select bank account...</option>
-                {bankAccounts.map((ba) => (
-                  <option key={ba.id} value={ba.id}>{ba.bank_name} — {ba.account_no}</option>
-                ))}
-              </select>
+          <select
+            disabled
+            className={cn(
+              "h-10 w-full rounded-lg border bg-slate-50 px-3 text-sm cursor-not-allowed",
+              process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID
+                ? "text-slate-600 border-slate-300"
+                : "text-slate-400 border-slate-200"
             )}
-          />
-          {form.formState.errors.bank_account_id && (
-            <p className="mt-1 text-xs text-red-400">{form.formState.errors.bank_account_id.message}</p>
-          )}
+          >
+            <option value="">
+              {process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID
+                ? `Maybank — Operating Account (${process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID.slice(0, 8)}…)`
+                : "Not configured — set NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID"}
+            </option>
+          </select>
+          <p className="mt-1 text-[10px] text-slate-400">
+            {process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID
+              ? "Bank account is configured via environment variable for Sprint F1."
+              : "Receipt creation requires NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID in .env.local."}
+          </p>
         </div>
 
         {/* Reference No */}

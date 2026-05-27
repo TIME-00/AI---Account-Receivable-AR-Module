@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatAmount, formatDate, pct } from "@/lib/utils";
 import { LoadingButton } from "@/components/ui/loading-button";
@@ -37,13 +38,17 @@ interface ReceiptTableProps {
   onPost: (id: string, receiptNo: string) => void;
   postingId: string | null;
   isPostPending: boolean;
+  /** When false, Post button is hidden (role-based UX gating). */
+  canPostReceipt?: boolean;
 }
 
 export function ReceiptTable({
   receipts, isLoading, isError,
   page, totalCount, totalPages, onPageChange,
   onPost, postingId, isPostPending,
+  canPostReceipt = true,
 }: ReceiptTableProps) {
+  const router = useRouter();
   const PAGE_SIZE = 15;
 
   return (
@@ -85,7 +90,7 @@ export function ReceiptTable({
                   const isPosting = postingId === r.id;
 
                   return (
-                    <tr key={r.id} className="border-b border-slate-100 transition-colors hover:bg-slate-50">
+                    <tr key={r.id} onClick={() => router.push(`/receipts/${r.id}`)} className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50">
                       <td className="px-4 py-3">
                         <p className="text-sm font-semibold text-slate-900">{r.receipt_no}</p>
                         {r.reference_no && <p className="text-[10px] text-slate-400">Ref: {r.reference_no}</p>}
@@ -130,12 +135,12 @@ export function ReceiptTable({
                       <td className="px-3 py-3 text-center"><StatusBadge status={r.status} /></td>
                       <td className="px-3 py-3 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          {isDraft && (
-                            <LoadingButton variant="ghost" size="sm" onClick={() => onPost(r.id, r.receipt_no)} isLoading={isPosting} disabled={isPostPending} loadingText="" title="Post">
+                          {canPostReceipt && isDraft && (
+                            <LoadingButton variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onPost(r.id, r.receipt_no); }} isLoading={isPosting} disabled={isPostPending} loadingText="" title="Post">
                               <Send className="h-3.5 w-3.5 text-brand-500" />
                             </LoadingButton>
                           )}
-                          <button type="button" className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" title="View Details">
+                          <button type="button" onClick={(e) => { e.stopPropagation(); router.push(`/receipts/${r.id}`); }} className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" title="View Details">
                             <Eye className="h-3.5 w-3.5" />
                           </button>
                         </div>

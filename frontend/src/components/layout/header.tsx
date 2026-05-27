@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/providers/auth-provider";
 import { useCompanyStore } from "@/stores/company-store";
+import { useUserRole } from "@/hooks/use-user-role";
 import { cn } from "@/lib/utils";
 import {
   Building2,
@@ -16,6 +17,8 @@ import { useState, useRef, useEffect } from "react";
 export function Header() {
   const { user, signOut } = useAuth();
   const { companyName, companies, companyId, setCompany } = useCompanyStore();
+  const { role } = useUserRole();
+  const displayRole = role ?? "Read-only";
   const [showCompanyMenu, setShowCompanyMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const companyMenuRef = useRef<HTMLDivElement>(null);
@@ -122,7 +125,7 @@ export function Header() {
               <p className="text-xs font-medium text-slate-700">
                 {user?.email?.split("@")[0] ?? "User"}
               </p>
-              <p className="text-[10px] text-slate-400">AR Clerk</p>
+              <p className="text-[10px] text-slate-400">{displayRole}</p>
             </div>
           </button>
 

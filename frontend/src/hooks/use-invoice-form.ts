@@ -68,10 +68,9 @@ export function useInvoiceForm() {
   });
 
   // ─── Data Queries ────────────────────────────────────────────────────
-  const { data: customersData } = useCustomers(customerSearch);
+  const { data: customers = [] } = useCustomers(customerSearch);
   const { data: taxCodes = [] } = useTaxCodes();
   const { data: paymentTerms = [] } = usePaymentTerms();
-  const customers = customersData?.customers ?? [];
 
   // ─── Calculator Engine ───────────────────────────────────────────────
   const calc = useInvoiceCalculator(form, taxCodes, paymentTerms, selectedTermId);
@@ -99,9 +98,36 @@ export function useInvoiceForm() {
       toast.error("Please complete the invoice header.");
       return;
     }
-    if (currentStep === 2 && !canProceedStep2) {
-      toast.error("Please add at least 1 valid line item.");
-      return;
+    if (currentStep === 2) {
+      if (!canProceedStep2) {
+        toast.error("Please add at least 1 valid line item.");
+        return;
+      }
+      // Validate all line item required fields (description, quantity, unit_price)
+      // using Zod schema before advancing to Review step.
+      const lines = form.getValues("lines");
+      const invalidLines: string[] = [];
+      lines.forEach((line, idx) => {
+        if (!line.description || line.description.trim().length === 0) {
+          invalidLines.push(`Line ${idx + 1}: Description is required.`);
+          form.setError(`lines.${idx}.description`, {
+            type: "manual",
+            message: "Description is required.",
+          });
+        }
+        if (!line.quantity || line.quantity <= 0) {
+          invalidLines.push(`Line ${idx + 1}: Quantity must be > 0.`);
+        }
+        if (!line.unit_price || line.unit_price <= 0) {
+          invalidLines.push(`Line ${idx + 1}: Unit price must be > 0.`);
+        }
+      });
+      if (invalidLines.length > 0) {
+        toast.error("Line item validation failed", {
+          description: invalidLines[0],
+        });
+        return;
+      }
     }
     setCurrentStep((s) => Math.min(s + 1, 3));
   };
@@ -153,7 +179,16 @@ export function useInvoiceForm() {
   const handleCreateDraft = async () => {
     setFieldErrors({});
     const valid = await form.trigger();
-    if (!valid) return;
+    if (!valid) {
+      // Surface the first validation error as a toast
+      const errors = form.formState.errors;
+      const firstError = Object.values(errors).find(Boolean);
+      const message = (firstError as any)?.message
+        ?? (firstError as any)?.root?.message
+        ?? "Please fix form validation errors before saving.";
+      toast.error("Validation Error", { description: String(message) });
+      return;
+    }
 
     const values = form.getValues();
     try {
@@ -170,7 +205,15 @@ export function useInvoiceForm() {
   const handleCreateAndPost = async () => {
     setFieldErrors({});
     const valid = await form.trigger();
-    if (!valid) return;
+    if (!valid) {
+      const errors = form.formState.errors;
+      const firstError = Object.values(errors).find(Boolean);
+      const message = (firstError as any)?.message
+        ?? (firstError as any)?.root?.message
+        ?? "Please fix form validation errors before posting.";
+      toast.error("Validation Error", { description: String(message) });
+      return;
+    }
 
     const values = form.getValues();
     try {

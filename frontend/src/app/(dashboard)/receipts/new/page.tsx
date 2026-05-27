@@ -64,6 +64,21 @@ export default function NewReceiptPage() {
 
   // ── Handlers ──────────────────────────────────────────────────────
   const onSubmit = async (values: ReceiptFormValues) => {
+    // ── Resolve bank_account_id from env ─────────────────────────────
+    // Backend requires bank_account_id (UUID). For Sprint F1, this comes
+    // from NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID since no GET /bank-accounts exists.
+    const demoBankAccountId = process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID?.trim();
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (!demoBankAccountId || !UUID_RE.test(demoBankAccountId)) {
+      toast.error("Receipt creation unavailable", {
+        description:
+          "NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID is not configured or is not a valid UUID. " +
+          "Please set it in frontend/.env.local to create receipts in Sprint F1.",
+      });
+      return;
+    }
+
     try {
       const payload: Record<string, unknown> = {
         receipt_date: values.receipt_date,
@@ -71,7 +86,7 @@ export default function NewReceiptPage() {
         payment_method: values.payment_method,
         currency: values.currency,
         receipt_amount: values.receipt_amount,
-        bank_account_id: values.bank_account_id,
+        bank_account_id: demoBankAccountId,
       };
 
       if (values.exchange_rate && values.exchange_rate !== 1) payload.exchange_rate = values.exchange_rate;

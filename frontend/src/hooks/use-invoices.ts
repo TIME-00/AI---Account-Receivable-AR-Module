@@ -33,7 +33,9 @@ interface CreateInvoicePayload {
     unit_price: number;
     discount_pct?: number;
     discount_amt?: number;
-    tax_code_id?: string;
+    // SAFETY: tax_code_id is intentionally omitted from payload.
+    // Mock tax codes (tc-sr6 etc.) must NEVER be sent to backend.
+    // Tax calculation is frontend display-only for the prototype.
     gl_account_id?: string;
     cost_center?: string;
     line_remarks?: string;
@@ -48,7 +50,9 @@ export function useCustomers(search?: string) {
   return useQuery({
     queryKey: ["customers", "list", search],
     queryFn: () =>
-      api.get<{ customers: Customer[]; total: number }>("/customers", {
+      // useApi() returns json.data which is the raw Customer[] array.
+      // meta (total, page, page_size) is discarded by useApi().
+      api.get<Customer[]>("/customers", {
         params: {
           page: 1,
           page_size: 50,
@@ -137,10 +141,15 @@ export function useCreateInvoice() {
         reason_code: payload.reason_code || undefined,
         reason_desc: payload.reason_desc || undefined,
         lines: payload.lines.map((line) => ({
-          ...line,
+          description: line.description,
+          quantity: line.quantity,
+          unit_price: line.unit_price,
           item_code: line.item_code || undefined,
           uom: line.uom || undefined,
-          tax_code_id: line.tax_code_id || undefined,
+          discount_pct: line.discount_pct || undefined,
+          discount_amt: line.discount_amt || undefined,
+          // SAFETY: tax_code_id is explicitly excluded.
+          // Mock IDs (tc-sr6 etc.) must never reach the backend.
           gl_account_id: line.gl_account_id || undefined,
           cost_center: line.cost_center || undefined,
           line_remarks: line.line_remarks || undefined,
@@ -167,6 +176,67 @@ export function usePostInvoice() {
       return api.post<Invoice & { je_no?: string }>(`/invoices/${invoiceId}/post`, {
         posting_period: postingPeriod,
       });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+// ─── Query: Invoice List (with filters) ─────────────────────────────────────
+
+export function useInvoiceList(filters: {
+  status?: string;
+  customer_id?: string;
+  search?: string;
+  doc_type?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  const api = useApi();
+
+  return useQuery({
+    queryKey: ["invoices", "list", filters],
+    queryFn: async () => {
+      const params: Record<string, string | number> = {
+        page: filters.page ?? 1,
+        page_size: filters.page_size ?? 20,
+      };
+      if (filters.status) params.status = filters.status;
+      if (filters.customer_id) params.customer_id = filters.customer_id;
+      if (filters.search) params.search = filters.search;
+      if (filters.doc_type) params.doc_type = filters.doc_type;
+
+      // useApi() returns json.data = Invoice[] (raw array).
+      // meta.total is discarded by useApi(). Client-side pagination for prototype.
+      return api.get<Invoice[]>("/invoices", { params });
+    },
+    staleTime: 30_000,
+  });
+}
+
+// ─── Query: Single Invoice (with Lines) ─────────────────────────────────────
+
+export function useInvoice(id: string) {
+  const api = useApi();
+
+  return useQuery({
+    queryKey: ["invoices", id],
+    queryFn: () => api.get<Invoice & { lines: InvoiceLine[] }>(`/invoices/${id}`),
+    enabled: !!id,
+  });
+}
+
+// ─── Mutation: Cancel Invoice ───────────────────────────────────────────────
+
+export function useCancelInvoice() {
+  const api = useApi();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ invoiceId, cancel_reason }: { invoiceId: string; cancel_reason: string }) => {
+      return api.post<Invoice>(`/invoices/${invoiceId}/cancel`, { cancel_reason });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["invoices"] });

@@ -31,7 +31,9 @@ export function useReceipts(filters: {
       if (filters.customer_id) params.customer_id = filters.customer_id;
       if (filters.search) params.search = filters.search;
 
-      return api.get<{ receipts: Receipt[]; total: number }>("/receipts", { params });
+      // useApi() returns json.data = Receipt[] (raw array).
+      // meta.total is discarded by useApi(). Client-side pagination for prototype.
+      return api.get<Receipt[]>("/receipts", { params });
     },
     staleTime: 30_000,
   });
@@ -57,29 +59,66 @@ export function useCustomers() {
   return useQuery({
     queryKey: ["customers", "list"],
     queryFn: async () => {
-      const result = await api.get<{ customers: Customer[]; total: number }>("/customers", {
+      // useApi() returns json.data = Customer[] (raw array).
+      return api.get<Customer[]>("/customers", {
         params: { page: 1, page_size: 200 },
       });
-      return result.customers ?? [];
     },
     staleTime: 60_000,
   });
 }
 
-// ─── Query: Bank Accounts (for bank account selector) ───────────────────────
+// ─── Query: Bank Accounts (MOCK — no Edge Function exists for /bank-accounts) ─
+// DISPLAY-ONLY: These mock IDs must NEVER be sent to the backend.
+// The bank_account_id field in the create receipt payload must be omitted.
 
 export function useBankAccounts() {
-  const api = useApi();
-
   return useQuery({
     queryKey: ["bank-accounts"],
     queryFn: async () => {
-      const result = await api.get<{ bank_accounts: BankAccount[]; total: number }>("/bank-accounts", {
-        params: { page: 1, page_size: 100, is_active: "true" },
-      });
-      return result.bank_accounts ?? [];
+      // MOCK DATA — display-only, no Edge Function exists for /bank-accounts
+      // These IDs are FAKE and must never be sent in API payloads.
+      const mockBankAccounts: BankAccount[] = [
+        {
+          id: "ba-mock-001",
+          company_id: "",
+          bank_name: "Maybank",
+          account_no: "5141-2200-0001",
+          account_name: "Maybank Current A/C",
+          currency: "MYR",
+          gl_account_id: null,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: "ba-mock-002",
+          company_id: "",
+          bank_name: "CIMB Bank",
+          account_no: "8600-1100-0002",
+          account_name: "CIMB Savings A/C",
+          currency: "MYR",
+          gl_account_id: null,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: "ba-mock-003",
+          company_id: "",
+          bank_name: "HSBC",
+          account_no: "0012-5500-0003",
+          account_name: "HSBC USD A/C",
+          currency: "USD",
+          gl_account_id: null,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ];
+      return mockBankAccounts;
     },
-    staleTime: 120_000,
+    staleTime: Infinity, // Mock data never changes
   });
 }
 
@@ -91,7 +130,8 @@ export function useCustomerOutstanding(customerId: string) {
   return useQuery({
     queryKey: ["customers", customerId, "outstanding"],
     queryFn: async () => {
-      const result = await api.get<{ invoices: Array<{ outstanding: number }>; total: number }>(
+      // useApi() returns json.data = Invoice[] (raw array).
+      const invoices = await api.get<Array<{ outstanding: number; status: string }>>(
         "/invoices",
         {
           params: {
@@ -102,11 +142,10 @@ export function useCustomerOutstanding(customerId: string) {
         }
       );
       // Sum outstanding from Open/Overdue/Partially Paid invoices
-      const invoices = result.invoices ?? [];
-      const totalOutstanding = invoices
-        .filter((inv: any) => ["Open", "Overdue", "Partially Paid"].includes(inv.status))
-        .reduce((sum: number, inv: any) => sum + Number(inv.outstanding ?? 0), 0);
-      const count = invoices.filter((inv: any) =>
+      const totalOutstanding = (invoices ?? [])
+        .filter((inv) => ["Open", "Overdue", "Partially Paid"].includes(inv.status))
+        .reduce((sum: number, inv) => sum + Number(inv.outstanding ?? 0), 0);
+      const count = (invoices ?? []).filter((inv) =>
         ["Open", "Overdue", "Partially Paid"].includes(inv.status)
       ).length;
 

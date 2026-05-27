@@ -37,15 +37,15 @@ export function useAgingSummary(asOfDate?: string) {
 
 /**
  * Fetch aging breakdown by customer.
- * Calls: GET /reports/aging/customers
+ * Calls: GET /reports/aging/by-customer
  */
 export function useAgingByCustomer(asOfDate?: string, page = 1, pageSize = 20) {
   const api = useApi();
 
   return useQuery({
-    queryKey: ["reports", "aging", "customers", asOfDate, page, pageSize],
+    queryKey: ["reports", "aging", "by-customer", asOfDate, page, pageSize],
     queryFn: () =>
-      api.get<{ rows: CustomerAgingRow[]; total: number }>("/reports/aging/customers", {
+      api.get<{ rows: CustomerAgingRow[]; total: number }>("/reports/aging/by-customer", {
         params: {
           as_of_date: asOfDate,
           page,

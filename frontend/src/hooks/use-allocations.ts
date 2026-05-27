@@ -18,8 +18,8 @@ export function usePostedReceipts(customerId?: string) {
   return useQuery({
     queryKey: ["receipts", "posted", customerId],
     queryFn: async () => {
-      // Fetch receipts that have unallocated balance
-      const result = await api.get<{ receipts: Receipt[]; total: number }>("/receipts", {
+      // useApi() returns json.data = Receipt[] (raw array).
+      const receipts = await api.get<Receipt[]>("/receipts", {
         params: {
           page: 1,
           page_size: 50,
@@ -29,7 +29,7 @@ export function usePostedReceipts(customerId?: string) {
       });
 
       // Map to AllocationReceipt and filter those with unallocated balance
-      const receipts: AllocationReceipt[] = (result.receipts ?? [])
+      const mapped: AllocationReceipt[] = (receipts ?? [])
         .filter((r) => r.unallocated_amount > 0.005)
         .map((r) => ({
           id: r.id,
@@ -45,7 +45,7 @@ export function usePostedReceipts(customerId?: string) {
           status: r.status,
         }));
 
-      return receipts;
+      return mapped;
     },
     enabled: true,
     staleTime: 30_000,
@@ -60,7 +60,8 @@ export function useOutstandingInvoices(customerId: string, currency: string) {
   return useQuery({
     queryKey: ["invoices", "outstanding", customerId, currency],
     queryFn: async () => {
-      const result = await api.get<{ invoices: Invoice[]; total: number }>("/invoices", {
+      // useApi() returns json.data = Invoice[] (raw array).
+      const invoices = await api.get<Invoice[]>("/invoices", {
         params: {
           page: 1,
           page_size: 100,
@@ -70,7 +71,7 @@ export function useOutstandingInvoices(customerId: string, currency: string) {
       });
 
       const today = new Date();
-      const invoices: AllocationInvoice[] = (result.invoices ?? [])
+      const mapped: AllocationInvoice[] = (invoices ?? [])
         .filter(
           (inv) =>
             ["Open", "Overdue", "Partially Paid"].includes(inv.status) &&
@@ -104,7 +105,7 @@ export function useOutstandingInvoices(customerId: string, currency: string) {
           return dA.localeCompare(dB);
         });
 
-      return invoices;
+      return mapped;
     },
     enabled: !!customerId && !!currency,
     staleTime: 15_000,
@@ -133,21 +134,18 @@ export function useManualAllocate() {
   });
 }
 
-// ─── Mutation: Execute Auto Allocation (FIFO / AmountMatch) ─────────────────
+// ─── Mutation: Execute Auto Allocation (DISABLED for Sprint F1) ───────────────
+// IMPORTANT: POST /allocations/auto is NOT in the verified Sprint F1 endpoint list.
+// This hook is disabled. Use useManualAllocate() instead.
 
 export function useAutoAllocate() {
-  const api = useApi();
-  const qc = useQueryClient();
-
   return useMutation({
-    mutationFn: async (payload: { receipt_id: string; method: "FIFO" | "AmountMatch" }) => {
-      return api.post<AllocationDetail[]>("/allocations/auto", payload);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["receipts"] });
-      qc.invalidateQueries({ queryKey: ["invoices"] });
-      qc.invalidateQueries({ queryKey: ["allocations"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    mutationFn: async (_payload: { receipt_id: string; method: "FIFO" | "AmountMatch" }) => {
+      // DISABLED: /allocations/auto is not a verified Sprint F1 endpoint.
+      // This will be enabled when the endpoint is added to the verified list.
+      throw new Error(
+        "Auto-allocation is not available in the current sprint. Use manual allocation instead."
+      );
     },
   });
 }
