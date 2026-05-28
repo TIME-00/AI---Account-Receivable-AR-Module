@@ -18,6 +18,8 @@ import {
   Sparkles,
   Settings,
   Zap,
+  ShieldCheck,
+  Shield,
 } from "lucide-react";
 
 const navItems = [
@@ -42,7 +44,9 @@ const navItems = [
   {
     section: "System",
     items: [
-      { href: "/settings", label: "Settings", icon: Settings },
+      { href: "/settings",           label: "Settings",     icon: Settings },
+      { href: "/settings/roles",     label: "Roles",        icon: ShieldCheck },
+      { href: "/settings/audit-log", label: "Audit Trail",  icon: Shield },
     ],
   },
 ];

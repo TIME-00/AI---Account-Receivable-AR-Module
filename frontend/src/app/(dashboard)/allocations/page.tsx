@@ -21,7 +21,7 @@ import { LoadingButton } from "@/components/ui/loading-button";
 import { ReceiptPanel } from "@/components/features/allocations/receipt-panel";
 import { InvoicePanel } from "@/components/features/allocations/invoice-panel";
 import { AllocationTable } from "@/components/features/allocations/allocation-table";
-import { ArrowLeftRight, RotateCcw } from "lucide-react";
+import { ArrowLeftRight, RotateCcw, Zap, Clock, Info } from "lucide-react";
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export default function AllocationsPage() {
             Allocation Wizard
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Select Receipt → Match Invoices → Auto FIFO or Manual Allocation
+            Select Receipt → Match Invoices → Manual Allocation
           </p>
         </div>
         {logic.selectedReceipt && (
@@ -92,6 +92,17 @@ export default function AllocationsPage() {
             Reselect
           </LoadingButton>
         )}
+      </div>
+
+      {/* Auto-Allocate Disabled Notice */}
+      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+        <Zap className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
+        <div>
+          <p className="text-sm font-medium text-amber-800">Auto-allocation is not available</p>
+          <p className="text-xs text-amber-600">
+            Automatic FIFO allocation will be available in a future sprint. Use manual allocation below.
+          </p>
+        </div>
       </div>
 
       {/* Split Screen: Receipts + Invoices */}
@@ -129,6 +140,21 @@ export default function AllocationsPage() {
           isSubmitting={allocMutation.isPending}
         />
       )}
+
+      {/* Allocation History — Placeholder */}
+      <div className="glass-card overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-3">
+          <Clock className="h-4 w-4 text-slate-400" />
+          <h2 className="text-sm font-semibold text-slate-700">Allocation History</h2>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">Placeholder</span>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-2 py-10">
+          <Info className="h-8 w-8 text-slate-300" />
+          <p className="text-sm text-slate-500">Allocation history will be available in a future sprint.</p>
+          <p className="text-[10px] text-slate-400">The GET /allocations endpoint is not yet verified for frontend use.</p>
+        </div>
+      </div>
     </div>
   );
 }
+
