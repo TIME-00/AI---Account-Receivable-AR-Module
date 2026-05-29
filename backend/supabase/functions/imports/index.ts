@@ -1,7 +1,7 @@
 // ============================================================================
 // TSH Synergy ERP - Accounts Receivable Module
 // Edge Function: imports
-// Sprint F4 Phase A - CSV Invoice Import, Draft Only
+// Sprint F4 Phase A/B - CSV/XLSX Invoice Import, Draft Only
 // ============================================================================
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
@@ -11,6 +11,7 @@ import { parsePagination, validateUUID } from '../_shared/validators.ts';
 import { ImportService } from './service.ts';
 
 const UUID = '([0-9a-f\\-]{36})';
+const ALLOWED_FILE_TYPES = ['csv', 'xlsx'];
 
 const ROUTES: Record<string, RegExp> = {
   upload:     /^\/upload\/?$/i,
@@ -58,17 +59,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       const importType = String(form.get('import_type') ?? 'invoice');
       if (importType !== 'invoice') {
-        throw new ValidationError('Phase A only supports import_type=invoice.');
+        throw new ValidationError('Phase B only supports import_type=invoice.');
       }
 
       const fileType = String(form.get('file_type') ?? 'csv');
-      if (fileType !== 'csv') {
-        throw new ValidationError('Phase A only supports file_type=csv.');
+      if (!ALLOWED_FILE_TYPES.includes(fileType)) {
+        throw new ValidationError('Phase B only supports file_type=csv or file_type=xlsx.');
       }
 
       const batchNameRaw = form.get('batch_name');
-      const batch = await service.uploadCsv(auth, {
+      const batch = await service.uploadFile(auth, {
         file,
+        fileType: fileType as 'csv' | 'xlsx',
         batchName: typeof batchNameRaw === 'string' ? batchNameRaw : undefined,
       });
       return jsonResponse(successResponse(batch), 201);
@@ -77,7 +79,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (route === 'parse' && req.method === 'POST') {
       const { id } = params;
       validateUUID(id, 'batch_id');
-      const result = await service.parseCsvBatch(auth, id);
+      const result = await service.parseBatch(auth, id);
       return jsonResponse(successResponse(result));
     }
 
@@ -133,4 +135,3 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return jsonResponse(body, status);
   }
 });
-

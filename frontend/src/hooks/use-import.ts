@@ -120,19 +120,28 @@ export function useImport() {
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Step 1: Upload CSV file to imports Edge Function.
+   * Step 1: Upload CSV or Excel file to imports Edge Function.
    * Uses rawFetch for multipart/form-data upload.
+   * Detects file_type from extension: .csv → 'csv', .xlsx → 'xlsx'.
    */
-  const uploadCsv = useCallback(
+  const uploadFile = useCallback(
     async (file: File) => {
       setIsLoading(true);
       setError(null);
       try {
+        // Detect file type from extension
+        const ext = file.name.split(".").pop()?.toLowerCase();
+        if (ext !== "csv" && ext !== "xlsx") {
+          throw new Error("Unsupported file type. Only .csv and .xlsx files are allowed.");
+        }
+        const fileType = ext === "xlsx" ? "xlsx" : "csv";
+        const label = fileType === "xlsx" ? "Excel" : "CSV";
+
         const formData = new FormData();
         formData.append("file", file);
         formData.append("import_type", "invoice");
-        formData.append("file_type", "csv");
-        formData.append("batch_name", `CSV Import — ${file.name}`);
+        formData.append("file_type", fileType);
+        formData.append("batch_name", `${label} Import — ${file.name}`);
 
         const res = await api.rawFetch("/imports/upload", {
           method: "POST",
@@ -296,7 +305,7 @@ export function useImport() {
     isLoading,
     error,
     // Actions
-    uploadCsv,
+    uploadFile,
     parseBatch,
     validateBatch,
     executeBatch,

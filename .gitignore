@@ -25,6 +25,9 @@ build/
 out/
 .vercel/
 
+# Generated test artifacts
+tests/fixtures/generated/
+
 # Logs
 logs/
 *.log

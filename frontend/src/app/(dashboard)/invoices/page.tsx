@@ -103,7 +103,7 @@ export default function InvoicesPage() {
             <Link href="/invoices/import">
               <LoadingButton variant="secondary" size="md">
                 <Upload className="h-4 w-4" />
-                Import CSV
+                Import CSV/Excel
               </LoadingButton>
             </Link>
             <Link href="/invoices/new">

@@ -1,7 +1,7 @@
 // ============================================================================
 // TSH Synergy ERP - Accounts Receivable Module
-// Sprint F4 Phase A Import Service
-// CSV Invoice Import, Draft Only
+// Sprint F4 Import Service
+// CSV/XLSX Invoice Import, Draft Only
 // ============================================================================
 
 import { SupabaseClient } from 'supabase';
@@ -26,12 +26,17 @@ import type {
   CreateInvoiceLineInput,
 } from '../invoices/validators.ts';
 import { parseCsv } from './csv.ts';
+import { parseXlsx } from './xlsx.ts';
 
 const BUCKET = 'ar-imports';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
+const MAX_XLSX_BYTES = 10 * 1024 * 1024;
 const MAX_ROWS = 500;
 const READ_ROLES = ['AR Clerk', 'AR Supervisor', 'Finance Manager', 'Auditor'];
 const WRITE_ROLES = ['AR Clerk', 'AR Supervisor', 'Finance Manager'];
+const ALLOWED_IMPORT_FILE_TYPES = ['csv', 'xlsx'] as const;
+
+type ImportFileType = typeof ALLOWED_IMPORT_FILE_TYPES[number];
 
 type ImportBatchStatus =
   | 'Uploaded'
@@ -71,6 +76,7 @@ interface ImportRow {
 
 interface UploadInput {
   file: File;
+  fileType: ImportFileType;
   batchName?: string;
 }
 
@@ -113,6 +119,29 @@ function rowError(field: string, message: string): Record<string, unknown> {
   return { field, message };
 }
 
+function isAllowedImportFileType(fileType: string): fileType is ImportFileType {
+  return ALLOWED_IMPORT_FILE_TYPES.includes(fileType as ImportFileType);
+}
+
+function requireInvoiceImportFileType(batch: ImportBatch, stage: string): ImportFileType {
+  if (batch.import_type !== 'invoice') {
+    throw new ValidationError(`Phase B ${stage} supports invoice imports only.`);
+  }
+
+  if (!isAllowedImportFileType(batch.file_type)) {
+    throw new ValidationError(`Phase B ${stage} supports csv and xlsx files only.`);
+  }
+
+  return batch.file_type;
+}
+
+function mimeForImportFile(fileType: ImportFileType, browserMime: string): string {
+  if (browserMime) return browserMime;
+  return fileType === 'xlsx'
+    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    : 'text/csv';
+}
+
 function errorToRowErrors(error: unknown): Array<Record<string, unknown>> {
   if (error instanceof ValidationError) {
     return [rowError(String(error.details.field ?? 'row'), error.message)];
@@ -138,20 +167,32 @@ export class ImportService {
     this.invoiceService = new InvoiceService(this.client);
   }
 
-  async uploadCsv(auth: AuthContext, input: UploadInput): Promise<ImportBatch> {
+  async uploadFile(auth: AuthContext, input: UploadInput): Promise<ImportBatch> {
     requireImportWrite(auth);
 
-    if (!input.file.name.toLowerCase().endsWith('.csv')) {
-      throw new ValidationError('Phase A only supports .csv files.', { file_name: input.file.name });
-    }
-    if (input.file.size <= 0) {
-      throw new ValidationError('CSV file is empty.');
-    }
-    if (input.file.size > MAX_CSV_BYTES) {
-      throw new ValidationError('CSV file exceeds the 5 MB Phase A limit.');
+    if (!isAllowedImportFileType(input.fileType)) {
+      throw new ValidationError('Phase B only supports csv and xlsx invoice imports.', { file_type: input.fileType });
     }
 
-    const batchName = input.batchName?.trim() || input.file.name.replace(/\.csv$/i, '');
+    const lowerName = input.file.name.toLowerCase();
+    if (!lowerName.endsWith(`.${input.fileType}`)) {
+      throw new ValidationError(`File extension must match file_type=${input.fileType}.`, {
+        file_name: input.file.name,
+        file_type: input.fileType,
+      });
+    }
+
+    if (input.file.size <= 0) {
+      throw new ValidationError('Import file is empty.');
+    }
+
+    const maxBytes = input.fileType === 'xlsx' ? MAX_XLSX_BYTES : MAX_CSV_BYTES;
+    if (input.file.size > maxBytes) {
+      const mb = maxBytes / 1024 / 1024;
+      throw new ValidationError(`Import file exceeds the ${mb} MB Phase B limit.`);
+    }
+
+    const batchName = input.batchName?.trim() || input.file.name.replace(/\.(csv|xlsx)$/i, '');
 
     const { data: batch, error: batchError } = await this.client
       .from('import_batches')
@@ -159,7 +200,7 @@ export class ImportService {
         company_id: auth.companyId,
         batch_name: batchName,
         import_type: 'invoice',
-        file_type: 'csv',
+        file_type: input.fileType,
         file_name: input.file.name,
         file_size_bytes: input.file.size,
         status: 'Uploaded',
@@ -178,7 +219,7 @@ export class ImportService {
     const { error: uploadError } = await this.client.storage
       .from(BUCKET)
       .upload(filePath, input.file, {
-        contentType: input.file.type || 'text/csv',
+        contentType: mimeForImportFile(input.fileType, input.file.type),
         upsert: false,
       });
 
@@ -203,20 +244,18 @@ export class ImportService {
       batch_id: batch.id,
       file_name: input.file.name,
       file_path: filePath,
-      file_type: 'csv',
+      file_type: input.fileType,
       file_size_bytes: input.file.size,
     });
 
     return updated as ImportBatch;
   }
 
-  async parseCsvBatch(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
+  async parseBatch(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
     requireImportWrite(auth);
     const batch = await this.getWritableBatch(auth, batchId);
+    const fileType = requireInvoiceImportFileType(batch, 'parse');
 
-    if (batch.import_type !== 'invoice' || batch.file_type !== 'csv') {
-      throw new ValidationError('Phase A parse supports invoice CSV batches only.');
-    }
     if (batch.status !== 'Uploaded') {
       throw new ValidationError(`Only Uploaded batches can be parsed. Current status: ${batch.status}.`);
     }
@@ -232,10 +271,12 @@ export class ImportService {
         throw new Error(`Failed to download import file: ${error?.message ?? 'No file returned'}`);
       }
 
-      const csvText = await data.text();
-      const parsed = parseCsv(csvText);
+      const parsed = fileType === 'xlsx'
+        ? parseXlsx(await data.arrayBuffer())
+        : parseCsv(await data.text());
+
       if (parsed.rows.length > MAX_ROWS) {
-        throw new ValidationError(`CSV has ${parsed.rows.length} rows. Phase A limit is ${MAX_ROWS}.`);
+        throw new ValidationError(`${fileType.toUpperCase()} has ${parsed.rows.length} rows. Phase B limit is ${MAX_ROWS}.`);
       }
 
       const { count: existingRows, error: existingRowsError } = await this.client
@@ -287,6 +328,8 @@ export class ImportService {
   async validateBatch(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
     requireImportWrite(auth);
     const batch = await this.getWritableBatch(auth, batchId);
+    requireInvoiceImportFileType(batch, 'validate');
+
     if (batch.status !== 'Parsed' && batch.status !== 'Validated') {
       throw new ValidationError(`Only Parsed or Validated batches can be validated. Current status: ${batch.status}.`);
     }
@@ -340,10 +383,8 @@ export class ImportService {
   async executeDraftCreation(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
     requireImportWrite(auth);
     const batch = await this.getWritableBatch(auth, batchId);
+    requireInvoiceImportFileType(batch, 'execute');
 
-    if (batch.import_type !== 'invoice' || batch.file_type !== 'csv') {
-      throw new ValidationError('Phase A execute supports invoice CSV batches only.');
-    }
     if (batch.status !== 'Parsed' && batch.status !== 'Validated') {
       throw new ValidationError(`Only Parsed or Validated batches can be executed. Current status: ${batch.status}.`);
     }
@@ -500,7 +541,7 @@ export class ImportService {
         customer_id: customer.id,
         currency,
         reference_no: referenceNo,
-        internal_remarks: 'Created by Sprint F4 CSV import Phase A',
+        internal_remarks: 'Created by Sprint F4 import draft-only flow',
         invoice_remarks: asString(raw, 'invoice_remarks') || undefined,
         lines: [{
           description,

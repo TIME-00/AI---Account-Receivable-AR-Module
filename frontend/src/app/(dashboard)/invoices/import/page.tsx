@@ -70,7 +70,7 @@ const BATCH_STATUS_COLORS: Record<string, string> = {
 export default function InvoiceImportPage() {
   const {
     step, setStep, batch, rows, isLoading, error,
-    uploadCsv, parseBatch, validateBatch, executeBatch, reset,
+    uploadFile, parseBatch, validateBatch, executeBatch, reset,
   } = useImport();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -82,17 +82,20 @@ export default function InvoiceImportPage() {
 
   const handleFile = useCallback(
     (file: File) => {
-      if (!file.name.endsWith(".csv")) {
-        toast.error("Invalid File", { description: "Only .csv files are supported in Phase A." });
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (ext !== "csv" && ext !== "xlsx") {
+        toast.error("Unsupported File", { description: "Only .csv and .xlsx files are supported." });
         return;
       }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("File Too Large", { description: "Maximum file size is 5 MB." });
+      const maxSize = ext === "xlsx" ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+      const maxLabel = ext === "xlsx" ? "10 MB" : "5 MB";
+      if (file.size > maxSize) {
+        toast.error("File Too Large", { description: `Maximum file size for .${ext} is ${maxLabel}.` });
         return;
       }
-      uploadCsv(file);
+      uploadFile(file);
     },
-    [uploadCsv]
+    [uploadFile]
   );
 
   const handleDrop = useCallback(
@@ -144,10 +147,10 @@ export default function InvoiceImportPage() {
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
             <FileSpreadsheet className="h-6 w-6 text-brand-500" />
-            CSV Invoice Import
+            Invoice Import
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Phase A: CSV Invoice Import — Draft Only
+            CSV/Excel Invoice Import — Draft Only
           </p>
         </div>
         {step !== "upload" && step !== "result" && (
@@ -158,17 +161,17 @@ export default function InvoiceImportPage() {
         )}
       </div>
 
-      {/* Phase A Warning Banner */}
+      {/* Draft-Only Warning Banner */}
       <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4">
         <div className="flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5 flex-shrink-0" />
           <div className="text-sm">
-            <p className="font-semibold text-amber-800">Phase A: Draft Creation Only</p>
+            <p className="font-semibold text-amber-800">Draft Creation Only</p>
             <ul className="mt-1 space-y-0.5 text-amber-700">
               <li>• Created invoices remain <strong>Draft</strong> — they are not posted.</li>
-              <li>• Receipt import is not available in this phase.</li>
-              <li>• Payment allocation is not available in this phase.</li>
-              <li>• Only CSV files are supported. Excel/PDF/Image coming in later phases.</li>
+              <li>• Receipt import is not available yet.</li>
+              <li>• Payment allocation is not available yet.</li>
+              <li>• CSV and Excel (.xlsx) files are supported. PDF/Image coming in later phases.</li>
             </ul>
           </div>
         </div>
@@ -251,7 +254,7 @@ export default function InvoiceImportPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx"
                 className="hidden"
                 onChange={handleFileInput}
               />
@@ -267,10 +270,10 @@ export default function InvoiceImportPage() {
                 </div>
                 <div>
                   <p className="text-lg font-semibold text-slate-700">
-                    {dragActive ? "Drop CSV file here" : "Drag & drop CSV file here"}
+                    {dragActive ? "Drop file here" : "Drag & drop CSV or Excel file here"}
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
-                    or <span className="text-brand-600 font-medium">click to browse</span> · .csv up to 5 MB
+                    or <span className="text-brand-600 font-medium">click to browse</span> · .csv (5 MB) / .xlsx (10 MB)
                   </p>
                 </div>
               </div>
@@ -282,14 +285,14 @@ export default function InvoiceImportPage() {
               )}
             </div>
 
-            {/* CSV Template Guide */}
+            {/* Import Template Guide */}
             <div>
               <button
                 onClick={() => setShowTemplate(!showTemplate)}
                 className="inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:text-brand-700 transition-colors"
               >
                 <Info className="h-4 w-4" />
-                {showTemplate ? "Hide" : "Show"} CSV template & column guide
+                {showTemplate ? "Hide" : "Show"} import template & column guide
                 <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", showTemplate && "rotate-90")} />
               </button>
 
@@ -343,7 +346,9 @@ export default function InvoiceImportPage() {
                     <div className="text-xs text-blue-700 space-y-1">
                       <p><strong>customer_code</strong> must exactly match an existing customer&apos;s <code className="bg-blue-100 px-1 rounded">customer_id</code> field (e.g. CUST-001).</p>
                       <p><strong>tax_rate</strong> can be <code className="bg-blue-100 px-1 rounded">0</code> for non-taxable items.</p>
-                      <p>Phase A creates <strong>one draft invoice per CSV row</strong>. Multi-line invoice grouping is planned for a future phase.</p>
+                      <p>Each row creates <strong>one draft invoice</strong>. Multi-line invoice grouping is planned for a future phase.</p>
+                      <p><strong>CSV and Excel use the same columns.</strong> In Excel, dates can be date-formatted cells or <code className="bg-blue-100 px-1 rounded">YYYY-MM-DD</code> text. Numbers should be plain numeric cells.</p>
+                      <p>Excel imports read the <strong>first sheet only</strong>. Merged cells are not supported.</p>
                     </div>
                   </div>
                 </div>
