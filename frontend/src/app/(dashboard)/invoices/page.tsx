@@ -16,7 +16,7 @@ import { LoadingButton } from "@/components/ui/loading-button";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import {
   FileText, Plus, Search, Send, Eye, ChevronLeft, ChevronRight,
-  AlertCircle, Filter, X,
+  AlertCircle, Filter, X, Upload,
 } from "lucide-react";
 import { INVOICE_STATUSES } from "@/types";
 
@@ -99,12 +99,20 @@ export default function InvoicesPage() {
           </p>
         </div>
         {canCreateInvoice && (
-          <Link href="/invoices/new">
-            <LoadingButton variant="primary" size="md">
-              <Plus className="h-4 w-4" />
-              New Invoice
-            </LoadingButton>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/invoices/import">
+              <LoadingButton variant="secondary" size="md">
+                <Upload className="h-4 w-4" />
+                Import CSV
+              </LoadingButton>
+            </Link>
+            <Link href="/invoices/new">
+              <LoadingButton variant="primary" size="md">
+                <Plus className="h-4 w-4" />
+                New Invoice
+              </LoadingButton>
+            </Link>
+          </div>
         )}
       </div>
 

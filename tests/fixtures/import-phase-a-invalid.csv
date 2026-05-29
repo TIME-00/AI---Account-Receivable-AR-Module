@@ -1,0 +1,3 @@
+customer_code,customer_name,invoice_date,currency,description,quantity,unit_price,tax_rate,reference_no,invoice_remarks
+NO-SUCH-CUSTOMER,,2026-05-28,MYR,Invalid customer row,1,1.00,0,F4-SMOKE-INVALID-001,Expected validation failure
+
