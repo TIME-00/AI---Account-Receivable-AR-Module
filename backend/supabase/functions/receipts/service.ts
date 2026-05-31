@@ -34,6 +34,7 @@ import type {
 import { roundTo2 } from '../invoices/calculator.ts';
 import { JournalEntryService } from '../journal-entries/service.ts';
 import type { CreateReceiptInput, PostReceiptInput, CancelReceiptInput, BounceReceiptInput } from './validators.ts';
+import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
 
 // ─── Receipt Service ────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ export class ReceiptService {
     // Validate customer
     const customer = await fetchById<Customer>(this.client, 'customers', data.customer_id);
     if (customer.company_id !== auth.companyId) throw new NotFoundError('Customer', data.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, customer.id);
     if (customer.is_deleted) throw new NotFoundError('Customer', data.customer_id);
 
     // Blocked customers: no new receipts either (BR-CUS-002)
@@ -375,6 +377,7 @@ export class ReceiptService {
     const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
     await requireCustomerAccess(auth, receipt.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
     return receipt;
   }
 
@@ -384,11 +387,14 @@ export class ReceiptService {
     pagination: PaginationParams,
   ): Promise<{ receipts: Receipt[]; total: number }> {
     const allowedIds = await getCustomerAccessFilter(auth);
+    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    if (visibleCustomerIds.length === 0) return { receipts: [], total: 0 };
 
     let query = this.client
       .from('receipts')
       .select('*', { count: 'exact' })
-      .eq('company_id', auth.companyId);
+      .eq('company_id', auth.companyId)
+      .in('customer_id', visibleCustomerIds);
 
     if (allowedIds !== null) {
       query = query.in('customer_id', allowedIds);
@@ -423,6 +429,7 @@ export class ReceiptService {
   ): Promise<Receipt[]> {
     validateUUID(customerId, 'customer_id');
     await requireCustomerAccess(auth, customerId);
+    await assertCustomerVisible(this.client, auth.companyId, customerId);
 
     const { data, error } = await this.client
       .from('receipts')

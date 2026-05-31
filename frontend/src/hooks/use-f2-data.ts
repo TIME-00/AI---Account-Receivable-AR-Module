@@ -9,6 +9,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
 import type { Customer, Invoice, Receipt, CustomerAgingRow, ARSummary } from "@/types";
+import {
+  filterVisibleCustomerRecords,
+  filterVisibleCustomers,
+} from "@/lib/customer-visibility";
 
 // ─── Customers: Full List (all statuses, large page) ────────────────────────
 
@@ -21,10 +25,10 @@ export function useAllCustomers() {
 
   return useQuery({
     queryKey: ["customers", "all"],
-    queryFn: () =>
-      api.get<Customer[]>("/customers", {
+    queryFn: async () =>
+      filterVisibleCustomers(await api.get<Customer[]>("/customers", {
         params: { page: 1, page_size: 500 },
-      }),
+      })),
     staleTime: 60_000,
   });
 }
@@ -41,10 +45,13 @@ export function useAllInvoices() {
 
   return useQuery({
     queryKey: ["invoices", "all-f2"],
-    queryFn: () =>
-      api.get<Invoice[]>("/invoices", {
-        params: { page: 1, page_size: 500 },
-      }),
+    queryFn: async () => {
+      const [invoices, customers] = await Promise.all([
+        api.get<Invoice[]>("/invoices", { params: { page: 1, page_size: 500 } }),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
+      return filterVisibleCustomerRecords(invoices, customers);
+    },
     staleTime: 30_000,
   });
 }
@@ -61,10 +68,13 @@ export function useAllReceipts() {
 
   return useQuery({
     queryKey: ["receipts", "all-f2"],
-    queryFn: () =>
-      api.get<Receipt[]>("/receipts", {
-        params: { page: 1, page_size: 500 },
-      }),
+    queryFn: async () => {
+      const [receipts, customers] = await Promise.all([
+        api.get<Receipt[]>("/receipts", { params: { page: 1, page_size: 500 } }),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
+      return filterVisibleCustomerRecords(receipts, customers);
+    },
     staleTime: 30_000,
   });
 }
@@ -98,10 +108,15 @@ export function useAgingByCustomerF2() {
 
   return useQuery({
     queryKey: ["reports", "aging", "by-customer-f2"],
-    queryFn: () =>
-      api.get<CustomerAgingRow[]>("/reports/aging/by-customer", {
+    queryFn: async () => {
+      const [rows, customers] = await Promise.all([
+        api.get<CustomerAgingRow[]>("/reports/aging/by-customer", {
         params: { page: 1, page_size: 500 },
-      }),
+        }),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
+      return filterVisibleCustomerRecords(rows, customers);
+    },
     staleTime: 2 * 60_000,
   });
 }

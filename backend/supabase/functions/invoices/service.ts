@@ -36,6 +36,7 @@ import { calculateLineAmount, calculateInvoiceTotals, roundTo2 } from './calcula
 import type { CreateInvoiceInput, CreateInvoiceLineInput, PostInvoiceInput, CancelInvoiceInput } from './validators.ts';
 import { JournalEntryService } from '../journal-entries/service.ts';
 import { CustomerService } from '../customers/service.ts';
+import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
 
 // ─── Invoice Service ────────────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ export class InvoiceService {
     // Fetch customer for validation and snapshot
     const customer = await fetchById<Customer>(this.client, 'customers', data.customer_id);
     if (customer.company_id !== auth.companyId) throw new NotFoundError('Customer', data.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, customer.id);
     if (customer.is_deleted) throw new NotFoundError('Customer', data.customer_id);
 
     // BR-CUS-002: Blocked = no new transactions
@@ -380,6 +382,7 @@ export class InvoiceService {
 
     if (invoice.company_id !== auth.companyId) throw new NotFoundError('Invoice', invoiceId);
     await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
     const rpcResult = await callRpc<{ je_no?: string }>(adminClient, 'post_invoice', {
       p_invoice_id: invoiceId,
@@ -495,6 +498,7 @@ export class InvoiceService {
     if (invoice.company_id !== auth.companyId) throw new NotFoundError('Invoice', invoiceId);
 
     await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
     const { data: lines } = await this.client
       .from('invoice_lines')
@@ -510,10 +514,14 @@ export class InvoiceService {
     filters: Record<string, string | undefined>,
     pagination: PaginationParams,
   ): Promise<{ invoices: Invoice[]; total: number }> {
+    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    if (visibleCustomerIds.length === 0) return { invoices: [], total: 0 };
+
     let query = this.client
       .from('invoices')
       .select('*', { count: 'exact' })
-      .eq('company_id', auth.companyId);
+      .eq('company_id', auth.companyId)
+      .in('customer_id', visibleCustomerIds);
 
     // Apply filters
     if (filters.doc_type) query = query.eq('doc_type', filters.doc_type);

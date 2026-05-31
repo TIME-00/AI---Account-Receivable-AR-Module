@@ -9,6 +9,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
 import type { Invoice, InvoiceLine, Customer } from "@/types";
 import type { TaxCodeOption, PaymentTermOption } from "@/hooks/use-invoice-calculator";
+import {
+  filterVisibleCustomerRecords,
+  filterVisibleCustomers,
+  isKnownHiddenCustomer,
+} from "@/lib/customer-visibility";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -49,17 +54,17 @@ export function useCustomers(search?: string) {
 
   return useQuery({
     queryKey: ["customers", "list", search],
-    queryFn: () =>
+    queryFn: async () =>
       // useApi() returns json.data which is the raw Customer[] array.
       // meta (total, page, page_size) is discarded by useApi().
-      api.get<Customer[]>("/customers", {
+      filterVisibleCustomers(await api.get<Customer[]>("/customers", {
         params: {
           page: 1,
           page_size: 50,
           search: search || undefined,
           status: "Active",
         },
-      }),
+      })),
     staleTime: 60 * 1000,
   });
 }
@@ -210,7 +215,11 @@ export function useInvoiceList(filters: {
 
       // useApi() returns json.data = Invoice[] (raw array).
       // meta.total is discarded by useApi(). Client-side pagination for prototype.
-      return api.get<Invoice[]>("/invoices", { params });
+      const [invoices, customers] = await Promise.all([
+        api.get<Invoice[]>("/invoices", { params }),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
+      return filterVisibleCustomerRecords(invoices, customers);
     },
     staleTime: 30_000,
   });
@@ -223,7 +232,16 @@ export function useInvoice(id: string) {
 
   return useQuery({
     queryKey: ["invoices", id],
-    queryFn: () => api.get<Invoice & { lines: InvoiceLine[] }>(`/invoices/${id}`),
+    queryFn: async () => {
+      const [invoice, customers] = await Promise.all([
+        api.get<Invoice & { lines: InvoiceLine[] }>(`/invoices/${id}`),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
+      if (isKnownHiddenCustomer(customers, invoice.customer_id)) {
+        throw new Error("Invoice not found");
+      }
+      return invoice;
+    },
     enabled: !!id,
   });
 }

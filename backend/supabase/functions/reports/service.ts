@@ -13,6 +13,7 @@ import { requireRole, requireCustomerAccess, getCustomerAccessFilter } from '../
 import { validateUUID, validateDate } from '../_shared/validators.ts';
 import type { PaginationParams } from '../_shared/types.ts';
 import { roundTo2 } from '../invoices/calculator.ts';
+import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -94,12 +95,29 @@ export class ReportService {
   ): Promise<ARSummary> {
     requireRole(auth, 'AR Clerk');
     const refDate = asOfDate ?? new Date().toISOString().slice(0, 10);
+    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    if (visibleCustomerIds.length === 0) {
+      return {
+        total_customers: 0,
+        total_outstanding: 0,
+        total_overdue: 0,
+        overdue_percentage: 0,
+        aging_summary: [
+          { bucket_name: 'Current', from_days: 0, to_days: 0, invoice_count: 0, total_outstanding: 0, percentage: 0 },
+          { bucket_name: '1-30', from_days: 1, to_days: 30, invoice_count: 0, total_outstanding: 0, percentage: 0 },
+          { bucket_name: '31-60', from_days: 31, to_days: 60, invoice_count: 0, total_outstanding: 0, percentage: 0 },
+          { bucket_name: '61-90', from_days: 61, to_days: 90, invoice_count: 0, total_outstanding: 0, percentage: 0 },
+          { bucket_name: 'Over 90', from_days: 91, to_days: null, invoice_count: 0, total_outstanding: 0, percentage: 0 },
+        ],
+      };
+    }
 
     // Use the v_customer_ar_summary view supplemented with direct queries
     const { data: summaryData, error: sumErr } = await this.client
       .from('v_customer_ar_summary')
       .select('*')
-      .eq('company_id', auth.companyId);
+      .eq('company_id', auth.companyId)
+      .in('id', visibleCustomerIds);
 
     if (sumErr) throw new Error(`Failed to get AR summary: ${sumErr.message}`);
 
@@ -113,6 +131,7 @@ export class ReportService {
       .from('invoices')
       .select('total_amount, outstanding, due_date')
       .eq('company_id', auth.companyId)
+      .in('customer_id', visibleCustomerIds)
       .in('status', ['Open', 'Overdue', 'Partially Paid'])
       .in('doc_type', ['Invoice', 'Debit Note'])
       .gt('outstanding', 0);
@@ -188,7 +207,8 @@ export class ReportService {
       .from('customers')
       .select('id, customer_id, customer_name, credit_limit, credit_rating')
       .eq('company_id', auth.companyId)
-      .eq('is_deleted', false);
+      .eq('is_deleted', false)
+      .eq('is_hidden', false);
 
     if (allowedIds !== null) {
       customerQuery = customerQuery.in('id', allowedIds);
@@ -274,6 +294,7 @@ export class ReportService {
     validateDate(periodFrom, 'period_from');
     validateDate(periodTo, 'period_to');
     await requireCustomerAccess(auth, customerId);
+    await assertCustomerVisible(this.client, auth.companyId, customerId);
 
     const customer = await fetchById<Record<string, unknown>>(this.client, 'customers', customerId);
     if (customer.company_id !== auth.companyId) throw new NotFoundError('Customer', customerId);
@@ -424,6 +445,19 @@ export class ReportService {
     auth: AuthContext,
   ): Promise<Record<string, unknown>> {
     requireRole(auth, 'AR Clerk');
+    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    if (visibleCustomerIds.length === 0) {
+      return {
+        total_invoices: 0,
+        open_invoices: 0,
+        overdue_invoices: 0,
+        total_receipts: 0,
+        total_ar_balance: 0,
+        total_overdue_balance: 0,
+        total_credit_balance: 0,
+        overdue_percentage: 0,
+      };
+    }
 
     const [
       { count: totalInvoices },
@@ -432,20 +466,21 @@ export class ReportService {
       { count: totalReceipts },
     ] = await Promise.all([
       this.client.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).neq('status', 'Draft').neq('status', 'Cancelled'),
+        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).neq('status', 'Draft').neq('status', 'Cancelled'),
       this.client.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).eq('status', 'Open'),
+        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).eq('status', 'Open'),
       this.client.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).eq('status', 'Overdue'),
+        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).eq('status', 'Overdue'),
       this.client.from('receipts').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).neq('status', 'Draft').neq('status', 'Cancelled'),
+        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).neq('status', 'Draft').neq('status', 'Cancelled'),
     ]);
 
     // Totals from v_customer_ar_summary
     const { data: arSummary } = await this.client
       .from('v_customer_ar_summary')
       .select('total_ar_balance, overdue_ar_balance, credit_balance')
-      .eq('company_id', auth.companyId);
+      .eq('company_id', auth.companyId)
+      .in('id', visibleCustomerIds);
 
     const totalAR = (arSummary ?? []).reduce((s, r) => s + Number(r.total_ar_balance ?? 0), 0);
     const totalOverdue = (arSummary ?? []).reduce((s, r) => s + Number(r.overdue_ar_balance ?? 0), 0);

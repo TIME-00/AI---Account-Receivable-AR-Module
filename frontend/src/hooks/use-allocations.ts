@@ -7,8 +7,9 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
-import type { Receipt, Invoice, AllocationDetail } from "@/types";
+import type { Receipt, Invoice, AllocationDetail, Customer } from "@/types";
 import type { AllocationReceipt, AllocationInvoice } from "@/hooks/use-allocation-logic";
+import { filterVisibleCustomerRecords } from "@/lib/customer-visibility";
 
 // ─── Query: Fetch Posted Receipts with unallocated balance ──────────────────
 
@@ -19,17 +20,20 @@ export function usePostedReceipts(customerId?: string) {
     queryKey: ["receipts", "posted", customerId],
     queryFn: async () => {
       // useApi() returns json.data = Receipt[] (raw array).
-      const receipts = await api.get<Receipt[]>("/receipts", {
-        params: {
-          page: 1,
-          page_size: 50,
-          status: "Posted",
-          customer_id: customerId,
-        },
-      });
+      const [receipts, customers] = await Promise.all([
+        api.get<Receipt[]>("/receipts", {
+          params: {
+            page: 1,
+            page_size: 50,
+            status: "Posted",
+            customer_id: customerId,
+          },
+        }),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
 
       // Map to AllocationReceipt and filter those with unallocated balance
-      const mapped: AllocationReceipt[] = (receipts ?? [])
+      const mapped: AllocationReceipt[] = filterVisibleCustomerRecords(receipts ?? [], customers)
         .filter((r) => r.unallocated_amount > 0.005)
         .map((r) => ({
           id: r.id,
@@ -61,17 +65,20 @@ export function useOutstandingInvoices(customerId: string, currency: string) {
     queryKey: ["invoices", "outstanding", customerId, currency],
     queryFn: async () => {
       // useApi() returns json.data = Invoice[] (raw array).
-      const invoices = await api.get<Invoice[]>("/invoices", {
-        params: {
-          page: 1,
-          page_size: 100,
-          customer_id: customerId,
-          // Fetch Open + Overdue + Partially Paid
-        },
-      });
+      const [invoices, customers] = await Promise.all([
+        api.get<Invoice[]>("/invoices", {
+          params: {
+            page: 1,
+            page_size: 100,
+            customer_id: customerId,
+            // Fetch Open + Overdue + Partially Paid
+          },
+        }),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
 
       const today = new Date();
-      const mapped: AllocationInvoice[] = (invoices ?? [])
+      const mapped: AllocationInvoice[] = filterVisibleCustomerRecords(invoices ?? [], customers)
         .filter(
           (inv) =>
             ["Open", "Overdue", "Partially Paid"].includes(inv.status) &&

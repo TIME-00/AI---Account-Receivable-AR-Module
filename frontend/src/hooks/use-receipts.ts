@@ -8,6 +8,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
 import type { Receipt, Customer, BankAccount } from "@/types";
+import {
+  filterVisibleCustomerRecords,
+  filterVisibleCustomers,
+  isKnownHiddenCustomer,
+} from "@/lib/customer-visibility";
 
 // ─── Query: List Receipts (with filters) ────────────────────────────────────
 
@@ -33,7 +38,11 @@ export function useReceipts(filters: {
 
       // useApi() returns json.data = Receipt[] (raw array).
       // meta.total is discarded by useApi(). Client-side pagination for prototype.
-      return api.get<Receipt[]>("/receipts", { params });
+      const [receipts, customers] = await Promise.all([
+        api.get<Receipt[]>("/receipts", { params }),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
+      return filterVisibleCustomerRecords(receipts, customers);
     },
     staleTime: 30_000,
   });
@@ -46,7 +55,16 @@ export function useReceipt(id: string) {
 
   return useQuery({
     queryKey: ["receipts", id],
-    queryFn: () => api.get<Receipt>(`/receipts/${id}`),
+    queryFn: async () => {
+      const [receipt, customers] = await Promise.all([
+        api.get<Receipt>(`/receipts/${id}`),
+        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
+      ]);
+      if (isKnownHiddenCustomer(customers, receipt.customer_id)) {
+        throw new Error("Receipt not found");
+      }
+      return receipt;
+    },
     enabled: !!id,
   });
 }
@@ -60,9 +78,9 @@ export function useCustomers() {
     queryKey: ["customers", "list"],
     queryFn: async () => {
       // useApi() returns json.data = Customer[] (raw array).
-      return api.get<Customer[]>("/customers", {
+      return filterVisibleCustomers(await api.get<Customer[]>("/customers", {
         params: { page: 1, page_size: 200 },
-      });
+      }));
     },
     staleTime: 60_000,
   });

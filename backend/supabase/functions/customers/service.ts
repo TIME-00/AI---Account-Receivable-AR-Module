@@ -167,6 +167,9 @@ export class CustomerService {
     if (customer.is_deleted) {
       throw new NotFoundError('Customer', customerId);
     }
+    if (customer.is_hidden) {
+      throw new NotFoundError('Customer', customerId);
+    }
 
     // Attach credit utilization from view (BR-CUS-005)
     const { data: creditData } = await this.client
@@ -196,7 +199,8 @@ export class CustomerService {
     let query = this.client
       .from('customers')
       .select('*', { count: 'exact' })
-      .eq('company_id', auth.companyId);
+      .eq('company_id', auth.companyId)
+      .eq('is_hidden', false);
 
     // Soft-delete filter
     if (!filters.include_deleted) {

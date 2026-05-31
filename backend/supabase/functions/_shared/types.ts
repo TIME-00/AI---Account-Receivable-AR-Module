@@ -174,6 +174,9 @@ export interface Customer {
   customer_group_id: string | null;
   parent_id: string | null;
   is_deleted: boolean;
+  is_hidden: boolean;
+  hidden_reason: string | null;
+  hidden_at: string | null;
 
   // Contact
   bill_addr_line1: string;

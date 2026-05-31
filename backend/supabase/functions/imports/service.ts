@@ -27,6 +27,7 @@ import type {
 } from '../invoices/validators.ts';
 import { parseCsv } from './csv.ts';
 import { parseXlsx } from './xlsx.ts';
+import { assertCustomerVisible } from '../_shared/visibility.ts';
 
 const BUCKET = 'ar-imports';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
@@ -586,6 +587,7 @@ export class ImportService {
       if (customer.company_id !== auth.companyId || customer.is_deleted) {
         throw new NotFoundError('Customer', uuid);
       }
+      await assertCustomerVisible(this.client, auth.companyId, customer.id);
       return customer;
     }
 
@@ -593,7 +595,8 @@ export class ImportService {
       .from('customers')
       .select('*')
       .eq('company_id', auth.companyId)
-      .eq('is_deleted', false);
+      .eq('is_deleted', false)
+      .eq('is_hidden', false);
 
     if (code) {
       query = query.eq('customer_id', code);
