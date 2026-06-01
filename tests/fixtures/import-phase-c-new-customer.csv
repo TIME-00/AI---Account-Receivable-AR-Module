@@ -1,0 +1,2 @@
+customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,invoice_date,currency,description,quantity,unit_price,tax_rate,reference_no
+,F4C New Customer REPLACE-RUN-ID,F4CREPLACERUNID,10 Anson Road,Downtown Core,Central,079903,SG,Phase C Contact,+6561234567,phase-c-REPLACE-RUN-ID@example.com,2026-05-28,SGD,Phase C new customer CSV,1,1.00,0,F4C-NEW-REPLACE-RUN-ID

@@ -13,6 +13,7 @@ import {
   IMPORT_STEPS,
   type ImportStep,
   type ImportRow,
+  type ImportCustomerResolution,
   type ImportBatchStatus,
 } from "@/hooks/use-import";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -27,7 +28,17 @@ import {
 // ─── CSV Template ───────────────────────────────────────────────────────────
 
 const CSV_COLUMNS = [
-  { name: "customer_code", required: true, description: "Current phase: match an existing visible customer code (e.g. CUST-001)" },
+  { name: "customer_code", required: false, description: "Optional existing visible customer code. Leave blank to match or create by customer name." },
+  { name: "customer_name", required: false, description: "Required when customer_code is blank. Used for visible company-scoped matching or creation." },
+  { name: "registration_no", required: false, description: "Required when creating a new Corporate customer." },
+  { name: "bill_addr_line1", required: false, description: "Required when creating a new customer." },
+  { name: "bill_city", required: false, description: "Required when creating a new customer." },
+  { name: "bill_state", required: false, description: "Required when creating a new customer." },
+  { name: "bill_postal", required: false, description: "Required when creating a new customer." },
+  { name: "bill_country", required: false, description: "Required when creating a new customer. Use ISO code such as SG or MY." },
+  { name: "contact_name", required: false, description: "Required when creating a new customer." },
+  { name: "contact_phone", required: false, description: "Required when creating a new customer." },
+  { name: "contact_email", required: false, description: "Required when creating a new customer." },
   { name: "invoice_date", required: true, description: "Date format: YYYY-MM-DD" },
   { name: "currency", required: false, description: "3-letter ISO code (default: MYR)" },
   { name: "description", required: true, description: "Line item description" },
@@ -37,10 +48,9 @@ const CSV_COLUMNS = [
   { name: "reference_no", required: false, description: "External reference number" },
 ];
 
-const SAMPLE_CSV = `customer_code,invoice_date,currency,description,quantity,unit_price,tax_rate,reference_no
-CUST-001,2026-05-28,MYR,Consulting Services,1,5000.00,0,REF-001
-CUST-001,2026-05-28,MYR,Travel Expenses,1,1200.00,0,REF-001
-CUST-002,2026-05-28,MYR,Software License,3,2500.00,6,REF-002`;
+const SAMPLE_CSV = `customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,invoice_date,currency,description,quantity,unit_price,tax_rate,reference_no
+CUST-001,,,,,,,,,,,2026-05-28,SGD,Consulting Services,1,5000.00,0,REF-001
+,New Client Pte Ltd,202612345N,10 Anson Road,Downtown Core,Central,079903,SG,Alex Tan,+6561234567,alex@example.com,2026-05-28,SGD,Implementation Services,1,1200.00,0,REF-002`;
 
 // ─── Status Colors ──────────────────────────────────────────────────────────
 
@@ -344,7 +354,8 @@ export default function InvoiceImportPage() {
                   <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 flex items-start gap-2">
                     <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
                     <div className="text-xs text-blue-700 space-y-1">
-                      <p><strong>customer_code</strong> currently matches an existing visible customer&apos;s system-generated code (e.g. CUST-001). New-customer import review and matching is a planned follow-up flow.</p>
+                      <p><strong>customer_code</strong> is optional. Use an existing visible system-generated code when available, or leave it blank so the system can match or create the customer from the supplied customer master fields.</p>
+                      <p>New customers are created through the backend customer service during draft execution only. Validation remains read-only.</p>
                       <p><strong>tax_rate</strong> can be <code className="bg-blue-100 px-1 rounded">0</code> for non-taxable items.</p>
                       <p>Each row creates <strong>one draft invoice</strong>. Multi-line invoice grouping is planned for a future phase.</p>
                       <p><strong>CSV and Excel use the same columns.</strong> In Excel, dates can be date-formatted cells or <code className="bg-blue-100 px-1 rounded">YYYY-MM-DD</code> text. Numbers should be plain numeric cells.</p>
@@ -496,7 +507,7 @@ export default function InvoiceImportPage() {
             </div>
 
             {/* Summary cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <SummaryCard
                 label="Drafts Created"
                 value={batch.created_count}
@@ -510,6 +521,18 @@ export default function InvoiceImportPage() {
                 color="red"
               />
               <SummaryCard
+                label="Matched Customers"
+                value={batch.matched_customers_count}
+                icon={<CheckCircle2 className="h-5 w-5 text-emerald-500" />}
+                color="emerald"
+              />
+              <SummaryCard
+                label="Created Customers"
+                value={batch.created_customers_count}
+                icon={<CheckCircle2 className="h-5 w-5 text-blue-500" />}
+                color="blue"
+              />
+              <SummaryCard
                 label="Skipped"
                 value={batch.skipped_count}
                 icon={<AlertTriangle className="h-5 w-5 text-amber-500" />}
@@ -520,7 +543,7 @@ export default function InvoiceImportPage() {
                 value={batch.posted_count}
                 icon={<CheckCircle2 className="h-5 w-5 text-slate-400" />}
                 color="slate"
-                suffix="(Phase C)"
+                suffix="(always 0)"
               />
             </div>
 
@@ -679,6 +702,22 @@ function RowsTable({
                 </th>
               ))}
               {showValidation && (
+                <>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                    Customer Action
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                    Customer Name
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                    Customer Code
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                    Invoice Reference
+                  </th>
+                </>
+              )}
+              {showValidation && (
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider min-w-[200px]">
                   Errors
                 </th>
@@ -693,6 +732,7 @@ function RowsTable({
           <tbody className="divide-y divide-slate-100">
             {rows.map((row) => {
               const hasErrors = row.status === "Error" && row.validation_errors?.length;
+              const resolution = row.mapped_data?.customer_resolution as ImportCustomerResolution | undefined;
               return (
                 <tr
                   key={row.id}
@@ -727,6 +767,22 @@ function RowsTable({
                       </td>
                     );
                   })}
+                  {showValidation && (
+                    <>
+                      <td className="px-3 py-2 text-xs font-medium text-slate-700 whitespace-nowrap">
+                        {resolution?.action ?? (hasErrors ? "Error" : "—")}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-700 whitespace-nowrap">
+                        {resolution?.customer_name ?? String(row.raw_data?.customer_name || "—")}
+                      </td>
+                      <td className="px-3 py-2 text-xs font-mono text-slate-600 whitespace-nowrap">
+                        {resolution?.customer_code ?? "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-700 whitespace-nowrap">
+                        {String(row.raw_data?.reference_no || "—")}
+                      </td>
+                    </>
+                  )}
                   {showValidation && (
                     <td className="px-3 py-2">
                       {row.validation_errors?.length ? (

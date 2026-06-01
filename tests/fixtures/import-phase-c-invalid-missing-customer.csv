@@ -1,0 +1,2 @@
+customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,invoice_date,currency,description,quantity,unit_price,tax_rate,reference_no
+,,,,,,,,,,,2026-05-28,SGD,Phase C invalid missing customer,1,1.00,0,F4C-INVALID-REPLACE-RUN-ID

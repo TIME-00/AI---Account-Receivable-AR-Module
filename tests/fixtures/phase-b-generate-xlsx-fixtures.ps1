@@ -164,4 +164,33 @@ New-Xlsx -Path (Join-Path $OutputDir "phase-b-numeric-cells.xlsx") -Rows @(
   @($CustomerCode, "2026-05-28", $Currency, "Phase B numeric cells", 3, 2.75, 0, "F4B-NUM-$RunId-001")
 )
 
+$phaseCHeaders = @(
+  "customer_code", "customer_name", "registration_no",
+  "bill_addr_line1", "bill_city", "bill_state", "bill_postal", "bill_country",
+  "contact_name", "contact_phone", "contact_email",
+  "invoice_date", "currency", "description", "quantity", "unit_price", "tax_rate", "reference_no"
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-c-existing-customer.xlsx") -Rows @(
+  $phaseCHeaders,
+  @($CustomerCode, "", "", "", "", "", "", "", "", "", "", "2026-05-28", $Currency, "Phase C existing customer XLSX", 1, 1.00, 0, "F4C-XLSX-EXISTING-$RunId")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-c-new-customer.xlsx") -Rows @(
+  $phaseCHeaders,
+  @("", "F4C XLSX Customer $RunId", "F4CXLSX$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase C Contact", "+6561234567", "phase-c-xlsx-$RunId@example.com", "2026-05-28", $Currency, "Phase C new customer XLSX", 1, 1.00, 0, "F4C-XLSX-NEW-$RunId")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-c-invalid-missing-customer.xlsx") -Rows @(
+  $phaseCHeaders,
+  @("", "", "", "", "", "", "", "", "", "", "", "2026-05-28", $Currency, "Phase C invalid missing customer XLSX", 1, 1.00, 0, "F4C-XLSX-INVALID-$RunId")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-c-duplicate-new-customer.xlsx") -Rows @(
+  $phaseCHeaders,
+  @("", "F4C XLSX Duplicate Customer $RunId", "F4CXLSXDUP$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase C Contact", "+6561234567", "phase-c-xlsx-duplicate-$RunId@example.com", "2026-05-28", $Currency, "Phase C XLSX duplicate row one", 1, 1.00, 0, "F4C-XLSX-DUP-$RunId-1"),
+  @("", "  f4c   xlsx   duplicate   customer   $RunId  ", "F4CXLSXDUP$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase C Contact", "+6561234567", "phase-c-xlsx-duplicate-$RunId@example.com", "2026-05-28", $Currency, "Phase C XLSX duplicate row two", 1, 2.00, 0, "F4C-XLSX-DUP-$RunId-2")
+)
+
 Get-ChildItem -Path $OutputDir -Filter "phase-b-*.xlsx" | Select-Object FullName, Length
+Get-ChildItem -Path $OutputDir -Filter "phase-c-*.xlsx" | Select-Object FullName, Length

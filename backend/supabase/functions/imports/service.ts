@@ -1,7 +1,7 @@
 // ============================================================================
 // TSH Synergy ERP - Accounts Receivable Module
 // Sprint F4 Import Service
-// CSV/XLSX Invoice Import, Draft Only
+// CSV/XLSX Smart Invoice Import with Customer Auto-Creation, Draft Only
 // ============================================================================
 
 import { SupabaseClient } from 'supabase';
@@ -14,8 +14,8 @@ import {
 } from '../_shared/errors.ts';
 import type { AuthContext } from '../_shared/auth.ts';
 import { requireCustomerAccess } from '../_shared/auth.ts';
-import { validateUUID } from '../_shared/validators.ts';
-import type { Customer, Invoice, PaginationParams } from '../_shared/types.ts';
+import { validateCurrency, validateDate, validateUUID } from '../_shared/validators.ts';
+import type { Customer, CreateCustomerRequest, Invoice, PaginationParams } from '../_shared/types.ts';
 import { InvoiceService } from '../invoices/service.ts';
 import {
   validateCreateInvoice,
@@ -27,7 +27,9 @@ import type {
 } from '../invoices/validators.ts';
 import { parseCsv } from './csv.ts';
 import { parseXlsx } from './xlsx.ts';
-import { assertCustomerVisible } from '../_shared/visibility.ts';
+import { CustomerService } from '../customers/service.ts';
+import { validateCreateCustomer } from '../customers/validators.ts';
+import { COUNTRY_DEFAULTS } from '../_shared/constants.ts';
 
 const BUCKET = 'ar-imports';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
@@ -86,6 +88,20 @@ interface RowValidationResult {
   errors: Array<Record<string, unknown>>;
 }
 
+interface CustomerResolutionDetails {
+  action: 'Matched Existing' | 'Create New';
+  customer_id: string | null;
+  customer_code: string | null;
+  customer_name: string;
+  matched_by: 'customer_code' | 'normalized_name' | 'created_in_batch' | null;
+}
+
+interface ResolvedImportCustomer {
+  customer: Customer;
+  created: boolean;
+  details: CustomerResolutionDetails;
+}
+
 function hasAnyRole(auth: AuthContext, allowed: string[]): boolean {
   return auth.roles.some((role) => allowed.includes(role));
 }
@@ -126,11 +142,11 @@ function isAllowedImportFileType(fileType: string): fileType is ImportFileType {
 
 function requireInvoiceImportFileType(batch: ImportBatch, stage: string): ImportFileType {
   if (batch.import_type !== 'invoice') {
-    throw new ValidationError(`Phase B ${stage} supports invoice imports only.`);
+    throw new ValidationError(`Phase C ${stage} supports invoice imports only.`);
   }
 
   if (!isAllowedImportFileType(batch.file_type)) {
-    throw new ValidationError(`Phase B ${stage} supports csv and xlsx files only.`);
+    throw new ValidationError(`Phase C ${stage} supports csv and xlsx files only.`);
   }
 
   return batch.file_type;
@@ -162,17 +178,19 @@ function errorToRowErrors(error: unknown): Array<Record<string, unknown>> {
 export class ImportService {
   private client: SupabaseClient;
   private invoiceService: InvoiceService;
+  private customerService: CustomerService;
 
   constructor(client?: SupabaseClient) {
     this.client = client ?? getAdminClient();
     this.invoiceService = new InvoiceService(this.client);
+    this.customerService = new CustomerService(this.client);
   }
 
   async uploadFile(auth: AuthContext, input: UploadInput): Promise<ImportBatch> {
     requireImportWrite(auth);
 
     if (!isAllowedImportFileType(input.fileType)) {
-      throw new ValidationError('Phase B only supports csv and xlsx invoice imports.', { file_type: input.fileType });
+      throw new ValidationError('Phase C only supports csv and xlsx invoice imports.', { file_type: input.fileType });
     }
 
     const lowerName = input.file.name.toLowerCase();
@@ -190,7 +208,7 @@ export class ImportService {
     const maxBytes = input.fileType === 'xlsx' ? MAX_XLSX_BYTES : MAX_CSV_BYTES;
     if (input.file.size > maxBytes) {
       const mb = maxBytes / 1024 / 1024;
-      throw new ValidationError(`Import file exceeds the ${mb} MB Phase B limit.`);
+      throw new ValidationError(`Import file exceeds the ${mb} MB Phase C limit.`);
     }
 
     const batchName = input.batchName?.trim() || input.file.name.replace(/\.(csv|xlsx)$/i, '');
@@ -277,7 +295,7 @@ export class ImportService {
         : parseCsv(await data.text());
 
       if (parsed.rows.length > MAX_ROWS) {
-        throw new ValidationError(`${fileType.toUpperCase()} has ${parsed.rows.length} rows. Phase B limit is ${MAX_ROWS}.`);
+        throw new ValidationError(`${fileType.toUpperCase()} has ${parsed.rows.length} rows. Phase C limit is ${MAX_ROWS}.`);
       }
 
       const { count: existingRows, error: existingRowsError } = await this.client
@@ -315,6 +333,8 @@ export class ImportService {
         valid_rows: 0,
         error_rows: 0,
         created_count: 0,
+        matched_customers_count: 0,
+        created_customers_count: 0,
         error_summary: null,
       });
 
@@ -403,6 +423,9 @@ export class ImportService {
     await this.updateBatch(batch.id, { status: 'Executing' });
 
     let createdCount = 0;
+    const matchedCustomerIds = new Set<string>();
+    const createdCustomerIds = new Set<string>();
+    const resolvedCustomers = new Map<string, ResolvedImportCustomer>();
     let errorRows = rows.filter((row) => row.status === 'Error').length;
     const errorSummary: Array<Record<string, unknown>> = [];
 
@@ -420,7 +443,20 @@ export class ImportService {
       }
 
       try {
-        const header = validateCreateInvoice(row.mapped_data);
+        const resolved = await this.resolveOrCreateImportCustomer(auth, row.raw_data, resolvedCustomers);
+        if (resolved.created) {
+          createdCustomerIds.add(resolved.customer.id);
+        } else if (!createdCustomerIds.has(resolved.customer.id)) {
+          matchedCustomerIds.add(resolved.customer.id);
+        }
+
+        const invoiceData = {
+          ...row.mapped_data,
+          customer_id: resolved.customer.id,
+          customer_resolution: resolved.details,
+        };
+        await this.assertNoDuplicateReference(auth.companyId, resolved.customer.id, asString(invoiceData, 'reference_no'));
+        const header = validateCreateInvoice(invoiceData);
         const lines = validateInvoiceLines(row.mapped_data.lines);
         const invoice = await this.invoiceService.createInvoice(auth, header, lines);
         createdCount += 1;
@@ -428,6 +464,7 @@ export class ImportService {
         await this.client.from('import_rows').update({
           status: 'Created',
           invoice_id: invoice.id,
+          mapped_data: invoiceData,
           validation_errors: null,
         }).eq('id', row.id);
       } catch (error) {
@@ -451,6 +488,8 @@ export class ImportService {
       valid_rows: finalValidRows,
       error_rows: finalErrorRows,
       created_count: createdCount,
+      matched_customers_count: matchedCustomerIds.size,
+      created_customers_count: createdCustomerIds.size,
       posted_count: 0,
       allocated_count: 0,
       error_summary: errorSummary.length > 0 ? errorSummary : null,
@@ -525,11 +564,27 @@ export class ImportService {
     let mappedData: Record<string, unknown> | undefined;
 
     try {
-      const customer = await this.resolveCustomer(auth, raw);
-      await requireCustomerAccess(auth, customer.id);
+      const classification = await this.customerService.classifyImportCustomer(auth, {
+        customerCode: asString(raw, 'customer_code') || undefined,
+        customerName: asString(raw, 'customer_name') || undefined,
+        registrationNo: asString(raw, 'registration_no') || undefined,
+      });
+      const customer = classification.customer;
+      let customerInput: CreateCustomerRequest | undefined;
+
+      if (customer) {
+        await requireCustomerAccess(auth, customer.id);
+      } else {
+        customerInput = this.validateNewCustomerInput(raw);
+      }
 
       const invoiceDate = asString(raw, 'invoice_date');
-      const currency = (asString(raw, 'currency') || customer.default_currency || 'MYR').toUpperCase();
+      const currency = (
+        asString(raw, 'currency')
+        || customer?.default_currency
+        || COUNTRY_DEFAULTS[customerInput!.bill_country]?.currency
+        || 'MYR'
+      ).toUpperCase();
       const description = asString(raw, 'description');
       const quantity = parseNumber(asString(raw, 'quantity') || '1', 'quantity');
       const unitPrice = parseNumber(asString(raw, 'unit_price'), 'unit_price');
@@ -539,7 +594,9 @@ export class ImportService {
       mappedData = {
         doc_type: 'Invoice',
         invoice_date: invoiceDate,
-        customer_id: customer.id,
+        customer_id: customer?.id,
+        customer_input: customerInput,
+        customer_resolution: this.toCustomerResolutionDetails(classification),
         currency,
         reference_no: referenceNo,
         internal_remarks: 'Created by Sprint F4 import draft-only flow',
@@ -552,22 +609,16 @@ export class ImportService {
         }],
       };
 
-      validateCreateInvoice(mappedData);
+      if (customer) {
+        validateCreateInvoice(mappedData);
+      } else {
+        validateDate(invoiceDate, 'invoice_date');
+        validateCurrency(currency, 'currency');
+      }
       validateInvoiceLines(mappedData.lines);
 
-      if (referenceNo) {
-        const { count, error } = await this.client
-          .from('invoices')
-          .select('id', { count: 'exact', head: true })
-          .eq('company_id', auth.companyId)
-          .eq('customer_id', customer.id)
-          .eq('reference_no', referenceNo)
-          .neq('status', 'Cancelled');
-
-        if (error) throw new Error(`Failed duplicate reference check: ${error.message}`);
-        if ((count ?? 0) > 0) {
-          errors.push(rowError('reference_no', `Duplicate invoice reference_no "${referenceNo}" for this customer.`));
-        }
+      if (referenceNo && customer) {
+        await this.assertNoDuplicateReference(auth.companyId, customer.id, referenceNo);
       }
     } catch (error) {
       errors.push(...errorToRowErrors(error));
@@ -576,48 +627,113 @@ export class ImportService {
     return { mappedData, errors };
   }
 
-  private async resolveCustomer(auth: AuthContext, raw: Record<string, unknown>): Promise<Customer> {
-    const uuid = asString(raw, 'customer_id');
+  private async resolveOrCreateImportCustomer(
+    auth: AuthContext,
+    raw: Record<string, unknown>,
+    cache: Map<string, ResolvedImportCustomer>,
+  ): Promise<ResolvedImportCustomer> {
+    const cacheKey = this.importCustomerCacheKey(raw);
+    const classification = await this.customerService.classifyImportCustomer(auth, {
+      customerCode: asString(raw, 'customer_code') || undefined,
+      customerName: asString(raw, 'customer_name') || undefined,
+      registrationNo: asString(raw, 'registration_no') || undefined,
+    });
+
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return {
+        ...cached,
+        created: false,
+        details: {
+          ...cached.details,
+          action: 'Matched Existing',
+          matched_by: cached.created ? 'created_in_batch' : cached.details.matched_by,
+        },
+      };
+    }
+
+    if (classification.customer) {
+      await requireCustomerAccess(auth, classification.customer.id);
+      const resolved = {
+        customer: classification.customer,
+        created: false,
+        details: this.toCustomerResolutionDetails(classification),
+      };
+      cache.set(cacheKey, resolved);
+      return resolved;
+    }
+
+    const customerInput = this.validateNewCustomerInput(raw);
+    const result = await this.customerService.createInlineCustomer(auth, customerInput);
+    await requireCustomerAccess(auth, result.customer.id);
+    const resolved = {
+      customer: result.customer,
+      created: result.created,
+      details: {
+        action: result.created ? 'Create New' as const : 'Matched Existing' as const,
+        customer_id: result.customer.id,
+        customer_code: result.customer.customer_id,
+        customer_name: result.customer.customer_name,
+        matched_by: result.created ? null : 'normalized_name' as const,
+      },
+    };
+    cache.set(cacheKey, resolved);
+    return resolved;
+  }
+
+  private validateNewCustomerInput(raw: Record<string, unknown>): CreateCustomerRequest {
+    return validateCreateCustomer({
+      customer_name: asString(raw, 'customer_name'),
+      customer_type: 'Corporate',
+      registration_no: asString(raw, 'registration_no'),
+      bill_addr_line1: asString(raw, 'bill_addr_line1'),
+      bill_city: asString(raw, 'bill_city'),
+      bill_state: asString(raw, 'bill_state'),
+      bill_postal: asString(raw, 'bill_postal'),
+      bill_country: asString(raw, 'bill_country'),
+      contact_name: asString(raw, 'contact_name'),
+      contact_phone: asString(raw, 'contact_phone'),
+      contact_email: asString(raw, 'contact_email'),
+    });
+  }
+
+  private importCustomerCacheKey(raw: Record<string, unknown>): string {
     const code = asString(raw, 'customer_code');
-    const name = asString(raw, 'customer_name');
+    if (code) return `code:${code.toLocaleUpperCase()}`;
+    return `name:${asString(raw, 'customer_name').trim().replace(/\s+/g, ' ').toLocaleLowerCase()}`;
+  }
 
-    if (uuid) {
-      validateUUID(uuid, 'customer_id');
-      const customer = await fetchById<Customer>(this.client, 'customers', uuid);
-      if (customer.company_id !== auth.companyId || customer.is_deleted) {
-        throw new NotFoundError('Customer', uuid);
-      }
-      await assertCustomerVisible(this.client, auth.companyId, customer.id);
-      return customer;
-    }
+  private toCustomerResolutionDetails(classification: Awaited<ReturnType<CustomerService['classifyImportCustomer']>>): CustomerResolutionDetails {
+    return {
+      action: classification.action,
+      customer_id: classification.customer?.id ?? null,
+      customer_code: classification.customer?.customer_id ?? null,
+      customer_name: classification.customer?.customer_name ?? classification.normalizedCustomerName,
+      matched_by: classification.matchedBy,
+    };
+  }
 
-    let query = this.client
-      .from('customers')
-      .select('*')
-      .eq('company_id', auth.companyId)
-      .eq('is_deleted', false)
-      .eq('is_hidden', false);
+  private async assertNoDuplicateReference(
+    companyId: string,
+    customerId: string,
+    referenceNo?: string,
+  ): Promise<void> {
+    if (!referenceNo) return;
+    const { count, error } = await this.client
+      .from('invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .eq('customer_id', customerId)
+      .eq('reference_no', referenceNo)
+      .neq('status', 'Cancelled');
 
-    if (code) {
-      query = query.eq('customer_id', code);
-    } else if (name) {
-      query = query.ilike('customer_name', name);
-    } else {
-      throw new ValidationError('One of customer_id, customer_code, or customer_name is required.');
-    }
-
-    const { data, error } = await query.limit(2);
-    if (error) throw new Error(`Failed to resolve customer: ${error.message}`);
-    if (!data || data.length === 0) {
-      throw new ValidationError('Customer could not be resolved.', { customer_code: code, customer_name: name });
-    }
-    if (data.length > 1) {
-      throw new ValidationError('Customer match is ambiguous. Use customer_id UUID or customer_code.', {
-        customer_name: name,
-        matches: data.length,
+    if (error) throw new Error(`Failed duplicate reference check: ${error.message}`);
+    if ((count ?? 0) > 0) {
+      throw new ValidationError(`Duplicate invoice reference_no "${referenceNo}" for this customer.`, {
+        field: 'reference_no',
+        reference_no: referenceNo,
       });
     }
-    return data[0] as Customer;
   }
 
   private async resolveTaxCode(companyId: string, raw: Record<string, unknown>): Promise<string | undefined> {

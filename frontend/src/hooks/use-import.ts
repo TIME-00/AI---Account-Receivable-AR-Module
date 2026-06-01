@@ -23,6 +23,8 @@ export interface ImportBatch {
   valid_rows: number;
   error_rows: number;
   created_count: number;
+  matched_customers_count: number;
+  created_customers_count: number;
   posted_count: number;
   allocated_count: number;
   skipped_count: number;
@@ -60,6 +62,14 @@ export interface ImportRow {
   je_no: string | null;
   duplicate_of: string | null;
   created_at: string;
+}
+
+export interface ImportCustomerResolution {
+  action: "Matched Existing" | "Create New";
+  customer_id: string | null;
+  customer_code: string | null;
+  customer_name: string;
+  matched_by: "customer_code" | "normalized_name" | "created_in_batch" | null;
 }
 
 export type ImportRowStatus =
@@ -100,7 +110,7 @@ export type ImportStep =
   | "result";
 
 export const IMPORT_STEPS: { key: ImportStep; label: string; number: number }[] = [
-  { key: "upload", label: "Upload CSV", number: 1 },
+  { key: "upload", label: "Upload File", number: 1 },
   { key: "parse", label: "Parse", number: 2 },
   { key: "preview", label: "Preview & Edit", number: 3 },
   { key: "validate", label: "Validate", number: 4 },
@@ -196,7 +206,7 @@ export function useImport() {
         setBatch(batchData);
         setRows(Array.isArray(parsedRows) ? parsedRows : []);
         setStep("preview");
-        toast.success("CSV Parsed", { description: `${parsedRows.length} rows extracted` });
+        toast.success("File Parsed", { description: `${parsedRows.length} rows extracted` });
         return batchData;
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : "Parse failed";

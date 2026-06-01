@@ -1,7 +1,7 @@
 // ============================================================================
 // TSH Synergy ERP - Accounts Receivable Module
 // Edge Function: imports
-// Sprint F4 Phase A/B - CSV/XLSX Invoice Import, Draft Only
+// Sprint F4 Phase C - CSV/XLSX Smart Invoice Import, Draft Only
 // ============================================================================
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
@@ -59,12 +59,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       const importType = String(form.get('import_type') ?? 'invoice');
       if (importType !== 'invoice') {
-        throw new ValidationError('Phase B only supports import_type=invoice.');
+        throw new ValidationError('Phase C only supports import_type=invoice.');
       }
 
       const fileType = String(form.get('file_type') ?? 'csv');
       if (!ALLOWED_FILE_TYPES.includes(fileType)) {
-        throw new ValidationError('Phase B only supports file_type=csv or file_type=xlsx.');
+        throw new ValidationError('Phase C only supports file_type=csv or file_type=xlsx.');
       }
 
       const batchNameRaw = form.get('batch_name');

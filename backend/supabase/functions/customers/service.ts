@@ -36,6 +36,19 @@ import type {
   PaginationParams,
 } from '../_shared/types.ts';
 
+export interface ImportCustomerLookup {
+  customerCode?: string;
+  customerName?: string;
+  registrationNo?: string;
+}
+
+export interface ImportCustomerClassification {
+  action: 'Matched Existing' | 'Create New';
+  customer: Customer | null;
+  matchedBy: 'customer_code' | 'normalized_name' | null;
+  normalizedCustomerName: string;
+}
+
 // ─── Customer Service ───────────────────────────────────────────────────────
 
 export class CustomerService {
@@ -194,6 +207,61 @@ export class CustomerService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Read-only import classification. Customer creation is deliberately deferred
+   * until the user executes the validated draft-only import batch.
+   */
+  async classifyImportCustomer(
+    auth: AuthContext,
+    lookup: ImportCustomerLookup,
+  ): Promise<ImportCustomerClassification> {
+    const customerCode = lookup.customerCode?.trim();
+    const customerName = lookup.customerName ? normalizeCustomerName(lookup.customerName) : '';
+    const registrationNo = lookup.registrationNo?.trim();
+
+    if (customerCode) {
+      const customer = await this.findVisibleCustomerByCode(auth.companyId, customerCode);
+      if (!customer) {
+        throw new ValidationError(
+          `Visible customer_code "${customerCode}" could not be resolved. Leave customer_code blank to create a new customer.`,
+          { field: 'customer_code', customer_code: customerCode },
+        );
+      }
+      this.assertImportCustomerDataConsistent(customer, customerName, registrationNo);
+      return {
+        action: 'Matched Existing',
+        customer,
+        matchedBy: 'customer_code',
+        normalizedCustomerName: normalizeCustomerName(customer.customer_name),
+      };
+    }
+
+    if (!customerName) {
+      throw new ValidationError(
+        'customer_name is required when customer_code is blank.',
+        { field: 'customer_name' },
+      );
+    }
+
+    const customer = await this.findVisibleCustomerByNormalizedName(auth.companyId, customerName);
+    if (customer) {
+      this.assertImportCustomerDataConsistent(customer, customerName, registrationNo);
+      return {
+        action: 'Matched Existing',
+        customer,
+        matchedBy: 'normalized_name',
+        normalizedCustomerName: customerName,
+      };
+    }
+
+    return {
+      action: 'Create New',
+      customer: null,
+      matchedBy: null,
+      normalizedCustomerName: customerName,
+    };
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -849,6 +917,50 @@ export class CustomerService {
     return data as Customer | null;
   }
 
+  private async findVisibleCustomerByCode(
+    companyId: string,
+    customerCode: string,
+  ): Promise<Customer | null> {
+    const { data, error } = await this.client
+      .from('customers')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('customer_id', customerCode)
+      .eq('is_deleted', false)
+      .eq('is_hidden', false)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to check customer code: ${error.message}`);
+    }
+
+    return data as Customer | null;
+  }
+
+  private assertImportCustomerDataConsistent(
+    customer: Customer,
+    customerName: string,
+    registrationNo?: string,
+  ): void {
+    if (customerName && normalizeCustomerName(customer.customer_name).toLocaleLowerCase() !== customerName.toLocaleLowerCase()) {
+      throw new ValidationError(
+        `customer_name conflicts with resolved customer_code "${customer.customer_id}".`,
+        { field: 'customer_name', customer_code: customer.customer_id },
+      );
+    }
+
+    if (
+      registrationNo
+      && customer.registration_no
+      && normalizeRegistrationNo(customer.registration_no) !== normalizeRegistrationNo(registrationNo)
+    ) {
+      throw new ValidationError(
+        `registration_no conflicts with resolved customer "${customer.customer_name}".`,
+        { field: 'registration_no', customer_code: customer.customer_id },
+      );
+    }
+  }
+
   private async getDefaultPaymentTermId(companyId: string): Promise<string | null> {
     const { data, error } = await this.client
       .from('payment_terms')
@@ -978,4 +1090,8 @@ export class CustomerService {
 
 function normalizeCustomerName(customerName: string): string {
   return customerName.trim().replace(/\s+/g, ' ');
+}
+
+function normalizeRegistrationNo(registrationNo: string): string {
+  return registrationNo.trim().toLocaleUpperCase();
 }
