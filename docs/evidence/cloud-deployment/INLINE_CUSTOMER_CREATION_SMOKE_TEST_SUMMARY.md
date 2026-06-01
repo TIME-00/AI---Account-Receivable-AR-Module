@@ -33,6 +33,18 @@ Both pages use the shared `CustomerComboboxWithCreate` component. No separate cu
 - `database/011_customer_normalized_name.sql` adds a partial unique index for visible, non-deleted customer names.
 - AR Clerk creation creates or reactivates only the creator's `user_customer_assignments` row.
 
+## Country-Aware Address Dropdowns
+
+The Quick Create Customer modal uses cascading address dropdowns:
+
+- Country controls the available State / Region options.
+- State / Region controls the available City / Area options.
+- City / Area controls the available Postal Code options.
+- Changing a parent selection resets all dependent selections.
+- Malaysia and Singapore options are kept separate so mismatched country data cannot be selected through the modal.
+
+The frontend dataset is intentionally curated for the client prototype. It includes Malaysian states with practical major-city postcode samples and Singapore regions with common-area postcode samples. It is not an exhaustive official postal database. A production-grade follow-up can replace `frontend/src/lib/address-options.ts` with a backend `address_reference` table or an official postal dataset.
+
 ## Data Preservation
 
 - No customer, invoice, receipt, allocation, journal entry, or audit record is deleted.
@@ -77,6 +89,10 @@ Run after applying migrations `010`, `011a` preflight, and `011`, then deploying
 - [ ] As AR Clerk, confirm a newly created customer is assigned only to the creating clerk.
 - [ ] Confirm hidden customers do not appear and are not reused.
 - [ ] Confirm dashboard, invoice, receipt, and report visibility filters still exclude hidden test data.
+- [ ] Select Malaysia, then Johor and Johor Bahru; confirm only Johor Bahru postcode options appear.
+- [ ] Change the country from Malaysia to Singapore; confirm state, city, and postal selections reset.
+- [ ] Confirm only Singapore regions, areas, and postcode options appear after selecting Singapore.
+- [ ] Repeat the cascading address dropdown check from New Receipt.
 
 ## Deployment Status
 

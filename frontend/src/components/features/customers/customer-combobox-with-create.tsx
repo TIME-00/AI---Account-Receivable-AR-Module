@@ -7,6 +7,12 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isVisibleCustomer } from "@/lib/customer-visibility";
 import {
+  countryOptions,
+  getCityOptions,
+  getPostalOptions,
+  getStateOptions,
+} from "@/lib/address-options";
+import {
   useInlineCustomerCreate,
   type InlineCustomerCreatePayload,
 } from "@/hooks/use-inline-customer-create";
@@ -52,6 +58,13 @@ export function CustomerComboboxWithCreate({
   const [createError, setCreateError] = useState("");
   const [quickCreate, setQuickCreate] = useState(() => emptyQuickCreate(""));
   const createCustomer = useInlineCustomerCreate();
+  const stateOptions = getStateOptions(quickCreate.bill_country);
+  const cityOptions = getCityOptions(quickCreate.bill_country, quickCreate.bill_state);
+  const postalOptions = getPostalOptions(
+    quickCreate.bill_country,
+    quickCreate.bill_state,
+    quickCreate.bill_city
+  );
 
   const visibleCustomers = useMemo(
     () => customers.filter(isVisibleCustomer),
@@ -94,6 +107,33 @@ export function CustomerComboboxWithCreate({
 
   const updateQuickCreate = (field: keyof InlineCustomerCreatePayload, value: string) => {
     setQuickCreate((current) => ({ ...current, [field]: value }));
+  };
+
+  const updateCountry = (value: string) => {
+    setQuickCreate((current) => ({
+      ...current,
+      bill_country: value,
+      bill_state: "",
+      bill_city: "",
+      bill_postal: "",
+    }));
+  };
+
+  const updateState = (value: string) => {
+    setQuickCreate((current) => ({
+      ...current,
+      bill_state: value,
+      bill_city: "",
+      bill_postal: "",
+    }));
+  };
+
+  const updateCity = (value: string) => {
+    setQuickCreate((current) => ({
+      ...current,
+      bill_city: value,
+      bill_postal: "",
+    }));
   };
 
   const submitQuickCreate = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -195,16 +235,37 @@ export function CustomerComboboxWithCreate({
                 <QuickField label="Customer Name" value={quickCreate.customer_name} onChange={(value) => updateQuickCreate("customer_name", value)} />
                 <QuickField label="Registration No." value={quickCreate.registration_no} onChange={(value) => updateQuickCreate("registration_no", value)} placeholder="Corporate registration number" />
                 <QuickField label="Billing Address" value={quickCreate.bill_addr_line1} onChange={(value) => updateQuickCreate("bill_addr_line1", value)} className="md:col-span-2" />
-                <QuickField label="City" value={quickCreate.bill_city} onChange={(value) => updateQuickCreate("bill_city", value)} />
-                <QuickField label="State" value={quickCreate.bill_state} onChange={(value) => updateQuickCreate("bill_state", value)} />
-                <QuickField label="Postal Code" value={quickCreate.bill_postal} onChange={(value) => updateQuickCreate("bill_postal", value)} />
                 <label className="block">
                   <span className="mb-1.5 block text-xs font-medium text-slate-600">Country <span className="text-red-400">*</span></span>
-                  <select value={quickCreate.bill_country} onChange={(event) => updateQuickCreate("bill_country", event.target.value)} className="input-premium w-full">
-                    <option value="SG">Singapore</option>
-                    <option value="MY">Malaysia</option>
+                  <select value={quickCreate.bill_country} onChange={(event) => updateCountry(event.target.value)} className="input-premium w-full">
+                    {countryOptions.map((country) => (
+                      <option key={country.value} value={country.value}>{country.label}</option>
+                    ))}
                   </select>
                 </label>
+                <AddressSelect
+                  label="State / Region"
+                  value={quickCreate.bill_state}
+                  placeholder="Select state / region"
+                  options={stateOptions}
+                  onChange={updateState}
+                />
+                <AddressSelect
+                  label="City / Area"
+                  value={quickCreate.bill_city}
+                  placeholder="Select city / area"
+                  options={cityOptions}
+                  onChange={updateCity}
+                  disabled={!quickCreate.bill_state}
+                />
+                <AddressSelect
+                  label="Postal Code"
+                  value={quickCreate.bill_postal}
+                  placeholder="Select postal code"
+                  options={postalOptions}
+                  onChange={(value) => updateQuickCreate("bill_postal", value)}
+                  disabled={!quickCreate.bill_city}
+                />
                 <QuickField label="Contact Name" value={quickCreate.contact_name} onChange={(value) => updateQuickCreate("contact_name", value)} />
                 <QuickField label="Contact Phone" value={quickCreate.contact_phone} onChange={(value) => updateQuickCreate("contact_phone", value)} placeholder="+65 6123 4567" />
                 <QuickField label="Contact Email" value={quickCreate.contact_email} onChange={(value) => updateQuickCreate("contact_email", value)} type="email" className="md:col-span-2" />
@@ -231,6 +292,42 @@ export function CustomerComboboxWithCreate({
         </Dialog.Portal>
       </Dialog.Root>
     </div>
+  );
+}
+
+function AddressSelect({
+  label,
+  value,
+  placeholder,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: string[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-medium text-slate-600">
+        {label} <span className="text-red-400">*</span>
+      </span>
+      <select
+        required
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        className="input-premium w-full disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+    </label>
   );
 }
 
