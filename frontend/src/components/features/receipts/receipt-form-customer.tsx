@@ -2,16 +2,11 @@
 
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/utils";
-import { Controller, type UseFormReturn } from "react-hook-form";
+import type { UseFormReturn } from "react-hook-form";
 import type { ReceiptFormValues } from "@/lib/receipt-schema";
+import type { Customer } from "@/types";
+import { CustomerComboboxWithCreate } from "@/components/features/customers/customer-combobox-with-create";
 import { User, CalendarDays, FileText } from "lucide-react";
-
-interface Customer {
-  id: string;
-  customer_id: string;
-  customer_name: string;
-  credit_limit?: number;
-}
 
 interface Outstanding {
   totalOutstanding: number;
@@ -42,31 +37,18 @@ export function ReceiptFormCustomer({
       <div className="grid gap-5 p-5 md:grid-cols-2">
         {/* Customer Select */}
         <div className="md:col-span-2">
-          <label className="mb-1.5 block text-xs font-medium text-slate-600">
-            Customer <span className="text-red-400">*</span>
-          </label>
-          <Controller
-            control={form.control}
-            name="customer_id"
-            render={({ field }) => (
-              <select
-                {...field}
-                className={cn(
-                  "h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-800 transition-colors",
-                  "focus:outline-none focus:ring-1 focus:ring-brand-500",
-                  form.formState.errors.customer_id ? "border-red-500" : "border-slate-300"
-                )}
-              >
-                <option value="">Select customer...</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.customer_name} ({c.customer_id})</option>
-                ))}
-              </select>
-            )}
+          <CustomerComboboxWithCreate
+            customers={customers}
+            selectedName={selectedCustomer?.customer_name}
+            onClearSelection={() => {
+              form.setValue("customer_id", "", { shouldValidate: true });
+            }}
+            onSelect={(customer) => {
+              form.setValue("customer_id", customer.id, { shouldValidate: true });
+              form.setValue("currency", customer.default_currency, { shouldValidate: true });
+            }}
+            error={form.formState.errors.customer_id?.message}
           />
-          {form.formState.errors.customer_id && (
-            <p className="mt-1 text-xs text-red-400">{form.formState.errors.customer_id.message}</p>
-          )}
 
           {/* Customer Outstanding Preview */}
           {watchCustomerId && outstanding && (

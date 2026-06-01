@@ -60,6 +60,8 @@ export class CustomerService {
     // Permission: AR Clerk+
     requireRole(auth, 'AR Clerk');
 
+    const customerName = normalizeCustomerName(data.customer_name);
+
     // Generate unique customer ID: CUST-NNNNN
     const customerId = await getNextSequence(this.client, auth.companyId, 'CUST');
 
@@ -80,7 +82,7 @@ export class CustomerService {
     const insertData = {
       company_id: auth.companyId,
       customer_id: customerId,
-      customer_name: data.customer_name,
+      customer_name: customerName,
       short_name: data.short_name ?? null,
       customer_type: data.customer_type,
       registration_no: data.registration_no ?? null,
@@ -89,6 +91,7 @@ export class CustomerService {
       customer_group_id: data.customer_group_id ?? null,
       parent_id: data.parent_id ?? null,
       is_deleted: false,
+      is_hidden: false,
 
       // Contact
       bill_addr_line1: data.bill_addr_line1,
@@ -131,6 +134,15 @@ export class CustomerService {
 
     if (error) {
       if (error.code === '23505') {
+        const existing = await this.findVisibleCustomerByNormalizedName(auth.companyId, customerName);
+        if (existing) {
+          throw new BusinessError(
+            'DUPLICATE_CUSTOMER_NAME',
+            `A visible customer named "${customerName}" already exists.`,
+            409,
+            { customer_id: existing.id },
+          );
+        }
         throw new BusinessError('DUPLICATE_CUSTOMER',
           `Customer ID ${customerId} already exists. Please retry.`, 409);
       }
@@ -139,8 +151,49 @@ export class CustomerService {
 
     // Log creation in change log
     await this.logChange(created.id, 'CREATED', null, customerId, auth.userId, 'New customer record created');
+    await this.assignCreatedCustomerToClerk(auth, created.id);
 
     return created as Customer;
+  }
+
+  /**
+   * Client-facing inline create for invoice and receipt workbenches.
+   * Returns an authorized visible match when one exists, otherwise creates a
+   * visible customer through the standard customer master-data path.
+   */
+  async createInlineCustomer(
+    auth: AuthContext,
+    data: CreateCustomerRequest,
+  ): Promise<{ customer: Customer; created: boolean }> {
+    requireRole(auth, 'AR Clerk');
+
+    const normalizedName = normalizeCustomerName(data.customer_name);
+    const existing = await this.findVisibleCustomerByNormalizedName(auth.companyId, normalizedName);
+    if (existing) {
+      await requireCustomerAccess(auth, existing.id);
+      return { customer: existing, created: false };
+    }
+
+    const paymentTermId = data.payment_term_id ?? await this.getDefaultPaymentTermId(auth.companyId);
+
+    try {
+      const customer = await this.createCustomer(auth, {
+        ...data,
+        customer_name: normalizedName,
+        payment_term_id: paymentTermId ?? undefined,
+      });
+      return { customer, created: true };
+    } catch (error) {
+      // The visible-name index closes the race between lookup and insert.
+      if (error instanceof BusinessError && error.code === 'DUPLICATE_CUSTOMER_NAME') {
+        const racedCustomer = await this.findVisibleCustomerByNormalizedName(auth.companyId, normalizedName);
+        if (racedCustomer) {
+          await requireCustomerAccess(auth, racedCustomer.id);
+          return { customer: racedCustomer, created: false };
+        }
+      }
+      throw error;
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -776,6 +829,66 @@ export class CustomerService {
    * 2. Customer Type default mapping
    * 3. System-wide default
    */
+  private async findVisibleCustomerByNormalizedName(
+    companyId: string,
+    customerName: string,
+  ): Promise<Customer | null> {
+    const { data, error } = await this.client
+      .from('customers')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('normalized_customer_name', normalizeCustomerName(customerName).toLocaleLowerCase())
+      .eq('is_deleted', false)
+      .eq('is_hidden', false)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to check duplicate customer name: ${error.message}`);
+    }
+
+    return data as Customer | null;
+  }
+
+  private async getDefaultPaymentTermId(companyId: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from('payment_terms')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('term_code', 'NET30')
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to fetch default payment term: ${error.message}`);
+    }
+
+    return data?.id ?? null;
+  }
+
+  private async assignCreatedCustomerToClerk(
+    auth: AuthContext,
+    customerId: string,
+  ): Promise<void> {
+    if (auth.highestRole !== 'AR Clerk') {
+      return;
+    }
+
+    const { error } = await this.client
+      .from('user_customer_assignments')
+      .upsert({
+        user_id: auth.userId,
+        customer_id: customerId,
+        company_id: auth.companyId,
+        assigned_by: auth.userId,
+        assigned_at: new Date().toISOString(),
+        is_active: true,
+      }, { onConflict: 'user_id,customer_id' });
+
+    if (error) {
+      throw new Error(`Failed to assign created customer to AR Clerk: ${error.message}`);
+    }
+  }
+
   private async resolveAccountMappings(
     companyId: string,
     customerType: string,
@@ -861,4 +974,8 @@ export class CustomerService {
         created_by: createdBy,
       });
   }
+}
+
+function normalizeCustomerName(customerName: string): string {
+  return customerName.trim().replace(/\s+/g, ' ');
 }

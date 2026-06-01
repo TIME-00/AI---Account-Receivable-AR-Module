@@ -1,0 +1,275 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Loader2, Plus, Search, X } from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { isVisibleCustomer } from "@/lib/customer-visibility";
+import {
+  useInlineCustomerCreate,
+  type InlineCustomerCreatePayload,
+} from "@/hooks/use-inline-customer-create";
+import type { Customer } from "@/types";
+
+interface CustomerComboboxWithCreateProps {
+  customers: Customer[];
+  selectedName?: string;
+  onSelect: (customer: Customer) => void;
+  onClearSelection: () => void;
+  onSearchChange?: (query: string) => void;
+  error?: string;
+  className?: string;
+}
+
+const emptyQuickCreate = (customerName: string): InlineCustomerCreatePayload => ({
+  customer_name: normalizeDisplayName(customerName),
+  customer_type: "Corporate",
+  registration_no: "",
+  bill_addr_line1: "",
+  bill_city: "",
+  bill_state: "",
+  bill_postal: "",
+  bill_country: "SG",
+  contact_name: "",
+  contact_phone: "",
+  contact_email: "",
+});
+
+export function CustomerComboboxWithCreate({
+  customers,
+  selectedName = "",
+  onSelect,
+  onClearSelection,
+  onSearchChange,
+  error,
+  className,
+}: CustomerComboboxWithCreateProps) {
+  const [query, setQuery] = useState("");
+  const [chosenName, setChosenName] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [quickCreate, setQuickCreate] = useState(() => emptyQuickCreate(""));
+  const createCustomer = useInlineCustomerCreate();
+
+  const visibleCustomers = useMemo(
+    () => customers.filter(isVisibleCustomer),
+    [customers]
+  );
+  const normalizedQuery = normalizeCustomerName(query);
+  const filteredCustomers = useMemo(() => {
+    const match = normalizedQuery.toLocaleLowerCase();
+    if (!match) return visibleCustomers;
+    return visibleCustomers.filter((customer) =>
+      `${customer.customer_name} ${customer.customer_id}`.toLocaleLowerCase().includes(match)
+    );
+  }, [normalizedQuery, visibleCustomers]);
+  const hasExactVisibleMatch = visibleCustomers.some(
+    (customer) => normalizeCustomerName(customer.customer_name).toLocaleLowerCase() === normalizedQuery.toLocaleLowerCase()
+  );
+  const canCreate = normalizedQuery.length > 0 && !hasExactVisibleMatch;
+
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    setChosenName("");
+    setIsOpen(true);
+    onClearSelection();
+    onSearchChange?.(value);
+  };
+
+  const selectCustomer = (customer: Customer) => {
+    onSelect(customer);
+    setChosenName(customer.customer_name);
+    setQuery("");
+    setIsOpen(false);
+  };
+
+  const openQuickCreate = () => {
+    setQuickCreate(emptyQuickCreate(normalizedQuery));
+    setCreateError("");
+    setIsModalOpen(true);
+    setIsOpen(false);
+  };
+
+  const updateQuickCreate = (field: keyof InlineCustomerCreatePayload, value: string) => {
+    setQuickCreate((current) => ({ ...current, [field]: value }));
+  };
+
+  const submitQuickCreate = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreateError("");
+
+    try {
+      const result = await createCustomer.mutateAsync({
+        ...quickCreate,
+        customer_name: normalizeDisplayName(quickCreate.customer_name),
+      });
+      selectCustomer(result.customer);
+      setIsModalOpen(false);
+      toast.success(result.created ? "Customer created" : "Existing customer selected", {
+        description: `${result.customer.customer_name} (${result.customer.customer_id})`,
+      });
+    } catch (cause) {
+      setCreateError(cause instanceof Error ? cause.message : "Customer creation failed.");
+    }
+  };
+
+  return (
+    <div className={cn("md:col-span-2", className)}>
+      <label className="mb-1.5 block text-xs font-medium text-slate-600">
+        Customer <span className="text-red-400">*</span>
+      </label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          type="text"
+          value={selectedName || chosenName || query}
+          onChange={(event) => updateQuery(event.target.value)}
+          onFocus={() => setIsOpen(true)}
+          placeholder="Search or enter a new customer name..."
+          className={cn(
+            "input-premium w-full pl-9",
+            error && "!border-red-500 !ring-red-500/30"
+          )}
+        />
+
+        {isOpen && (
+          <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl">
+            {filteredCustomers.map((customer) => (
+              <button
+                key={customer.id}
+                type="button"
+                onClick={() => selectCustomer(customer)}
+                className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50"
+              >
+                <span>
+                  <span className="block font-medium text-slate-700">{customer.customer_name}</span>
+                  <span className="block text-[11px] text-slate-500">
+                    {customer.customer_id} · {customer.customer_type} · {customer.default_currency}
+                  </span>
+                </span>
+                <span className="text-xs text-slate-500">{customer.credit_rating}</span>
+              </button>
+            ))}
+            {filteredCustomers.length === 0 && !canCreate && (
+              <p className="px-3 py-3 text-sm text-slate-500">No visible customers found.</p>
+            )}
+            {canCreate && (
+              <button
+                type="button"
+                onClick={openQuickCreate}
+                className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-3 text-left text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50"
+              >
+                <Plus className="h-4 w-4" />
+                Create new customer: &quot;{normalizedQuery}&quot;
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+
+      <Dialog.Root open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[80] bg-slate-950/35" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-[90] max-h-[90vh] w-[min(680px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Dialog.Title className="text-base font-semibold text-slate-900">
+                  Quick Create Customer
+                </Dialog.Title>
+                <Dialog.Description className="mt-1 text-xs text-slate-500">
+                  Enter the customer details to continue with this document. The customer code is generated automatically.
+                </Dialog.Description>
+              </div>
+              <Dialog.Close asChild>
+                <button type="button" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Close">
+                  <X className="h-4 w-4" />
+                </button>
+              </Dialog.Close>
+            </div>
+
+            <form onSubmit={submitQuickCreate} className="mt-5 space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <QuickField label="Customer Name" value={quickCreate.customer_name} onChange={(value) => updateQuickCreate("customer_name", value)} />
+                <QuickField label="Registration No." value={quickCreate.registration_no} onChange={(value) => updateQuickCreate("registration_no", value)} placeholder="Corporate registration number" />
+                <QuickField label="Billing Address" value={quickCreate.bill_addr_line1} onChange={(value) => updateQuickCreate("bill_addr_line1", value)} className="md:col-span-2" />
+                <QuickField label="City" value={quickCreate.bill_city} onChange={(value) => updateQuickCreate("bill_city", value)} />
+                <QuickField label="State" value={quickCreate.bill_state} onChange={(value) => updateQuickCreate("bill_state", value)} />
+                <QuickField label="Postal Code" value={quickCreate.bill_postal} onChange={(value) => updateQuickCreate("bill_postal", value)} />
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-slate-600">Country <span className="text-red-400">*</span></span>
+                  <select value={quickCreate.bill_country} onChange={(event) => updateQuickCreate("bill_country", event.target.value)} className="input-premium w-full">
+                    <option value="SG">Singapore</option>
+                    <option value="MY">Malaysia</option>
+                  </select>
+                </label>
+                <QuickField label="Contact Name" value={quickCreate.contact_name} onChange={(value) => updateQuickCreate("contact_name", value)} />
+                <QuickField label="Contact Phone" value={quickCreate.contact_phone} onChange={(value) => updateQuickCreate("contact_phone", value)} placeholder="+65 6123 4567" />
+                <QuickField label="Contact Email" value={quickCreate.contact_email} onChange={(value) => updateQuickCreate("contact_email", value)} type="email" className="md:col-span-2" />
+              </div>
+
+              {createError && <p className="text-xs text-red-500">{createError}</p>}
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <Dialog.Close asChild>
+                  <button type="button" className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
+                    Cancel
+                  </button>
+                </Dialog.Close>
+                <button
+                  type="submit"
+                  disabled={createCustomer.isPending}
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {createCustomer.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Create Customer
+                </button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </div>
+  );
+}
+
+function QuickField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <label className={cn("block", className)}>
+      <span className="mb-1.5 block text-xs font-medium text-slate-600">
+        {label} <span className="text-red-400">*</span>
+      </span>
+      <input
+        required
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="input-premium w-full"
+      />
+    </label>
+  );
+}
+
+function normalizeDisplayName(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeCustomerName(value: string): string {
+  return normalizeDisplayName(value);
+}

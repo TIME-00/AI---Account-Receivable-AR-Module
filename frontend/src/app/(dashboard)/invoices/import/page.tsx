@@ -27,7 +27,7 @@ import {
 // ─── CSV Template ───────────────────────────────────────────────────────────
 
 const CSV_COLUMNS = [
-  { name: "customer_code", required: true, description: "Must match existing customer_id (e.g. CUST-001)" },
+  { name: "customer_code", required: true, description: "Current phase: match an existing visible customer code (e.g. CUST-001)" },
   { name: "invoice_date", required: true, description: "Date format: YYYY-MM-DD" },
   { name: "currency", required: false, description: "3-letter ISO code (default: MYR)" },
   { name: "description", required: true, description: "Line item description" },
@@ -344,7 +344,7 @@ export default function InvoiceImportPage() {
                   <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 flex items-start gap-2">
                     <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
                     <div className="text-xs text-blue-700 space-y-1">
-                      <p><strong>customer_code</strong> must exactly match an existing customer&apos;s <code className="bg-blue-100 px-1 rounded">customer_id</code> field (e.g. CUST-001).</p>
+                      <p><strong>customer_code</strong> currently matches an existing visible customer&apos;s system-generated code (e.g. CUST-001). New-customer import review and matching is a planned follow-up flow.</p>
                       <p><strong>tax_rate</strong> can be <code className="bg-blue-100 px-1 rounded">0</code> for non-taxable items.</p>
                       <p>Each row creates <strong>one draft invoice</strong>. Multi-line invoice grouping is planned for a future phase.</p>
                       <p><strong>CSV and Excel use the same columns.</strong> In Excel, dates can be date-formatted cells or <code className="bg-blue-100 px-1 rounded">YYYY-MM-DD</code> text. Numbers should be plain numeric cells.</p>

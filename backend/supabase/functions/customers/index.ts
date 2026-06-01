@@ -31,6 +31,7 @@ const UUID = '([0-9a-f\\-]{36})';
 
 const ROUTE_PATTERNS: Record<string, RegExp> = {
   collection: /^\/?$/,
+  inline:     /^\/inline\/?$/,
   single:     new RegExp(`^\\/${UUID}\\/?$`, 'i'),
   status:     new RegExp(`^\\/${UUID}\\/status\\/?$`, 'i'),
   credit:     new RegExp(`^\\/${UUID}\\/credit\\/?$`, 'i'),
@@ -118,6 +119,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // ── Route: Single (get / update / delete) ──────────────────────────
+    if (route === 'inline' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const validatedData = validateCreateCustomer(body);
+      const result = await service.createInlineCustomer(auth, validatedData);
+      return jsonResponse(successResponse(result), result.created ? 201 : 200);
+    }
+
     if (route === 'single') {
       const { id } = params;
       validateUUID(id, 'id');

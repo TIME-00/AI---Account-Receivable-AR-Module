@@ -50,7 +50,6 @@ export function useInvoiceForm() {
   const [selectedCustomerName, setSelectedCustomerName] = useState("");
   const [selectedTermId, setSelectedTermId] = useState<string | null>(null);
   const [customerSearch, setCustomerSearch] = useState("");
-  const [showCustomerList, setShowCustomerList] = useState(false);
 
   // ─── Server Field Errors ─────────────────────────────────────────────
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -256,8 +255,6 @@ export function useInvoiceForm() {
     setSelectedCustomerName,
     selectedTermId,
     setSelectedTermId,
-    showCustomerList,
-    setShowCustomerList,
 
     // Calculator
     calc,

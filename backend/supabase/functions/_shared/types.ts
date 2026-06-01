@@ -177,6 +177,7 @@ export interface Customer {
   is_hidden: boolean;
   hidden_reason: string | null;
   hidden_at: string | null;
+  normalized_customer_name: string;
 
   // Contact
   bill_addr_line1: string;

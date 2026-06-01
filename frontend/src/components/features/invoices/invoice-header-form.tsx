@@ -1,24 +1,16 @@
 "use client";
 
 import { cn, formatDate } from "@/lib/utils";
-import { CustomerSearchOverlay } from "./customer-search-overlay";
+import { CustomerComboboxWithCreate } from "@/components/features/customers/customer-combobox-with-create";
 import type { UseFormReturn } from "react-hook-form";
 import type { InvoiceFormValues } from "@/lib/invoice-schema";
-import type { TaxCodeOption, PaymentTermOption } from "@/hooks/use-invoice-calculator";
+import type { PaymentTermOption } from "@/hooks/use-invoice-calculator";
+import type { Customer } from "@/types";
 import { FileText, CalendarDays, CreditCard } from "lucide-react";
 
 interface InvoiceHeaderFormProps {
   form: UseFormReturn<InvoiceFormValues>;
-  customers: Array<{
-    id: string;
-    customer_id: string;
-    customer_name: string;
-    customer_type: string;
-    default_currency: string;
-    credit_rating: string;
-    credit_limit: number;
-    payment_term_id?: string | null;
-  }>;
+  customers: Customer[];
   paymentTerms: PaymentTermOption[];
   customerSearch: string;
   setCustomerSearch: (q: string) => void;
@@ -26,8 +18,6 @@ interface InvoiceHeaderFormProps {
   setSelectedCustomerName: (n: string) => void;
   selectedTermId: string | null;
   setSelectedTermId: (id: string | null) => void;
-  showCustomerList: boolean;
-  setShowCustomerList: (show: boolean) => void;
   fieldErrors: Record<string, string>;
   calculatedDueDate: string | null;
 }
@@ -42,8 +32,6 @@ export function InvoiceHeaderForm({
   setSelectedCustomerName,
   selectedTermId,
   setSelectedTermId,
-  showCustomerList,
-  setShowCustomerList,
   fieldErrors,
   calculatedDueDate,
 }: InvoiceHeaderFormProps) {
@@ -94,22 +82,22 @@ export function InvoiceHeaderForm({
         </div>
 
         {/* Customer Selector */}
-        <CustomerSearchOverlay
+        <CustomerComboboxWithCreate
           customers={customers}
-          searchQuery={customerSearch}
           onSearchChange={(q) => {
             setCustomerSearch(q);
             setSelectedCustomerName("");
             form.setValue("customer_id", "");
           }}
-          showList={showCustomerList}
-          onShowList={setShowCustomerList}
           selectedName={selectedCustomerName}
+          onClearSelection={() => {
+            setSelectedCustomerName("");
+            form.setValue("customer_id", "");
+          }}
           onSelect={(c) => {
-            form.setValue("customer_id", c.id);
-            form.setValue("currency", c.default_currency);
+            form.setValue("customer_id", c.id, { shouldValidate: true });
+            form.setValue("currency", c.default_currency, { shouldValidate: true });
             setSelectedCustomerName(c.customer_name);
-            setShowCustomerList(false);
             if (c.payment_term_id) {
               setSelectedTermId(c.payment_term_id);
             }

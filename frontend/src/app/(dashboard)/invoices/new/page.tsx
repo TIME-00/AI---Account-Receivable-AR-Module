@@ -78,8 +78,6 @@ export default function NewInvoicePage() {
           setSelectedCustomerName={inv.setSelectedCustomerName}
           selectedTermId={inv.selectedTermId}
           setSelectedTermId={inv.setSelectedTermId}
-          showCustomerList={inv.showCustomerList}
-          setShowCustomerList={inv.setShowCustomerList}
           fieldErrors={inv.fieldErrors}
           calculatedDueDate={inv.calc.calculatedDueDate}
         />
