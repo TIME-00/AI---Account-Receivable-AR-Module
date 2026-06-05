@@ -6,6 +6,7 @@
 param(
   [string]$OutputDir = "tests/fixtures/generated",
   [string]$CustomerCode = "CUST-REPLACE-001",
+  [string]$BankAccountCode = "BANK-ACCOUNT-REPLACE-001",
   [string]$Currency = "SGD",
   [string]$RunId = (Get-Date -Format "yyyyMMddHHmmss")
 )
@@ -192,5 +193,45 @@ New-Xlsx -Path (Join-Path $OutputDir "phase-c-duplicate-new-customer.xlsx") -Row
   @("", "  f4c   xlsx   duplicate   customer   $RunId  ", "F4CXLSXDUP$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase C Contact", "+6561234567", "phase-c-xlsx-duplicate-$RunId@example.com", "2026-05-28", $Currency, "Phase C XLSX duplicate row two", 1, 2.00, 0, "F4C-XLSX-DUP-$RunId-2")
 )
 
+$phaseDHeaders = @(
+  "customer_code", "customer_name", "registration_no",
+  "bill_addr_line1", "bill_city", "bill_state", "bill_postal", "bill_country",
+  "contact_name", "contact_phone", "contact_email",
+  "receipt_date", "currency", "receipt_reference", "payment_method",
+  "bank_account_code", "bank_account_id", "amount", "cheque_date", "remarks"
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-d-existing-customer.xlsx") -Rows @(
+  $phaseDHeaders,
+  @($CustomerCode, "", "", "", "", "", "", "", "", "", "", "2026-05-28", $Currency, "F4D-XLSX-EXISTING-$RunId", "TT", $BankAccountCode, "", 1.00, "", "Phase D existing customer XLSX")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-d-new-customer.xlsx") -Rows @(
+  $phaseDHeaders,
+  @("", "F4D XLSX Receipt Customer $RunId", "F4DXLSXRCT$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase D Contact", "+6561234567", "phase-d-xlsx-receipt-$RunId@example.com", "2026-05-28", $Currency, "F4D-XLSX-NEW-$RunId", "TT", $BankAccountCode, "", 1.00, "", "Phase D new customer XLSX")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-d-invalid-missing-customer.xlsx") -Rows @(
+  $phaseDHeaders,
+  @("", "", "", "", "", "", "", "", "", "", "", "2026-05-28", $Currency, "F4D-XLSX-INVALID-$RunId", "TT", $BankAccountCode, "", 1.00, "", "Phase D invalid missing customer XLSX")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-d-unknown-customer-code.xlsx") -Rows @(
+  $phaseDHeaders,
+  @("NO-SUCH-CUSTOMER-$RunId", "", "", "", "", "", "", "", "", "", "", "2026-05-28", $Currency, "F4D-XLSX-UNKNOWN-$RunId", "TT", $BankAccountCode, "", 1.00, "", "Phase D unknown customer XLSX")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-d-duplicate-new-customer.xlsx") -Rows @(
+  $phaseDHeaders,
+  @("", "F4D XLSX Duplicate Receipt Customer $RunId", "F4DXLSXRCTDUP$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase D Contact", "+6561234567", "phase-d-xlsx-duplicate-$RunId@example.com", "2026-05-28", $Currency, "F4D-XLSX-DUP-$RunId-1", "TT", $BankAccountCode, "", 1.00, "", "Phase D XLSX duplicate row one"),
+  @("", "  f4d   xlsx   duplicate   receipt   customer   $RunId  ", "F4DXLSXRCTDUP$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase D Contact", "+6561234567", "phase-d-xlsx-duplicate-$RunId@example.com", "2026-05-28", $Currency, "F4D-XLSX-DUP-$RunId-2", "TT", $BankAccountCode, "", 2.00, "", "Phase D XLSX duplicate row two")
+)
+
+New-Xlsx -Path (Join-Path $OutputDir "phase-d-chq-new-customer.xlsx") -Rows @(
+  $phaseDHeaders,
+  @("", "F4D XLSX CHQ Receipt Customer $RunId", "F4DXLSXRCTCHQ$RunId", "10 Anson Road", "Downtown Core", "Central", "079903", "SG", "Phase D Contact", "+6561234567", "phase-d-xlsx-chq-$RunId@example.com", "2026-05-28", $Currency, "F4D-XLSX-CHQ-$RunId", "CHQ", $BankAccountCode, "", 1.00, "2026-05-27", "Phase D XLSX cheque receipt")
+)
+
 Get-ChildItem -Path $OutputDir -Filter "phase-b-*.xlsx" | Select-Object FullName, Length
 Get-ChildItem -Path $OutputDir -Filter "phase-c-*.xlsx" | Select-Object FullName, Length
+Get-ChildItem -Path $OutputDir -Filter "phase-d-*.xlsx" | Select-Object FullName, Length

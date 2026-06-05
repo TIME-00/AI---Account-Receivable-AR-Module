@@ -1,7 +1,7 @@
 // ============================================================================
 // TSH Synergy ERP - Accounts Receivable Module
 // Edge Function: imports
-// Sprint F4 Phase C - CSV/XLSX Smart Invoice Import, Draft Only
+// Sprint F4 - CSV/XLSX Smart Invoice/Receipt Import, Draft Only
 // ============================================================================
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
@@ -12,6 +12,7 @@ import { ImportService } from './service.ts';
 
 const UUID = '([0-9a-f\\-]{36})';
 const ALLOWED_FILE_TYPES = ['csv', 'xlsx'];
+const ALLOWED_IMPORT_TYPES = ['invoice', 'receipt'];
 
 const ROUTES: Record<string, RegExp> = {
   upload:     /^\/upload\/?$/i,
@@ -58,19 +59,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
 
       const importType = String(form.get('import_type') ?? 'invoice');
-      if (importType !== 'invoice') {
-        throw new ValidationError('Phase C only supports import_type=invoice.');
+      if (!ALLOWED_IMPORT_TYPES.includes(importType)) {
+        throw new ValidationError('Sprint F4 only supports import_type=invoice or import_type=receipt.');
       }
 
       const fileType = String(form.get('file_type') ?? 'csv');
       if (!ALLOWED_FILE_TYPES.includes(fileType)) {
-        throw new ValidationError('Phase C only supports file_type=csv or file_type=xlsx.');
+        throw new ValidationError('Sprint F4 only supports file_type=csv or file_type=xlsx.');
       }
 
       const batchNameRaw = form.get('batch_name');
       const batch = await service.uploadFile(auth, {
         file,
         fileType: fileType as 'csv' | 'xlsx',
+        importType: importType as 'invoice' | 'receipt',
         batchName: typeof batchNameRaw === 'string' ? batchNameRaw : undefined,
       });
       return jsonResponse(successResponse(batch), 201);

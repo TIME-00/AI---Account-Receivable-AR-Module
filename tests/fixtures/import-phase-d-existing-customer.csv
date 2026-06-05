@@ -1,0 +1,2 @@
+customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,receipt_date,currency,receipt_reference,payment_method,bank_account_code,bank_account_id,amount,cheque_date,remarks
+CUST-REPLACE-001,,,,,,,,,,,2026-05-28,SGD,F4D-EXISTING-REPLACERUNID,TT,BANK-ACCOUNT-REPLACE-001,,1.00,,Phase D existing customer receipt

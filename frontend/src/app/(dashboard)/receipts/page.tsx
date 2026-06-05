@@ -13,7 +13,7 @@ import { useUserRole } from "@/hooks/use-user-role";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { ReceiptFilters } from "@/components/features/receipts/receipt-filters";
 import { ReceiptTable } from "@/components/features/receipts/receipt-table";
-import { Plus, Wallet } from "lucide-react";
+import { FileSpreadsheet, Plus, Wallet } from "lucide-react";
 
 const PAGE_SIZE = 15;
 
@@ -73,10 +73,16 @@ export default function ReceiptsListPage() {
           <p className="mt-1 text-sm text-slate-500">{totalCount} receipt records</p>
         </div>
         {canCreateReceipt && (
-          <LoadingButton variant="primary" onClick={() => router.push("/receipts/new")}>
-            <Plus className="h-4 w-4" />
-            New Receipt
-          </LoadingButton>
+          <div className="flex items-center gap-2">
+            <LoadingButton variant="secondary" onClick={() => router.push("/receipts/import")}>
+              <FileSpreadsheet className="h-4 w-4" />
+              Import CSV/Excel
+            </LoadingButton>
+            <LoadingButton variant="primary" onClick={() => router.push("/receipts/new")}>
+              <Plus className="h-4 w-4" />
+              New Receipt
+            </LoadingButton>
+          </div>
         )}
       </div>
 

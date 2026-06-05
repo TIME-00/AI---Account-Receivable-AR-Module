@@ -1,7 +1,7 @@
 // ============================================================================
 // TSH Synergy ERP - Accounts Receivable Module
 // Sprint F4 Import Service
-// CSV/XLSX Smart Invoice Import with Customer Auto-Creation, Draft Only
+// CSV/XLSX Smart Invoice/Receipt Import with Customer Auto-Creation, Draft Only
 // ============================================================================
 
 import { SupabaseClient } from 'supabase';
@@ -15,8 +15,9 @@ import {
 import type { AuthContext } from '../_shared/auth.ts';
 import { requireCustomerAccess } from '../_shared/auth.ts';
 import { validateCurrency, validateDate, validateUUID } from '../_shared/validators.ts';
-import type { Customer, CreateCustomerRequest, Invoice, PaginationParams } from '../_shared/types.ts';
+import type { BankAccount, Customer, CreateCustomerRequest, Invoice, PaginationParams, Receipt } from '../_shared/types.ts';
 import { InvoiceService } from '../invoices/service.ts';
+import { ReceiptService } from '../receipts/service.ts';
 import {
   validateCreateInvoice,
   validateInvoiceLines,
@@ -25,6 +26,7 @@ import type {
   CreateInvoiceInput,
   CreateInvoiceLineInput,
 } from '../invoices/validators.ts';
+import { validateCreateReceipt } from '../receipts/validators.ts';
 import { parseCsv } from './csv.ts';
 import { parseXlsx } from './xlsx.ts';
 import { CustomerService } from '../customers/service.ts';
@@ -38,8 +40,11 @@ const MAX_ROWS = 500;
 const READ_ROLES = ['AR Clerk', 'AR Supervisor', 'Finance Manager', 'Auditor'];
 const WRITE_ROLES = ['AR Clerk', 'AR Supervisor', 'Finance Manager'];
 const ALLOWED_IMPORT_FILE_TYPES = ['csv', 'xlsx'] as const;
+const ALLOWED_IMPORT_TYPES = ['invoice', 'receipt'] as const;
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
 type ImportFileType = typeof ALLOWED_IMPORT_FILE_TYPES[number];
+type ImportType = typeof ALLOWED_IMPORT_TYPES[number];
 
 type ImportBatchStatus =
   | 'Uploaded'
@@ -75,11 +80,13 @@ interface ImportRow {
   status: ImportRowStatus;
   validation_errors: Array<Record<string, unknown>> | null;
   invoice_id: string | null;
+  receipt_id: string | null;
 }
 
 interface UploadInput {
   file: File;
   fileType: ImportFileType;
+  importType: ImportType;
   batchName?: string;
 }
 
@@ -102,6 +109,13 @@ interface ResolvedImportCustomer {
   details: CustomerResolutionDetails;
 }
 
+interface BankAccountResolutionDetails {
+  bank_account_id: string;
+  account_no: string;
+  bank_name: string;
+  matched_by: 'bank_account_id' | 'bank_account_code';
+}
+
 function hasAnyRole(auth: AuthContext, allowed: string[]): boolean {
   return auth.roles.some((role) => allowed.includes(role));
 }
@@ -120,7 +134,9 @@ function requireImportWrite(auth: AuthContext): void {
 
 function asString(row: Record<string, unknown>, key: string): string {
   const value = row[key];
-  return typeof value === 'string' ? value.trim() : '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
+  return '';
 }
 
 function parseNumber(value: string, field: string): number {
@@ -140,13 +156,16 @@ function isAllowedImportFileType(fileType: string): fileType is ImportFileType {
   return ALLOWED_IMPORT_FILE_TYPES.includes(fileType as ImportFileType);
 }
 
-function requireInvoiceImportFileType(batch: ImportBatch, stage: string): ImportFileType {
-  if (batch.import_type !== 'invoice') {
-    throw new ValidationError(`Phase C ${stage} supports invoice imports only.`);
-  }
+function isAllowedImportType(importType: string): importType is ImportType {
+  return ALLOWED_IMPORT_TYPES.includes(importType as ImportType);
+}
 
+function requireSupportedImportBatch(batch: ImportBatch, stage: string): ImportFileType {
+  if (!isAllowedImportType(batch.import_type)) {
+    throw new ValidationError(`Sprint F4 ${stage} supports invoice and receipt imports only.`);
+  }
   if (!isAllowedImportFileType(batch.file_type)) {
-    throw new ValidationError(`Phase C ${stage} supports csv and xlsx files only.`);
+    throw new ValidationError(`Sprint F4 ${stage} supports csv and xlsx files only.`);
   }
 
   return batch.file_type;
@@ -178,19 +197,24 @@ function errorToRowErrors(error: unknown): Array<Record<string, unknown>> {
 export class ImportService {
   private client: SupabaseClient;
   private invoiceService: InvoiceService;
+  private receiptService: ReceiptService;
   private customerService: CustomerService;
 
   constructor(client?: SupabaseClient) {
     this.client = client ?? getAdminClient();
     this.invoiceService = new InvoiceService(this.client);
+    this.receiptService = new ReceiptService(this.client);
     this.customerService = new CustomerService(this.client);
   }
 
   async uploadFile(auth: AuthContext, input: UploadInput): Promise<ImportBatch> {
     requireImportWrite(auth);
 
+    if (!isAllowedImportType(input.importType)) {
+      throw new ValidationError('Sprint F4 supports invoice and receipt imports only.', { import_type: input.importType });
+    }
     if (!isAllowedImportFileType(input.fileType)) {
-      throw new ValidationError('Phase C only supports csv and xlsx invoice imports.', { file_type: input.fileType });
+      throw new ValidationError('Sprint F4 only supports csv and xlsx imports.', { file_type: input.fileType });
     }
 
     const lowerName = input.file.name.toLowerCase();
@@ -208,7 +232,7 @@ export class ImportService {
     const maxBytes = input.fileType === 'xlsx' ? MAX_XLSX_BYTES : MAX_CSV_BYTES;
     if (input.file.size > maxBytes) {
       const mb = maxBytes / 1024 / 1024;
-      throw new ValidationError(`Import file exceeds the ${mb} MB Phase C limit.`);
+      throw new ValidationError(`Import file exceeds the ${mb} MB Sprint F4 limit.`);
     }
 
     const batchName = input.batchName?.trim() || input.file.name.replace(/\.(csv|xlsx)$/i, '');
@@ -218,7 +242,7 @@ export class ImportService {
       .insert({
         company_id: auth.companyId,
         batch_name: batchName,
-        import_type: 'invoice',
+        import_type: input.importType,
         file_type: input.fileType,
         file_name: input.file.name,
         file_size_bytes: input.file.size,
@@ -273,7 +297,7 @@ export class ImportService {
   async parseBatch(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
     requireImportWrite(auth);
     const batch = await this.getWritableBatch(auth, batchId);
-    const fileType = requireInvoiceImportFileType(batch, 'parse');
+    const fileType = requireSupportedImportBatch(batch, 'parse');
 
     if (batch.status !== 'Uploaded') {
       throw new ValidationError(`Only Uploaded batches can be parsed. Current status: ${batch.status}.`);
@@ -295,7 +319,7 @@ export class ImportService {
         : parseCsv(await data.text());
 
       if (parsed.rows.length > MAX_ROWS) {
-        throw new ValidationError(`${fileType.toUpperCase()} has ${parsed.rows.length} rows. Phase C limit is ${MAX_ROWS}.`);
+        throw new ValidationError(`${fileType.toUpperCase()} has ${parsed.rows.length} rows. Sprint F4 limit is ${MAX_ROWS}.`);
       }
 
       const { count: existingRows, error: existingRowsError } = await this.client
@@ -349,7 +373,7 @@ export class ImportService {
   async validateBatch(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
     requireImportWrite(auth);
     const batch = await this.getWritableBatch(auth, batchId);
-    requireInvoiceImportFileType(batch, 'validate');
+    requireSupportedImportBatch(batch, 'validate');
 
     if (batch.status !== 'Parsed' && batch.status !== 'Validated') {
       throw new ValidationError(`Only Parsed or Validated batches can be validated. Current status: ${batch.status}.`);
@@ -366,7 +390,7 @@ export class ImportService {
     const errorSummary: Array<Record<string, unknown>> = [];
 
     for (const row of rows) {
-      const result = await this.validateRow(auth, row.raw_data);
+      const result = await this.validateRow(auth, batch.import_type, row.raw_data);
       if (result.errors.length > 0) {
         errorRows += 1;
         errorSummary.push({ row: row.row_number, errors: result.errors });
@@ -404,7 +428,7 @@ export class ImportService {
   async executeDraftCreation(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
     requireImportWrite(auth);
     const batch = await this.getWritableBatch(auth, batchId);
-    requireInvoiceImportFileType(batch, 'execute');
+    requireSupportedImportBatch(batch, 'execute');
 
     if (batch.status !== 'Parsed' && batch.status !== 'Validated') {
       throw new ValidationError(`Only Parsed or Validated batches can be executed. Current status: ${batch.status}.`);
@@ -450,21 +474,42 @@ export class ImportService {
           matchedCustomerIds.add(resolved.customer.id);
         }
 
-        const invoiceData = {
-          ...row.mapped_data,
-          customer_id: resolved.customer.id,
-          customer_resolution: resolved.details,
-        };
-        await this.assertNoDuplicateReference(auth.companyId, resolved.customer.id, asString(invoiceData, 'reference_no'));
-        const header = validateCreateInvoice(invoiceData);
-        const lines = validateInvoiceLines(row.mapped_data.lines);
-        const invoice = await this.invoiceService.createInvoice(auth, header, lines);
+        let created: Invoice | Receipt;
+        let mappedData: Record<string, unknown>;
+
+        if (batch.import_type === 'invoice') {
+          mappedData = {
+            ...row.mapped_data,
+            customer_id: resolved.customer.id,
+            customer_resolution: resolved.details,
+          };
+          await this.assertNoDuplicateReference(auth.companyId, resolved.customer.id, asString(mappedData, 'reference_no'));
+          const header = validateCreateInvoice(mappedData);
+          const lines = validateInvoiceLines(row.mapped_data.lines);
+          created = await this.invoiceService.createInvoice(auth, header, lines);
+        } else {
+          const bankAccount = await this.resolveBankAccount(auth.companyId, row.raw_data);
+          mappedData = {
+            ...row.mapped_data,
+            customer_id: resolved.customer.id,
+            customer_resolution: resolved.details,
+            bank_account_id: bankAccount.bank_account_id,
+            bank_account_resolution: bankAccount,
+          };
+          const receiptInput = validateCreateReceipt(mappedData);
+          created = await this.receiptService.createReceipt(auth, receiptInput);
+        }
+
         createdCount += 1;
+
+        const rowPatch = batch.import_type === 'invoice'
+          ? { invoice_id: created.id, receipt_id: null }
+          : { invoice_id: null, receipt_id: created.id };
 
         await this.client.from('import_rows').update({
           status: 'Created',
-          invoice_id: invoice.id,
-          mapped_data: invoiceData,
+          ...rowPatch,
+          mapped_data: mappedData,
           validation_errors: null,
         }).eq('id', row.id);
       } catch (error) {
@@ -559,7 +604,13 @@ export class ImportService {
     return batch;
   }
 
-  private async validateRow(auth: AuthContext, raw: Record<string, unknown>): Promise<RowValidationResult> {
+  private async validateRow(auth: AuthContext, importType: ImportType, raw: Record<string, unknown>): Promise<RowValidationResult> {
+    return importType === 'receipt'
+      ? await this.validateReceiptRow(auth, raw)
+      : await this.validateInvoiceRow(auth, raw);
+  }
+
+  private async validateInvoiceRow(auth: AuthContext, raw: Record<string, unknown>): Promise<RowValidationResult> {
     const errors: Array<Record<string, unknown>> = [];
     let mappedData: Record<string, unknown> | undefined;
 
@@ -620,6 +671,67 @@ export class ImportService {
       if (referenceNo && customer) {
         await this.assertNoDuplicateReference(auth.companyId, customer.id, referenceNo);
       }
+    } catch (error) {
+      errors.push(...errorToRowErrors(error));
+    }
+
+    return { mappedData, errors };
+  }
+
+  private async validateReceiptRow(auth: AuthContext, raw: Record<string, unknown>): Promise<RowValidationResult> {
+    const errors: Array<Record<string, unknown>> = [];
+    let mappedData: Record<string, unknown> | undefined;
+
+    try {
+      const classification = await this.customerService.classifyImportCustomer(auth, {
+        customerCode: asString(raw, 'customer_code') || undefined,
+        customerName: asString(raw, 'customer_name') || undefined,
+        registrationNo: asString(raw, 'registration_no') || undefined,
+      });
+      const customer = classification.customer;
+      let customerInput: CreateCustomerRequest | undefined;
+
+      if (customer) {
+        await requireCustomerAccess(auth, customer.id);
+      } else {
+        customerInput = this.validateNewCustomerInput(raw);
+      }
+
+      const bankAccount = await this.resolveBankAccount(auth.companyId, raw);
+      const receiptDate = asString(raw, 'receipt_date');
+      const currency = (
+        asString(raw, 'currency')
+        || customer?.default_currency
+        || COUNTRY_DEFAULTS[customerInput!.bill_country]?.currency
+        || 'MYR'
+      ).toUpperCase();
+      const receiptAmount = parseNumber(asString(raw, 'amount'), 'amount');
+      const referenceNo = asString(raw, 'receipt_reference') || undefined;
+      const chequeDate = asString(raw, 'cheque_date') || undefined;
+      const valueDate = asString(raw, 'value_date') || undefined;
+      const remarks = asString(raw, 'remarks') || undefined;
+
+      mappedData = {
+        receipt_date: receiptDate,
+        customer_id: customer?.id,
+        customer_input: customerInput,
+        customer_resolution: this.toCustomerResolutionDetails(classification),
+        payment_method: asString(raw, 'payment_method'),
+        currency,
+        receipt_amount: receiptAmount,
+        bank_account_id: bankAccount.bank_account_id,
+        bank_account_resolution: bankAccount,
+        reference_no: referenceNo,
+        cheque_date: chequeDate,
+        value_date: valueDate,
+        remarks,
+        internal_remarks: 'Created by Sprint F4 Phase D receipt import draft-only flow',
+      };
+
+      validateCreateReceipt({
+        ...mappedData,
+        customer_id: customer?.id ?? NIL_UUID,
+      });
     } catch (error) {
       errors.push(...errorToRowErrors(error));
     }
@@ -710,6 +822,69 @@ export class ImportService {
       customer_code: classification.customer?.customer_id ?? null,
       customer_name: classification.customer?.customer_name ?? classification.normalizedCustomerName,
       matched_by: classification.matchedBy,
+    };
+  }
+
+  private async resolveBankAccount(companyId: string, raw: Record<string, unknown>): Promise<BankAccountResolutionDetails> {
+    const bankAccountId = asString(raw, 'bank_account_id');
+    const bankAccountCode = asString(raw, 'bank_account_code');
+
+    if (!bankAccountId && !bankAccountCode) {
+      throw new ValidationError('Either bank_account_id or bank_account_code is required for receipt import.', {
+        field: 'bank_account_id',
+      });
+    }
+
+    let bankAccount: BankAccount | null = null;
+    let matchedBy: BankAccountResolutionDetails['matched_by'] = 'bank_account_code';
+
+    if (bankAccountId) {
+      validateUUID(bankAccountId, 'bank_account_id');
+      bankAccount = await fetchById<BankAccount>(this.client, 'bank_accounts', bankAccountId);
+      matchedBy = 'bank_account_id';
+    } else {
+      const { data, error } = await this.client
+        .from('bank_accounts')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('account_no', bankAccountCode)
+        .limit(2);
+
+      if (error) throw new Error(`Failed to resolve bank_account_code: ${error.message}`);
+      if (!data || data.length === 0) {
+        throw new ValidationError(`Active bank_account_code "${bankAccountCode}" could not be resolved.`, {
+          field: 'bank_account_code',
+          bank_account_code: bankAccountCode,
+        });
+      }
+      if (data.length > 1) {
+        throw new ValidationError(`Multiple bank accounts found for bank_account_code "${bankAccountCode}". Use bank_account_id.`, {
+          field: 'bank_account_code',
+          bank_account_code: bankAccountCode,
+        });
+      }
+      bankAccount = data[0] as BankAccount;
+    }
+
+    if (bankAccount.company_id !== companyId) {
+      throw new NotFoundError('BankAccount', bankAccount.id);
+    }
+    if (!bankAccount.is_active) {
+      throw new ValidationError('Selected bank account is inactive.', { field: 'bank_account_id', bank_account_id: bankAccount.id });
+    }
+    if (bankAccountCode && bankAccount.account_no !== bankAccountCode) {
+      throw new ValidationError('bank_account_code conflicts with resolved bank_account_id.', {
+        field: 'bank_account_code',
+        bank_account_id: bankAccount.id,
+        bank_account_code: bankAccountCode,
+      });
+    }
+
+    return {
+      bank_account_id: bankAccount.id,
+      account_no: bankAccount.account_no,
+      bank_name: bankAccount.bank_name,
+      matched_by: matchedBy,
     };
   }
 

@@ -99,6 +99,8 @@ export interface ImportBatchResponse {
   rows: ImportRow[];
 }
 
+export type ImportType = "invoice" | "receipt";
+
 // ─── Step tracking ──────────────────────────────────────────────────────────
 
 export type ImportStep =
@@ -120,7 +122,7 @@ export const IMPORT_STEPS: { key: ImportStep; label: string; number: number }[] 
 
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
-export function useImport() {
+export function useImport(importType: ImportType = "invoice") {
   const api = useApi();
 
   const [step, setStep] = useState<ImportStep>("upload");
@@ -146,12 +148,13 @@ export function useImport() {
         }
         const fileType = ext === "xlsx" ? "xlsx" : "csv";
         const label = fileType === "xlsx" ? "Excel" : "CSV";
+        const noun = importType === "receipt" ? "Receipt" : "Invoice";
 
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("import_type", "invoice");
+        formData.append("import_type", importType);
         formData.append("file_type", fileType);
-        formData.append("batch_name", `${label} Import — ${file.name}`);
+        formData.append("batch_name", `${label} ${noun} Import — ${file.name}`);
 
         const res = await api.rawFetch("/imports/upload", {
           method: "POST",
@@ -188,7 +191,7 @@ export function useImport() {
         setIsLoading(false);
       }
     },
-    [api]
+    [api, importType]
   );
 
   /**
@@ -264,8 +267,9 @@ export function useImport() {
         setBatch(batchData);
         setRows(Array.isArray(executedRows) ? executedRows : []);
         setStep("result");
-        toast.success("Draft Invoices Created", {
-          description: `${batchData.created_count} draft invoices created`,
+        const noun = importType === "receipt" ? "receipts" : "invoices";
+        toast.success(importType === "receipt" ? "Draft Receipts Created" : "Draft Invoices Created", {
+          description: `${batchData.created_count} draft ${noun} created`,
         });
         return batchData;
       } catch (err) {
@@ -276,7 +280,7 @@ export function useImport() {
         setIsLoading(false);
       }
     },
-    [api]
+    [api, importType]
   );
 
   /**
