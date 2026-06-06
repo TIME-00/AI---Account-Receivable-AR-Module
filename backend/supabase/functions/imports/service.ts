@@ -18,6 +18,7 @@ import { validateCurrency, validateDate, validateUUID } from '../_shared/validat
 import type { BankAccount, Customer, CreateCustomerRequest, Invoice, PaginationParams, Receipt } from '../_shared/types.ts';
 import { InvoiceService } from '../invoices/service.ts';
 import { ReceiptService } from '../receipts/service.ts';
+import { AllocationService } from '../allocations/service.ts';
 import {
   validateCreateInvoice,
   validateInvoiceLines,
@@ -57,7 +58,7 @@ type ImportBatchStatus =
   | 'Failed'
   | 'Cancelled';
 
-type ImportRowStatus = 'Pending' | 'Valid' | 'Error' | 'Skipped' | 'Created';
+type ImportRowStatus = 'Pending' | 'Valid' | 'Error' | 'Skipped' | 'Created' | 'Posted' | 'Allocated' | 'Unmatched';
 
 interface ImportBatch {
   id: string;
@@ -68,6 +69,8 @@ interface ImportBatch {
   file_name: string;
   file_path: string | null;
   status: ImportBatchStatus;
+  auto_post: boolean;
+  auto_allocate: boolean;
   created_by: string | null;
 }
 
@@ -93,6 +96,10 @@ interface UploadInput {
 interface RowValidationResult {
   mappedData?: Record<string, unknown>;
   errors: Array<Record<string, unknown>>;
+}
+
+interface ExecuteImportOptions {
+  autoPost?: boolean;
 }
 
 interface CustomerResolutionDetails {
@@ -198,12 +205,14 @@ export class ImportService {
   private client: SupabaseClient;
   private invoiceService: InvoiceService;
   private receiptService: ReceiptService;
+  private allocationService: AllocationService;
   private customerService: CustomerService;
 
   constructor(client?: SupabaseClient) {
     this.client = client ?? getAdminClient();
     this.invoiceService = new InvoiceService(this.client);
     this.receiptService = new ReceiptService(this.client);
+    this.allocationService = new AllocationService(this.client);
     this.customerService = new CustomerService(this.client);
   }
 
@@ -359,6 +368,8 @@ export class ImportService {
         created_count: 0,
         matched_customers_count: 0,
         created_customers_count: 0,
+        posted_count: 0,
+        allocated_count: 0,
         error_summary: null,
       });
 
@@ -425,10 +436,22 @@ export class ImportService {
     return { batch: await this.getBatch(auth, batch.id), rows: await this.listRowsInternal(batch.id) };
   }
 
-  async executeDraftCreation(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
+  async executeDraftCreation(
+    auth: AuthContext,
+    batchId: string,
+    options: ExecuteImportOptions = {},
+  ): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
     requireImportWrite(auth);
     const batch = await this.getWritableBatch(auth, batchId);
     requireSupportedImportBatch(batch, 'execute');
+    const autoPost = options.autoPost === true;
+
+    if (autoPost && batch.import_type !== 'receipt') {
+      throw new ValidationError('auto_post is allowed only for receipt import batches.', {
+        import_type: batch.import_type,
+        auto_post: autoPost,
+      });
+    }
 
     if (batch.status !== 'Parsed' && batch.status !== 'Validated') {
       throw new ValidationError(`Only Parsed or Validated batches can be executed. Current status: ${batch.status}.`);
@@ -444,9 +467,15 @@ export class ImportService {
       rows = await this.listRowsInternal(batch.id);
     }
 
-    await this.updateBatch(batch.id, { status: 'Executing' });
+    await this.updateBatch(batch.id, {
+      status: 'Executing',
+      auto_post: autoPost,
+      auto_allocate: false,
+    });
 
     let createdCount = 0;
+    let postedCount = 0;
+    let allocatedCount = 0;
     const matchedCustomerIds = new Set<string>();
     const createdCustomerIds = new Set<string>();
     const resolvedCustomers = new Map<string, ResolvedImportCustomer>();
@@ -477,6 +506,9 @@ export class ImportService {
         let created: Invoice | Receipt;
         let mappedData: Record<string, unknown>;
 
+        let rowStatus: ImportRowStatus = 'Created';
+        const rowPatch = { invoice_id: null as string | null, receipt_id: null as string | null };
+
         if (batch.import_type === 'invoice') {
           mappedData = {
             ...row.mapped_data,
@@ -487,6 +519,7 @@ export class ImportService {
           const header = validateCreateInvoice(mappedData);
           const lines = validateInvoiceLines(row.mapped_data.lines);
           created = await this.invoiceService.createInvoice(auth, header, lines);
+          rowPatch.invoice_id = created.id;
         } else {
           const bankAccount = await this.resolveBankAccount(auth.companyId, row.raw_data);
           mappedData = {
@@ -498,16 +531,44 @@ export class ImportService {
           };
           const receiptInput = validateCreateReceipt(mappedData);
           created = await this.receiptService.createReceipt(auth, receiptInput);
+          rowPatch.receipt_id = created.id;
+
+          if (autoPost) {
+            try {
+              await this.receiptService.postReceipt(auth, created.id);
+              postedCount += 1;
+              rowStatus = 'Posted';
+              mappedData = {
+                ...mappedData,
+                posting_status: 'Posted',
+              };
+            } catch (postError) {
+              rowStatus = 'Created';
+              mappedData = {
+                ...mappedData,
+                posting_status: 'Error',
+                posting_error: this.errorMessage(postError),
+              };
+            }
+
+            if (rowStatus === 'Posted') {
+              const allocationOutcome = await this.allocateReceiptImportRow(
+                auth,
+                row.id,
+                created.id,
+                mappedData,
+              );
+              mappedData = allocationOutcome.mappedData;
+              rowStatus = allocationOutcome.status;
+              if (allocationOutcome.allocated) allocatedCount += 1;
+            }
+          }
         }
 
         createdCount += 1;
 
-        const rowPatch = batch.import_type === 'invoice'
-          ? { invoice_id: created.id, receipt_id: null }
-          : { invoice_id: null, receipt_id: created.id };
-
         await this.client.from('import_rows').update({
-          status: 'Created',
+          status: rowStatus,
           ...rowPatch,
           mapped_data: mappedData,
           validation_errors: null,
@@ -524,8 +585,17 @@ export class ImportService {
     }
 
     const finalRows = await this.listRowsInternal(batch.id);
-    const finalValidRows = finalRows.filter((row) => row.status === 'Valid' || row.status === 'Created').length;
-    const finalErrorRows = finalRows.filter((row) => row.status === 'Error').length;
+    const finalValidRows = finalRows.filter((row) =>
+      row.status === 'Valid'
+      || row.status === 'Created'
+      || row.status === 'Posted'
+      || row.status === 'Allocated'
+    ).length;
+    const finalErrorRows = finalRows.filter((row) =>
+      row.status === 'Error'
+      || row.status === 'Unmatched'
+      || this.rowHasPostingError(row)
+    ).length;
 
     await this.updateBatch(batch.id, {
       status: 'Completed',
@@ -535,8 +605,8 @@ export class ImportService {
       created_count: createdCount,
       matched_customers_count: matchedCustomerIds.size,
       created_customers_count: createdCustomerIds.size,
-      posted_count: 0,
-      allocated_count: 0,
+      posted_count: postedCount,
+      allocated_count: allocatedCount,
       error_summary: errorSummary.length > 0 ? errorSummary : null,
     });
 
@@ -710,6 +780,29 @@ export class ImportService {
       const chequeDate = asString(raw, 'cheque_date') || undefined;
       const valueDate = asString(raw, 'value_date') || undefined;
       const remarks = asString(raw, 'remarks') || undefined;
+      const invoiceReference = asString(raw, 'invoice_reference') || undefined;
+      const allocationAmountText = asString(raw, 'allocation_amount');
+      const allocationAmount = allocationAmountText
+        ? parseNumber(allocationAmountText, 'allocation_amount')
+        : undefined;
+
+      if (!invoiceReference && allocationAmount !== undefined) {
+        throw new ValidationError('allocation_amount requires invoice_reference.', {
+          field: 'allocation_amount',
+        });
+      }
+      if (allocationAmount !== undefined && allocationAmount <= 0) {
+        throw new ValidationError('allocation_amount must be greater than 0.', {
+          field: 'allocation_amount',
+        });
+      }
+      if (allocationAmount !== undefined && allocationAmount > receiptAmount + 0.01) {
+        throw new ValidationError('allocation_amount cannot exceed receipt amount.', {
+          field: 'allocation_amount',
+          allocation_amount: allocationAmount,
+          receipt_amount: receiptAmount,
+        });
+      }
 
       mappedData = {
         receipt_date: receiptDate,
@@ -725,7 +818,10 @@ export class ImportService {
         cheque_date: chequeDate,
         value_date: valueDate,
         remarks,
-        internal_remarks: 'Created by Sprint F4 Phase D receipt import draft-only flow',
+        invoice_reference: invoiceReference,
+        allocation_amount: allocationAmount,
+        allocation_status: invoiceReference ? 'Pending' : 'None',
+        internal_remarks: 'Created by Sprint F4 receipt import flow',
       };
 
       validateCreateReceipt({
@@ -886,6 +982,148 @@ export class ImportService {
       bank_name: bankAccount.bank_name,
       matched_by: matchedBy,
     };
+  }
+
+  private async allocateReceiptImportRow(
+    auth: AuthContext,
+    importRowId: string,
+    receiptId: string,
+    mappedData: Record<string, unknown>,
+  ): Promise<{ status: ImportRowStatus; mappedData: Record<string, unknown>; allocated: boolean }> {
+    const invoiceReference = asString(mappedData, 'invoice_reference');
+
+    if (!invoiceReference) {
+      return {
+        status: 'Posted',
+        allocated: false,
+        mappedData: {
+          ...mappedData,
+          allocation_status: 'Skipped',
+          allocation_error: 'No invoice_reference provided.',
+        },
+      };
+    }
+
+    try {
+      const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
+      const invoice = await this.resolveAllocationInvoice(
+        auth.companyId,
+        receipt.customer_id,
+        receipt.currency,
+        invoiceReference,
+      );
+      const explicitAmount = mappedData.allocation_amount !== undefined
+        ? Number(mappedData.allocation_amount)
+        : undefined;
+      const allocationAmount = explicitAmount ?? Math.min(Number(receipt.unallocated_amount), Number(invoice.outstanding));
+
+      if (!Number.isFinite(allocationAmount) || allocationAmount <= 0) {
+        throw new ValidationError('allocation_amount must be greater than 0.', {
+          field: 'allocation_amount',
+          invoice_reference: invoiceReference,
+        });
+      }
+
+      const allocations = await this.allocationService.manualAllocate(auth, {
+        receipt_id: receiptId,
+        allocations: [{
+          invoice_id: invoice.id,
+          amount: allocationAmount,
+        }],
+      });
+
+      const allocation = allocations[0];
+      if (!allocation?.id) {
+        throw new Error('Allocation RPC completed but no allocation_details row was returned.');
+      }
+
+      const allocatedMappedData: Record<string, unknown> = {
+        ...mappedData,
+        allocation_status: 'Allocated',
+        allocation_id: allocation.id,
+        invoice_id: invoice.id,
+        invoice_no: invoice.invoice_no,
+        allocated_amount: allocation.allocated_amount,
+      };
+
+      const { error: auditError } = await this.client.from('import_row_allocations').insert({
+        import_row_id: importRowId,
+        allocation_id: allocation.id,
+        invoice_id: invoice.id,
+        allocated_amount: allocation.allocated_amount,
+      });
+      if (auditError) {
+        return {
+          status: 'Allocated',
+          allocated: true,
+          mappedData: {
+            ...allocatedMappedData,
+            allocation_evidence_status: 'Error',
+            allocation_evidence_error: `Failed to record import allocation evidence: ${auditError.message}`,
+          },
+        };
+      }
+
+      return {
+        status: 'Allocated',
+        allocated: true,
+        mappedData: {
+          ...allocatedMappedData,
+          allocation_evidence_status: 'Recorded',
+        },
+      };
+    } catch (error) {
+      return {
+        status: 'Unmatched',
+        allocated: false,
+        mappedData: {
+          ...mappedData,
+          allocation_status: 'Error',
+          allocation_error: this.errorMessage(error),
+        },
+      };
+    }
+  }
+
+  private async resolveAllocationInvoice(
+    companyId: string,
+    customerId: string,
+    currency: string,
+    invoiceReference: string,
+  ): Promise<Invoice> {
+    const { data, error } = await this.client
+      .from('invoices')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('invoice_no', invoiceReference)
+      .eq('customer_id', customerId)
+      .eq('currency', currency)
+      .in('status', ['Open', 'Overdue', 'Partially Paid'])
+      .limit(2);
+
+    if (error) throw new Error(`Failed to resolve invoice_reference: ${error.message}`);
+    if (!data || data.length === 0) {
+      throw new ValidationError(`No matching open invoice found for invoice_reference "${invoiceReference}".`, {
+        field: 'invoice_reference',
+        invoice_reference: invoiceReference,
+      });
+    }
+    if (data.length > 1) {
+      throw new ValidationError(`Multiple open invoices matched invoice_reference "${invoiceReference}".`, {
+        field: 'invoice_reference',
+        invoice_reference: invoiceReference,
+      });
+    }
+
+    return data[0] as Invoice;
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : 'Unknown error';
+  }
+
+  private rowHasPostingError(row: ImportRow): boolean {
+    return Boolean(row.mapped_data && row.mapped_data.posting_status === 'Error');
   }
 
   private async assertNoDuplicateReference(

@@ -56,11 +56,13 @@ const RECEIPT_COLUMNS = [
   { name: "amount", required: true, description: "Positive receipt amount." },
   { name: "cheque_date", required: false, description: "Required only when payment_method is CHQ. Do not fake this date." },
   { name: "remarks", required: false, description: "Optional internal receipt remarks." },
+  { name: "invoice_reference", required: false, description: "Optional exact invoice_no for one-receipt-to-one-invoice allocation." },
+  { name: "allocation_amount", required: false, description: "Optional allocation amount. Requires invoice_reference and cannot exceed receipt amount." },
 ];
 
-const SAMPLE_CSV = `customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,receipt_date,currency,receipt_reference,payment_method,bank_account_code,bank_account_id,amount,cheque_date,remarks
-CUST-001,,,,,,,,,,,2026-05-28,SGD,TT-REF-001,TT,5141-2200-0001,,100.00,,Bank transfer receipt
-,New Receipt Client Pte Ltd,202612346N,10 Anson Road,Downtown Core,Central,079903,SG,Alex Tan,+6561234567,alex.receipts@example.com,2026-05-28,SGD,CHQ-0001,CHQ,5141-2200-0001,,250.00,2026-05-27,Cheque receipt`;
+const SAMPLE_CSV = `customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,receipt_date,currency,receipt_reference,payment_method,bank_account_code,bank_account_id,amount,cheque_date,remarks,invoice_reference,allocation_amount
+CUST-001,,,,,,,,,,,2026-05-28,SGD,TT-REF-001,TT,5141-2200-0001,,100.00,,Bank transfer receipt,INV-202605-00001,100.00
+,New Receipt Client Pte Ltd,202612346N,10 Anson Road,Downtown Core,Central,079903,SG,Alex Tan,+6561234567,alex.receipts@example.com,2026-05-28,SGD,CHQ-0001,CHQ,5141-2200-0001,,250.00,2026-05-27,Cheque receipt,,`;
 
 const ROW_STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   Pending: { bg: "bg-slate-100", text: "text-slate-600", dot: "bg-slate-400" },
@@ -68,6 +70,8 @@ const ROW_STATUS_COLORS: Record<string, { bg: string; text: string; dot: string 
   Error: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500" },
   Skipped: { bg: "bg-gray-100", text: "text-gray-500", dot: "bg-gray-400" },
   Created: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500" },
+  Posted: { bg: "bg-purple-50", text: "text-purple-700", dot: "bg-purple-500" },
+  Allocated: { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
   Unmatched: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-500" },
 };
 
@@ -90,6 +94,7 @@ export default function ReceiptImportPage() {
   const [dragActive, setDragActive] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [autoPost, setAutoPost] = useState(false);
   const currentStepIndex = IMPORT_STEPS.findIndex((s) => s.key === step);
 
   const handleFile = useCallback(
@@ -143,10 +148,10 @@ export default function ReceiptImportPage() {
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-500" />
           <div className="text-sm">
-            <p className="font-semibold text-amber-800">Draft Receipt Creation Only</p>
+            <p className="font-semibold text-amber-800">Draft by Default, Optional Auto-Post</p>
             <ul className="mt-1 space-y-0.5 text-amber-700">
-              <li>Created receipts remain <strong>Draft</strong>.</li>
-              <li>No posting, allocation, invoice matching, or journal entries are performed.</li>
+              <li>Default imports create <strong>Draft</strong> receipts only.</li>
+              <li>If Auto-Post & Allocate is explicitly enabled, receipts will be posted and exact invoice references may be allocated using verified financial RPCs.</li>
               <li>CSV and Excel (.xlsx) files are supported. PDF/Image/OCR are not part of this phase.</li>
             </ul>
           </div>
@@ -332,18 +337,34 @@ export default function ReceiptImportPage() {
                 <h2 className="text-lg font-semibold text-slate-800">Validation Complete</h2>
                 <p className="text-sm text-slate-500">Review results, then create draft receipts for valid rows.</p>
               </div>
+              <label className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <input
+                  type="checkbox"
+                  checked={autoPost}
+                  onChange={(e) => setAutoPost(e.target.checked)}
+                  className="h-4 w-4 rounded border-amber-300 text-brand-600"
+                />
+                Auto-Post & Allocate
+              </label>
               <LoadingButton
                 variant="primary"
                 size="md"
                 isLoading={isLoading}
-                loadingText="Creating Draft Receipts..."
+                loadingText={autoPost ? "Posting & Allocating..." : "Creating Draft Receipts..."}
                 disabled={batch.valid_rows === 0}
-                onClick={() => executeBatch(batch.id)}
+                onClick={() => executeBatch(batch.id, { autoPost })}
               >
                 <Zap className="h-4 w-4" />
-                Create {batch.valid_rows} Draft Receipt{batch.valid_rows !== 1 ? "s" : ""}
+                {autoPost
+                  ? `Create, Post & Allocate ${batch.valid_rows} Receipt${batch.valid_rows !== 1 ? "s" : ""}`
+                  : `Create ${batch.valid_rows} Draft Receipt${batch.valid_rows !== 1 ? "s" : ""}`}
               </LoadingButton>
             </div>
+            {autoPost && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Receipts will be posted immediately. Posted receipts with exact invoice references will be allocated. This creates financial entries through verified P1 RPCs and cannot be treated as a draft-only import.
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-3">
               <SummaryCard label="Valid Rows" value={batch.valid_rows} color="emerald" />
               <SummaryCard label="Error Rows" value={batch.error_rows} color="red" />
@@ -360,16 +381,16 @@ export default function ReceiptImportPage() {
                 <CheckCircle2 className="h-10 w-10 text-emerald-600" />
               </div>
               <h2 className="text-xl font-bold text-slate-800">Import Complete</h2>
-              <p className="mt-1 text-sm text-slate-500">Draft receipts have been created. They are unposted and unallocated.</p>
+              <p className="mt-1 text-sm text-slate-500">Import execution is complete. Review posted and allocated counts before continuing.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <SummaryCard label="Draft Receipts Created" value={batch.created_count} color="blue" />
               <SummaryCard label="Errors" value={batch.error_rows} color="red" />
+              <SummaryCard label="Posted" value={batch.posted_count} color="purple" />
+              <SummaryCard label="Allocated" value={batch.allocated_count} color="emerald" />
               <SummaryCard label="Matched Customers" value={batch.matched_customers_count} color="emerald" />
               <SummaryCard label="Created Customers" value={batch.created_customers_count} color="blue" />
-              <SummaryCard label="Posted" value={batch.posted_count} color="slate" suffix="always 0" />
-              <SummaryCard label="Allocated" value={batch.allocated_count} color="slate" suffix="always 0" />
             </div>
 
             <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
@@ -472,6 +493,7 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                   <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Customer Code</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Receipt Reference</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Amount</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Allocation</th>
                   <th className="min-w-[220px] px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Errors</th>
                 </>
               )}
@@ -508,6 +530,10 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                       <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-600">{resolution?.customer_code ?? "-"}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-700">{String(row.raw_data?.receipt_reference || "-")}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-700">{String(row.raw_data?.amount || "-")}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-700">
+                        {String(row.mapped_data?.allocation_status || "-")}
+                        {row.mapped_data?.invoice_no ? ` (${String(row.mapped_data.invoice_no)})` : ""}
+                      </td>
                       <td className="px-3 py-2">
                         {row.validation_errors?.length ? (
                           <div className="space-y-0.5">

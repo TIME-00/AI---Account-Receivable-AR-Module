@@ -256,12 +256,14 @@ export function useImport(importType: ImportType = "invoice") {
    * Step 4: Execute import — create draft invoices only (Phase A).
    */
   const executeBatch = useCallback(
-    async (batchId: string) => {
+    async (batchId: string, options?: { autoPost?: boolean }) => {
       setIsLoading(true);
       setError(null);
       try {
         // Backend returns { batch, rows } wrapper
-        const result = await api.post<ImportBatchResponse>(`/imports/${batchId}/execute`);
+        const result = await api.post<ImportBatchResponse>(`/imports/${batchId}/execute`, {
+          auto_post: options?.autoPost === true,
+        });
         const batchData = result.batch ?? (result as unknown as ImportBatch);
         const executedRows = result.rows ?? [];
         setBatch(batchData);

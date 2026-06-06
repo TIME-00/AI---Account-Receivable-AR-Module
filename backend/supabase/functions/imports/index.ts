@@ -95,7 +95,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (route === 'execute' && req.method === 'POST') {
       const { id } = params;
       validateUUID(id, 'batch_id');
-      const result = await service.executeDraftCreation(auth, id);
+      let body: Record<string, unknown> = {};
+      if (req.headers.get('Content-Type')?.includes('application/json')) {
+        const parsed = await req.json();
+        if (parsed && typeof parsed === 'object') {
+          body = parsed as Record<string, unknown>;
+        }
+      }
+      const result = await service.executeDraftCreation(auth, id, {
+        autoPost: body.auto_post === true,
+      });
       return jsonResponse(successResponse(result));
     }
 
