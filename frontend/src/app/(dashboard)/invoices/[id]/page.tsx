@@ -13,6 +13,7 @@ import { useInvoice, usePostInvoice, useCancelInvoice } from "@/hooks/use-invoic
 import { useUserRole } from "@/hooks/use-user-role";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
+import { AllocationHistoryTable } from "@/components/allocation-history-table";
 import { formatCurrency, formatAmount, formatDate, cn } from "@/lib/utils";
 import {
   FileText, ChevronRight, Send, XCircle, ArrowLeft,
@@ -323,6 +324,15 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       </div>
+
+      <AllocationHistoryTable
+        invoiceId={id}
+        showReceiptColumn
+        showInvoiceColumn={false}
+        maxRows={8}
+        title="Payment Allocations"
+        emptyMessage="No payments allocated yet."
+      />
 
       {/* Remarks */}
       {(invoice.internal_remarks || invoice.invoice_remarks) && (

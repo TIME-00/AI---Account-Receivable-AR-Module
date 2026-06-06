@@ -7,9 +7,82 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
-import type { Receipt, Invoice, AllocationDetail, Customer } from "@/types";
+import type {
+  APIResponse,
+  Receipt,
+  Invoice,
+  AllocationDetail,
+  AllocationDetailFull,
+  AllocationMethod,
+  AllocationStatus,
+  Customer,
+} from "@/types";
 import type { AllocationReceipt, AllocationInvoice } from "@/hooks/use-allocation-logic";
 import { filterVisibleCustomerRecords } from "@/lib/customer-visibility";
+
+interface UseAllocationsOptions {
+  receiptId?: string;
+  invoiceId?: string;
+  status?: AllocationStatus | "All";
+  method?: AllocationMethod | "All";
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AllocationListResult {
+  allocations: AllocationDetailFull[];
+  meta: {
+    total: number;
+    page: number;
+    page_size: number;
+  };
+}
+
+export function useAllocations(options: UseAllocationsOptions = {}) {
+  const api = useApi();
+  const {
+    receiptId,
+    invoiceId,
+    status = "All",
+    method = "All",
+    page = 1,
+    pageSize = 10,
+  } = options;
+
+  return useQuery({
+    queryKey: ["allocations", "history", receiptId, invoiceId, status, method, page, pageSize],
+    queryFn: async (): Promise<AllocationListResult> => {
+      const response = await api.rawFetch("/allocations", {
+        method: "GET",
+      }, {
+        silent: true,
+        params: {
+          receipt_id: receiptId,
+          invoice_id: invoiceId,
+          status: status === "All" ? undefined : status,
+          method: method === "All" ? undefined : method,
+          page,
+          page_size: pageSize,
+        },
+      });
+
+      const json = await response.json() as APIResponse<AllocationDetailFull[]>;
+      if (!response.ok || !json.success || json.error) {
+        throw new Error(json.error?.message ?? `Failed to fetch allocations: HTTP ${response.status}`);
+      }
+
+      return {
+        allocations: json.data ?? [],
+        meta: {
+          total: json.meta?.total ?? (json.data?.length ?? 0),
+          page: json.meta?.page ?? page,
+          page_size: json.meta?.page_size ?? pageSize,
+        },
+      };
+    },
+    staleTime: 30_000,
+  });
+}
 
 // ─── Query: Fetch Posted Receipts with unallocated balance ──────────────────
 

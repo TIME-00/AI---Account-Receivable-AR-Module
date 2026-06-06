@@ -13,11 +13,12 @@ import { useReceipt, useCancelReceipt } from "@/hooks/use-receipts";
 import { useUserRole } from "@/hooks/use-user-role";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
+import { AllocationHistoryTable } from "@/components/allocation-history-table";
 import { formatCurrency, formatAmount, formatDate, pct, cn } from "@/lib/utils";
 import { PAYMENT_METHOD_NAMES } from "@/types";
 import {
   Wallet, ChevronRight, XCircle, ArrowLeft, AlertCircle,
-  Banknote, PiggyBank, CreditCard, MessageSquare, BookOpen, ListChecks,
+  Banknote, PiggyBank, CreditCard, MessageSquare, BookOpen,
 } from "lucide-react";
 
 export default function ReceiptDetailPage() {
@@ -228,31 +229,14 @@ export default function ReceiptDetailPage() {
         </div>
       </div>
 
-      {/* Allocation History */}
-      <div className="glass-card overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-5 py-3">
-          <ListChecks className="h-4 w-4 text-slate-500" />
-          <h2 className="text-sm font-semibold text-slate-700">Allocation History</h2>
-        </div>
-        <div className="flex flex-col items-center justify-center py-12 text-center px-6">
-          <ListChecks className="h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500">
-            Allocation details are shown on the Allocation Wizard page.
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            Navigate to the Allocation page to view or manage allocations for this receipt.
-          </p>
-          {/* TODO: When allocation detail API is available, show linked invoices here */}
-          {receipt.status !== "Draft" && receipt.allocated_amount > 0 && (
-            <Link
-              href="/allocations"
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 transition-colors"
-            >
-              View Allocations
-            </Link>
-          )}
-        </div>
-      </div>
+      <AllocationHistoryTable
+        receiptId={id}
+        showReceiptColumn={false}
+        showInvoiceColumn
+        maxRows={8}
+        title="Allocation Details"
+        emptyMessage="No allocations yet."
+      />
 
       {/* Remarks */}
       {receipt.remarks && (

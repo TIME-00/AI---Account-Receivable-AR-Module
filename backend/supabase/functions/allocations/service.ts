@@ -16,6 +16,7 @@ import {
   BusinessError,
   NotFoundError,
   BRErrors,
+  AuthorizationError,
 } from '../_shared/errors.ts';
 import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
@@ -28,6 +29,8 @@ import type {
   AllocationDetail,
   InvoiceStatus,
   PaginationParams,
+  AllocationMethod,
+  AllocationStatus,
 } from '../_shared/types.ts';
 import { roundTo2 } from '../invoices/calculator.ts';
 import { allocateFIFO, allocateAmountMatch, calculateForexGainLoss } from './algorithms.ts';
@@ -54,6 +57,23 @@ export interface AutoAllocationInput {
 export interface ReverseAllocationInput {
   allocation_id: string;
   reason: string;
+}
+
+export interface AllocationDetailFull extends AllocationDetail {
+  receipt_no: string;
+  invoice_no: string;
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  receipt_customer_name: string;
+  invoice_customer_name: string;
+  receipt_amount: number;
+  receipt_currency: string;
+  receipt_allocated_amount: number;
+  receipt_unallocated_amount: number;
+  invoice_total_amount: number;
+  invoice_outstanding: number;
+  invoice_due_date: string | null;
 }
 
 // ─── Allocation Service ─────────────────────────────────────────────────────
@@ -272,18 +292,106 @@ export class AllocationService {
   // ════════════════════════════════════════════════════════════════════════
 
   async listAllocations(
-    _auth: AuthContext,
+    auth: AuthContext,
     filters: Record<string, string | undefined>,
     pagination: PaginationParams,
-  ): Promise<{ allocations: AllocationDetail[]; total: number }> {
+  ): Promise<{ allocations: AllocationDetailFull[]; total: number }> {
+    const allowedReadRoles = ['AR Clerk', 'AR Supervisor', 'Finance Manager', 'Auditor'];
+    const hasReadRole = auth.roles.some(role => allowedReadRoles.includes(role));
+    if (!hasReadRole) {
+      throw new AuthorizationError(
+        'Allocation history requires AR Clerk, AR Supervisor, Finance Manager, or Auditor access.',
+        { user_roles: auth.roles },
+      );
+    }
+
+    const hasFullCustomerRead = auth.roles.some(role =>
+      ['AR Supervisor', 'Finance Manager', 'Auditor'].includes(role)
+    );
+
+    let allowedCustomerIds: string[] | null = null;
+    if (!hasFullCustomerRead) {
+      const { data: assignments, error: assignmentError } = await this.client
+        .from('user_customer_assignments')
+        .select('customer_id')
+        .eq('user_id', auth.userId)
+        .eq('company_id', auth.companyId)
+        .eq('is_active', true);
+
+      if (assignmentError) {
+        throw new Error(`Failed to fetch customer assignments: ${assignmentError.message}`);
+      }
+
+      allowedCustomerIds = (assignments ?? []).map((row: { customer_id: string }) => row.customer_id);
+      if (allowedCustomerIds.length === 0) {
+        return { allocations: [], total: 0 };
+      }
+    }
+
+    let customerQuery = this.client
+      .from('customers')
+      .select('id, customer_id, customer_name')
+      .eq('company_id', auth.companyId)
+      .eq('is_deleted', false)
+      .eq('is_hidden', false);
+
+    if (allowedCustomerIds) {
+      customerQuery = customerQuery.in('id', allowedCustomerIds);
+    }
+
+    const { data: customers, error: customerError } = await customerQuery;
+    if (customerError) throw new Error(`Failed to fetch allocation customers: ${customerError.message}`);
+
+    const visibleCustomers = (customers ?? []) as Array<{ id: string; customer_id: string; customer_name: string }>;
+    if (visibleCustomers.length === 0) {
+      return { allocations: [], total: 0 };
+    }
+
+    const customerById = new Map(visibleCustomers.map(customer => [customer.id, customer]));
+    const visibleCustomerIds = visibleCustomers.map(customer => customer.id);
+
+    let receiptQuery = this.client
+      .from('receipts')
+      .select('id, receipt_no, customer_id, customer_name, receipt_amount, currency, allocated_amount, unallocated_amount')
+      .eq('company_id', auth.companyId)
+      .in('customer_id', visibleCustomerIds);
+
+    if (filters.receipt_id) {
+      validateUUID(filters.receipt_id, 'receipt_id');
+      receiptQuery = receiptQuery.eq('id', filters.receipt_id);
+    }
+
+    const { data: receipts, error: receiptError } = await receiptQuery;
+    if (receiptError) throw new Error(`Failed to fetch allocation receipts: ${receiptError.message}`);
+
+    const scopedReceipts = (receipts ?? []) as Array<{
+      id: string;
+      receipt_no: string;
+      customer_id: string;
+      customer_name: string;
+      receipt_amount: number;
+      currency: string;
+      allocated_amount: number;
+      unallocated_amount: number;
+    }>;
+    if (scopedReceipts.length === 0) {
+      return { allocations: [], total: 0 };
+    }
+
+    const receiptById = new Map(scopedReceipts.map(receipt => [receipt.id, receipt]));
+    const receiptIds = scopedReceipts.map(receipt => receipt.id);
+
     let query = this.client
       .from('allocation_details')
       .select('*', { count: 'exact' });
 
-    if (filters.receipt_id) query = query.eq('receipt_id', filters.receipt_id);
-    if (filters.invoice_id) query = query.eq('invoice_id', filters.invoice_id);
-    if (filters.status) query = query.eq('status', filters.status);
-    if (filters.method) query = query.eq('allocation_method', filters.method);
+    query = query.in('receipt_id', receiptIds);
+    if (filters.invoice_id) {
+      validateUUID(filters.invoice_id, 'invoice_id');
+      query = query.eq('invoice_id', filters.invoice_id);
+    }
+    if (filters.status) query = query.eq('status', filters.status as AllocationStatus);
+    if (filters.method) query = query.eq('allocation_method', filters.method as AllocationMethod);
 
     const from = (pagination.page - 1) * pagination.page_size;
     const to = from + pagination.page_size - 1;
@@ -291,7 +399,64 @@ export class AllocationService {
 
     const { data, error, count } = await query;
     if (error) throw new Error(`Failed to list allocations: ${error.message}`);
-    return { allocations: (data ?? []) as AllocationDetail[], total: count ?? 0 };
+
+    const allocationRows = (data ?? []) as AllocationDetail[];
+    if (allocationRows.length === 0) {
+      return { allocations: [], total: count ?? 0 };
+    }
+
+    const invoiceIds = [...new Set(allocationRows.map(allocation => allocation.invoice_id))];
+    const { data: invoices, error: invoiceError } = await this.client
+      .from('invoices')
+      .select('id, invoice_no, customer_id, customer_name, total_amount, outstanding, due_date')
+      .eq('company_id', auth.companyId)
+      .in('customer_id', visibleCustomerIds)
+      .in('id', invoiceIds);
+
+    if (invoiceError) throw new Error(`Failed to fetch allocation invoices: ${invoiceError.message}`);
+
+    const invoiceById = new Map(
+      ((invoices ?? []) as Array<{
+        id: string;
+        invoice_no: string;
+        customer_id: string;
+        customer_name: string;
+        total_amount: number;
+        outstanding: number;
+        due_date: string | null;
+      }>).map(invoice => [invoice.id, invoice]),
+    );
+
+    const allocations = allocationRows
+      .map((allocation): AllocationDetailFull | null => {
+        const receipt = receiptById.get(allocation.receipt_id);
+        const invoice = invoiceById.get(allocation.invoice_id);
+        if (!receipt || !invoice || receipt.customer_id !== invoice.customer_id) return null;
+
+        const customer = customerById.get(receipt.customer_id);
+        if (!customer) return null;
+
+        return {
+          ...allocation,
+          receipt_no: receipt.receipt_no,
+          invoice_no: invoice.invoice_no,
+          customer_id: receipt.customer_id,
+          customer_code: customer.customer_id,
+          customer_name: receipt.customer_name || customer.customer_name,
+          receipt_customer_name: receipt.customer_name || customer.customer_name,
+          invoice_customer_name: invoice.customer_name || customer.customer_name,
+          receipt_amount: Number(receipt.receipt_amount),
+          receipt_currency: receipt.currency,
+          receipt_allocated_amount: Number(receipt.allocated_amount),
+          receipt_unallocated_amount: Number(receipt.unallocated_amount),
+          invoice_total_amount: Number(invoice.total_amount),
+          invoice_outstanding: Number(invoice.outstanding),
+          invoice_due_date: invoice.due_date,
+        };
+      })
+      .filter((allocation): allocation is AllocationDetailFull => allocation !== null);
+
+    return { allocations, total: count ?? 0 };
   }
 
   // ════════════════════════════════════════════════════════════════════════

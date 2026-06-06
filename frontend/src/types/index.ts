@@ -245,6 +245,23 @@ export interface AllocationDetail {
   status: AllocationStatus;
 }
 
+export interface AllocationDetailFull extends AllocationDetail {
+  receipt_no: string;
+  invoice_no: string;
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  receipt_customer_name: string;
+  invoice_customer_name: string;
+  receipt_amount: number;
+  receipt_currency: string;
+  receipt_allocated_amount: number;
+  receipt_unallocated_amount: number;
+  invoice_total_amount: number;
+  invoice_outstanding: number;
+  invoice_due_date: string | null;
+}
+
 // ─── Journal Entry ──────────────────────────────────────────────────────────
 
 export interface JournalEntry {
