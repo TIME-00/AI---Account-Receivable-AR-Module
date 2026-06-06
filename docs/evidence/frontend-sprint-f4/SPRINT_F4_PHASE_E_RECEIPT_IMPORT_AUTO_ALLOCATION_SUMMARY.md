@@ -58,15 +58,76 @@ No failed or skipped allocation row is inserted into `import_row_allocations`.
 
 ## Smoke Test Checklist
 
-- `auto_post=false` keeps imported receipts Draft.
-- `auto_post=true` with no `invoice_reference` posts receipts only.
-- `auto_post=true` with valid `invoice_reference` posts and allocates.
-- invalid invoice references become `Unmatched`.
-- wrong-customer invoice references do not allocate.
-- allocation amount without invoice reference is rejected before financial mutation.
-- allocation amount greater than invoice outstanding is rejected by validation/RPC.
-- successful allocations create `import_row_allocations` rows.
-- invoice import `auto_post=true` is blocked.
+- [x] `auto_post=false` keeps imported receipts Draft.
+- [x] `auto_post=true` with no `invoice_reference` posts receipts only.
+- [x] `auto_post=true` with valid `invoice_reference` posts and allocates.
+- [x] invalid invoice references become `Unmatched`.
+- [x] wrong-customer invoice references do not allocate.
+- [x] allocation amount without invoice reference is rejected before financial mutation.
+- [x] allocation amount greater than invoice outstanding is rejected by validation/RPC.
+- [x] successful allocations create `import_row_allocations` rows.
+- [x] invoice import `auto_post=true` is blocked.
+
+## Production Smoke Test Result
+
+**Date**: 2026-06-07  
+**Status**: ✅ Passed  
+**Environment**: Production
+
+### Batch Result
+
+| Counter | Value |
+|---------|-------|
+| Draft Receipts Created | 1 |
+| Errors | 0 |
+| Posted | 1 |
+| Allocated | 1 |
+| Matched Customers | 1 |
+| Created Customers | 0 |
+
+### Imported Receipt
+
+| Field | Value |
+|-------|-------|
+| `receipt_no` | RCT-202606-00006 |
+| `status` | Fully Allocated |
+| `receipt_amount` | 1.00 |
+| `allocated_amount` | 1.00 |
+| `unallocated_amount` | 0.00 |
+| `posted_at` | Not null (posted successfully) |
+
+### Allocation Details
+
+| Field | Value |
+|-------|-------|
+| `allocation_details` row | Exists |
+| `allocated_amount` | 1.00 |
+| `receipt_no` | RCT-202606-00006 |
+| `invoice_no` | DN-202606-00001 |
+
+### Invoice After Allocation
+
+| Field | Value |
+|-------|-------|
+| `invoice_no` | DN-202606-00001 |
+| `status` | Partially Paid |
+| `total_amount` | 2000.00 |
+| `outstanding` | 1999.00 |
+
+The invoice outstanding decreased by the allocation amount (2000.00 − 1.00 = 1999.00), confirming that `allocate_receipt` RPC correctly updated the invoice balance.
+
+### Frontend Verification
+
+| Check | Result |
+|-------|--------|
+| Receipt page shows RCT-202606-00006 | ✅ Visible as Fully Allocated |
+| Allocation progress bar | ✅ Shows 100% |
+| Applied amount | 1.00 |
+| Available (unallocated) amount | 0.00 |
+
+### Allocation Wizard Behavior
+
+The Allocation Wizard correctly excludes RCT-202606-00006 from manual allocation because its `unallocated_amount = 0.00`. Fully allocated receipts are no longer eligible for further allocation, consistent with the `allocate_receipt` RPC precondition check (`unallocated_amount > 0`).
 
 ## Safety Confirmation
 
@@ -76,4 +137,12 @@ Phase E does not use `AllocationService.autoAllocate()`.
 
 Phase E does not implement FIFO, AmountMatch, fuzzy matching, discounts, one receipt to many invoices, PDF/Image/OCR, or direct financial table mutation.
 
-No production deployment has been performed as part of local implementation.
+## Production Status
+
+✅ **Phase E production smoke test passed.** The receipt import auto-allocation feature is deployed, verified, and ready for use.
+
+All financial mutations flowed through verified services and P1 RPCs:
+- `ReceiptService.createReceipt()` → Draft receipt
+- `ReceiptService.postReceipt()` → `post_receipt` RPC → Posted receipt + receipt JE
+- `AllocationService.manualAllocate()` → `allocate_receipt` RPC → Allocation details + invoice balance update
+
