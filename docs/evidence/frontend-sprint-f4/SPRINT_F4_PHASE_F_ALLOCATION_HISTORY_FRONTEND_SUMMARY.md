@@ -59,12 +59,55 @@ Completed:
 - `git diff --check`
 - no frontend `supabase.from` direct table query found
 
-Pending before staging sign-off:
-- staging deploy of `allocations` Edge Function
-- API smoke test for `GET /allocations`
-- role smoke tests for Auditor, System Admin, and AR Clerk assignment filtering
-- hidden customer allocation exclusion smoke test
-- frontend smoke test on Allocation Wizard, Receipt Detail, and Invoice Detail
+## Production Deployment
+
+**Date**: 2026-06-08
+**Commit**: `0e82494`
+**Status**: ✅ Deployed to Vercel production
+
+## Production Smoke Test Result
+
+**Status**: ✅ Passed
+
+### Allocation Wizard
+
+| Check | Result |
+|-------|--------|
+| Allocation History table renders | ✅ Placeholder removed, real table displayed |
+| RCT-202606-00006 linked to DN-202606-00001 shown | ✅ Visible in allocation history |
+
+### Receipt Detail Page
+
+| Check | Result |
+|-------|--------|
+| Allocation Details section renders | ✅ Shows linked invoice allocation details |
+| RCT-202606-00006 shows linked invoice DN-202606-00001 | ✅ Allocated amount and date displayed |
+
+### Invoice Detail Page
+
+| Check | Result |
+|-------|--------|
+| Payment Allocations section renders | ✅ Shows linked receipt/payment allocation details |
+| DN-202606-00001 shows linked receipt RCT-202606-00006 | ✅ Receipt amount and allocation visible |
+
+### Allocation Wizard Behavior
+
+| Check | Result |
+|-------|--------|
+| Fully allocated receipt excluded from allocation candidates | ✅ RCT-202606-00006 not shown (unallocated_amount = 0.00) |
+
+### Hidden Customer Filtering
+
+| Check | Result |
+|-------|--------|
+| Hidden customer allocations not displayed | ✅ Verified — hidden customer allocation records excluded |
+
+### Read-Only Confirmation
+
+| Check | Result |
+|-------|--------|
+| No mutation controls added | ✅ No create/reverse/auto-allocate buttons present |
+| Phase F is read-only display only | ✅ Only `GET /allocations` called |
 
 ## Known Limitations
 
