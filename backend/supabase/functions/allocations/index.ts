@@ -69,17 +69,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // ── Auto allocation ──
     if (route === 'auto' && req.method === 'POST') {
-      const body = await parseRequestBody(req) as Record<string, unknown>;
-      const receipt_id = requireString(body.receipt_id, 'receipt_id');
-      validateUUID(receipt_id, 'receipt_id');
-      const method = String(body.method ?? 'FIFO');
-      if (method !== 'FIFO' && method !== 'AmountMatch') {
-        throw new ValidationError(
-          'method must be "FIFO" or "AmountMatch".'
-        );
-      }
-      const result = await service.autoAllocate(auth, { receipt_id, method });
-      return jsonResponse(successResponse(result), 201);
+      return jsonResponse({
+        success: false,
+        error: {
+          code: 'AUTO_ALLOCATION_DISABLED',
+          message: 'Automatic allocation route is disabled until reviewed. Use POST /allocations/manual for verified allocation flows.',
+        },
+      }, 403);
     }
 
     // ── Preview auto allocation (GET — no side effects) ──

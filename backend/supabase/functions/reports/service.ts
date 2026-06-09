@@ -81,6 +81,16 @@ export class ReportService {
     this.client = client ?? getAdminClient();
   }
 
+  private async getReadableVisibleCustomerIds(auth: AuthContext): Promise<string[]> {
+    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    if (visibleCustomerIds.length === 0) return [];
+
+    const allowedCustomerIds = await getCustomerAccessFilter(auth);
+    if (allowedCustomerIds === null) return visibleCustomerIds;
+
+    return visibleCustomerIds.filter(id => allowedCustomerIds.includes(id));
+  }
+
   // ════════════════════════════════════════════════════════════════════════
   // AGING REPORT — SUMMARY (PRD Part 4 §2.1)
   // ════════════════════════════════════════════════════════════════════════
@@ -95,7 +105,7 @@ export class ReportService {
   ): Promise<ARSummary> {
     requireRole(auth, 'AR Clerk');
     const refDate = asOfDate ?? new Date().toISOString().slice(0, 10);
-    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    const visibleCustomerIds = await this.getReadableVisibleCustomerIds(auth);
     if (visibleCustomerIds.length === 0) {
       return {
         total_customers: 0,
@@ -445,7 +455,7 @@ export class ReportService {
     auth: AuthContext,
   ): Promise<Record<string, unknown>> {
     requireRole(auth, 'AR Clerk');
-    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    const visibleCustomerIds = await this.getReadableVisibleCustomerIds(auth);
     if (visibleCustomerIds.length === 0) {
       return {
         total_invoices: 0,

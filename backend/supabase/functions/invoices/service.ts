@@ -23,7 +23,7 @@ import {
 } from '../_shared/errors.ts';
 import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
-import { requireRole, requireCustomerAccess } from '../_shared/auth.ts';
+import { requireRole, requireCustomerAccess, getCustomerAccessFilter } from '../_shared/auth.ts';
 import { validateUUID } from '../_shared/validators.ts';
 import type {
   Invoice,
@@ -515,13 +515,18 @@ export class InvoiceService {
     pagination: PaginationParams,
   ): Promise<{ invoices: Invoice[]; total: number }> {
     const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
-    if (visibleCustomerIds.length === 0) return { invoices: [], total: 0 };
+    const allowedCustomerIds = await getCustomerAccessFilter(auth);
+    const scopedCustomerIds = allowedCustomerIds === null
+      ? visibleCustomerIds
+      : visibleCustomerIds.filter(id => allowedCustomerIds.includes(id));
+
+    if (scopedCustomerIds.length === 0) return { invoices: [], total: 0 };
 
     let query = this.client
       .from('invoices')
       .select('*', { count: 'exact' })
       .eq('company_id', auth.companyId)
-      .in('customer_id', visibleCustomerIds);
+      .in('customer_id', scopedCustomerIds);
 
     // Apply filters
     if (filters.doc_type) query = query.eq('doc_type', filters.doc_type);
