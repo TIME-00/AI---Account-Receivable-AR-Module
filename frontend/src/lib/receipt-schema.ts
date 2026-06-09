@@ -42,14 +42,10 @@ export const receiptFormSchema = z.object({
   receipt_amount: z
     .number({ invalid_type_error: "Receipt amount must be a number." })
     .positive("Receipt amount must be greater than 0."),
-  // Sprint F1: bank_account_id is OPTIONAL because no real bank account
-  // API exists. Mock IDs (ba-mock-*) are display-only and must not be sent
-  // to backend. This field becomes required when a real GET /bank-accounts
-  // Edge Function is deployed.
   bank_account_id: z
     .string()
-    .optional()
-    .or(z.literal("")),
+    .min(1, "Please select a bank account.")
+    .uuid("Invalid bank account ID format."),
 
   // ── Optional fields ──
   exchange_rate: z
@@ -101,7 +97,7 @@ export function defaultReceiptValues(): ReceiptFormValues {
     payment_method: "TT",
     currency: "MYR",
     receipt_amount: 0,
-    bank_account_id: "",  // Sprint F1: empty — no real bank account API
+    bank_account_id: "",
     exchange_rate: 1,
     reference_no: "",
     cheque_date: "",

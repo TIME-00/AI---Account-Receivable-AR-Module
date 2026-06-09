@@ -221,6 +221,7 @@ export interface BankAccount {
   bank_name: string;
   account_no: string;
   account_name: string;
+  swift_code: string | null;
   currency: string;
   gl_account_id: string | null;
   is_active: boolean;

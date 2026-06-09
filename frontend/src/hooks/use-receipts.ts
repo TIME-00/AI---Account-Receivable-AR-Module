@@ -86,57 +86,17 @@ export function useCustomers() {
   });
 }
 
-// ─── Query: Bank Accounts (MOCK — no Edge Function exists for /bank-accounts) ─
-// DISPLAY-ONLY: These mock IDs must NEVER be sent to the backend.
-// The bank_account_id field in the create receipt payload must be omitted.
+// ─── Query: Bank Accounts ───────────────────────────────────────────────────
 
 export function useBankAccounts() {
+  const api = useApi();
+
   return useQuery({
     queryKey: ["bank-accounts"],
     queryFn: async () => {
-      // MOCK DATA — display-only, no Edge Function exists for /bank-accounts
-      // These IDs are FAKE and must never be sent in API payloads.
-      const mockBankAccounts: BankAccount[] = [
-        {
-          id: "ba-mock-001",
-          company_id: "",
-          bank_name: "Maybank",
-          account_no: "5141-2200-0001",
-          account_name: "Maybank Current A/C",
-          currency: "MYR",
-          gl_account_id: null,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          id: "ba-mock-002",
-          company_id: "",
-          bank_name: "CIMB Bank",
-          account_no: "8600-1100-0002",
-          account_name: "CIMB Savings A/C",
-          currency: "MYR",
-          gl_account_id: null,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          id: "ba-mock-003",
-          company_id: "",
-          bank_name: "HSBC",
-          account_no: "0012-5500-0003",
-          account_name: "HSBC USD A/C",
-          currency: "USD",
-          gl_account_id: null,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      ];
-      return mockBankAccounts;
+      return api.get<BankAccount[]>("/bank-accounts");
     },
-    staleTime: Infinity, // Mock data never changes
+    staleTime: 60_000,
   });
 }
 

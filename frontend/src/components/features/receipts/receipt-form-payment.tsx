@@ -6,15 +6,29 @@ import type { ReceiptFormValues } from "@/lib/receipt-schema";
 import { PAYMENT_METHODS } from "@/lib/receipt-schema";
 import { CreditCard, Info } from "lucide-react";
 
-interface BankAccount { id: string; bank_name: string; account_no: string; }
+interface BankAccount {
+  id: string;
+  bank_name: string;
+  account_name: string;
+  account_no: string;
+  currency: string;
+}
 
 interface ReceiptFormPaymentProps {
   form: UseFormReturn<ReceiptFormValues>;
   bankAccounts: BankAccount[];
+  isLoadingBankAccounts?: boolean;
   isCheque: boolean;
 }
 
-export function ReceiptFormPayment({ form, bankAccounts, isCheque }: ReceiptFormPaymentProps) {
+export function ReceiptFormPayment({
+  form,
+  bankAccounts,
+  isLoadingBankAccounts = false,
+  isCheque,
+}: ReceiptFormPaymentProps) {
+  const hasBankAccounts = bankAccounts.length > 0;
+
   return (
     <div className="glass-card overflow-hidden">
       <div className="border-b border-slate-200 px-5 py-3">
@@ -50,32 +64,48 @@ export function ReceiptFormPayment({ form, bankAccounts, isCheque }: ReceiptForm
           />
         </div>
 
-        {/* Bank Account — Sprint F1: Uses NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID */}
+        {/* Bank Account */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-slate-600">
-            Bank Account
-            <span className="ml-1 text-[10px] text-slate-400">(Sprint F1 — env-configured)</span>
+            Bank Account <span className="text-red-400">*</span>
           </label>
-          <select
-            disabled
-            className={cn(
-              "h-10 w-full rounded-lg border bg-slate-50 px-3 text-sm cursor-not-allowed",
-              process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID
-                ? "text-slate-600 border-slate-300"
-                : "text-slate-400 border-slate-200"
+          <Controller
+            control={form.control}
+            name="bank_account_id"
+            render={({ field }) => (
+              <select
+                {...field}
+                disabled={isLoadingBankAccounts || !hasBankAccounts}
+                className={cn(
+                  "h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-800",
+                  "focus:outline-none focus:ring-1 focus:ring-brand-500",
+                  (isLoadingBankAccounts || !hasBankAccounts) && "cursor-not-allowed bg-slate-50 text-slate-400",
+                  form.formState.errors.bank_account_id ? "border-red-500" : "border-slate-300"
+                )}
+              >
+                <option value="">
+                  {isLoadingBankAccounts
+                    ? "Loading bank accounts..."
+                    : hasBankAccounts
+                      ? "Select bank account"
+                      : "No active bank accounts available"}
+                </option>
+                {bankAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.bank_name} — {account.account_no} ({account.currency}) · {account.account_name}
+                  </option>
+                ))}
+              </select>
             )}
-          >
-            <option value="">
-              {process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID
-                ? `Maybank — Operating Account (${process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID.slice(0, 8)}…)`
-                : "Not configured — set NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID"}
-            </option>
-          </select>
+          />
           <p className="mt-1 text-[10px] text-slate-400">
-            {process.env.NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID
-              ? "Bank account is configured via environment variable for Sprint F1."
-              : "Receipt creation requires NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID in .env.local."}
+            {hasBankAccounts
+              ? "Only active company bank accounts are available."
+              : "Create or activate a company bank account before creating receipts."}
           </p>
+          {form.formState.errors.bank_account_id && (
+            <p className="mt-1 text-xs text-red-400">{form.formState.errors.bank_account_id.message}</p>
+          )}
         </div>
 
         {/* Reference No */}
