@@ -28,6 +28,23 @@ export function ReceiptFormPayment({
   isCheque,
 }: ReceiptFormPaymentProps) {
   const hasBankAccounts = bankAccounts.length > 0;
+  const selectedBankAccountId = form.watch("bank_account_id");
+  const selectedBankAccount = bankAccounts.find((account) => account.id === selectedBankAccountId);
+  const bankNameCounts = bankAccounts.reduce<Record<string, number>>((counts, account) => {
+    counts[account.bank_name] = (counts[account.bank_name] ?? 0) + 1;
+    return counts;
+  }, {});
+
+  const getBankOptionLabel = (account: BankAccount) => {
+    if ((bankNameCounts[account.bank_name] ?? 0) <= 1) return account.bank_name;
+    return `${account.bank_name} - ${account.account_name}`;
+  };
+
+  const getMaskedAccountNo = (accountNo: string) => {
+    const digits = accountNo.replace(/\D/g, "");
+    const suffix = digits.slice(-4);
+    return suffix ? `ending ${suffix}` : "number unavailable";
+  };
 
   return (
     <div className="glass-card overflow-hidden">
@@ -67,7 +84,7 @@ export function ReceiptFormPayment({
         {/* Bank Account */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-slate-600">
-            Bank Account <span className="text-red-400">*</span>
+            Deposit To <span className="text-red-400">*</span>
           </label>
           <Controller
             control={form.control}
@@ -87,12 +104,12 @@ export function ReceiptFormPayment({
                   {isLoadingBankAccounts
                     ? "Loading bank accounts..."
                     : hasBankAccounts
-                      ? "Select bank account"
+                      ? "Select receiving account"
                       : "No active bank accounts available"}
                 </option>
                 {bankAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
-                    {account.bank_name} — {account.account_no} ({account.currency}) · {account.account_name}
+                    {getBankOptionLabel(account)}
                   </option>
                 ))}
               </select>
@@ -100,9 +117,20 @@ export function ReceiptFormPayment({
           />
           <p className="mt-1 text-[10px] text-slate-400">
             {hasBankAccounts
-              ? "Only active company bank accounts are available."
+              ? "Select the company account that will receive this payment."
               : "Create or activate a company bank account before creating receipts."}
           </p>
+          {selectedBankAccount && (
+            <div className="mt-1 space-y-0.5 text-[10px] text-slate-500">
+              <p>Account: {selectedBankAccount.account_name}</p>
+              <p>
+                Currency: {selectedBankAccount.currency}
+                <span className="mx-1">·</span>
+                Account no. {getMaskedAccountNo(selectedBankAccount.account_no)}
+              </p>
+              <p className="text-slate-400">This is the company receiving account, not the customer's payer bank.</p>
+            </div>
+          )}
           {form.formState.errors.bank_account_id && (
             <p className="mt-1 text-xs text-red-400">{form.formState.errors.bank_account_id.message}</p>
           )}
