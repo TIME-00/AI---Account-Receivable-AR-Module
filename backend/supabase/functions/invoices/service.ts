@@ -419,6 +419,8 @@ export class InvoiceService {
 
     const invoice = await fetchById<Invoice>(this.client, 'invoices', invoiceId);
     if (invoice.company_id !== auth.companyId) throw new NotFoundError('Invoice', invoiceId);
+    await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
     // Only Open invoices can be cancelled
     if (invoice.status !== 'Open') {
@@ -560,6 +562,8 @@ export class InvoiceService {
     data: Partial<CreateInvoiceInput>,
   ): Promise<Invoice> {
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
+    await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
     const updatePayload: Record<string, unknown> = {};
     if (data.invoice_date !== undefined) updatePayload.invoice_date = data.invoice_date;
@@ -588,7 +592,9 @@ export class InvoiceService {
    * Delete a Draft invoice and its lines.
    */
   async deleteDraftInvoice(auth: AuthContext, invoiceId: string): Promise<void> {
-    await this.requireDraftInvoice(invoiceId, auth.companyId);
+    const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
+    await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
     // Delete lines first (CASCADE should handle, but explicit is safer)
     await this.client.from('invoice_lines').delete().eq('invoice_id', invoiceId);

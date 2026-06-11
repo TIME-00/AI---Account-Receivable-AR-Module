@@ -163,6 +163,7 @@ export class ReceiptService {
     const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
     await requireCustomerAccess(auth, receipt.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
 
     const rpcResult = await callRpc<{ je_no?: string }>(this.client, 'post_receipt', {
       p_receipt_id: receiptId,
@@ -199,6 +200,8 @@ export class ReceiptService {
 
     const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
+    await requireCustomerAccess(auth, receipt.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
 
     // Validate: must be CHQ and Posted
     if (receipt.payment_method !== 'CHQ') {
@@ -287,6 +290,8 @@ export class ReceiptService {
 
     const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
+    await requireCustomerAccess(auth, receipt.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
 
     if (receipt.status !== 'Posted') {
       throw new BusinessError('BR-RCT-CANCEL',
