@@ -34,6 +34,59 @@ import type {
   UpdateCustomerRequest,
 } from '../_shared/types.ts';
 
+const INCOMPLETE_CUSTOMER_NAME_MESSAGE =
+  'Customer name looks incomplete or invalid. Please enter a proper company name such as ABC Trading Sdn Bhd, or provide a registration number.';
+
+const WEAK_SINGLE_TOKEN_NAMES = new Set([
+  'abcde',
+  'asdfgh',
+  'customer',
+  'dedaed',
+  'demo',
+  'dwadae',
+  'lkjhg',
+  'qweasd',
+  'qwerty',
+  'random',
+  'sample',
+  'test',
+  'testing',
+  'unknown',
+]);
+
+const BUSINESS_NAME_KEYWORDS = [
+  'agency',
+  'berhad',
+  'bhd',
+  'co',
+  'company',
+  'construction',
+  'corp',
+  'corporation',
+  'enterprise',
+  'engineering',
+  'group',
+  'holdings',
+  'industries',
+  'llp',
+  'logistics',
+  'ltd',
+  'manufacturing',
+  'marketing',
+  'plt',
+  'pte',
+  'resources',
+  'retail',
+  'sdn',
+  'services',
+  'solutions',
+  'supplies',
+  'technology',
+  'trading',
+  'transport',
+  'wholesale',
+];
+
 // ─── Create Customer Validation ─────────────────────────────────────────────
 
 export function validateCreateCustomer(body: Record<string, unknown>): CreateCustomerRequest {
@@ -49,6 +102,8 @@ export function validateCreateCustomer(body: Record<string, unknown>): CreateCus
 
   // Registration number required for Corporate
   const registration_no = optionalString(body.registration_no);
+  validateCreateCustomerNameQuality(customer_name, registration_no);
+
   if (customer_type === 'Corporate' && !registration_no) {
     throw new ValidationError(
       'Registration number (registration_no) is required for Corporate customer type.',
@@ -265,4 +320,41 @@ function validateAltContacts(raw: unknown): AltContact[] | undefined {
       position: optionalString(c.position) ?? undefined,
     } as AltContact;
   });
+}
+
+function validateCreateCustomerNameQuality(customerName: string, registrationNo: string | null): void {
+  // Prototype rule-set: tuned for MY/SG English-language company names.
+  // A future official customer master workflow can replace this with jurisdiction-specific reference data.
+  if (isBlockedSingleTokenCustomerName(customerName)) {
+    throw new ValidationError(INCOMPLETE_CUSTOMER_NAME_MESSAGE, { field: 'customer_name' });
+  }
+
+  if (registrationNo) return;
+
+  if (!hasBusinessNameSignal(customerName)) {
+    throw new ValidationError(INCOMPLETE_CUSTOMER_NAME_MESSAGE, { field: 'customer_name' });
+  }
+}
+
+function hasBusinessNameSignal(value: string): boolean {
+  const words = getMeaningfulCustomerNameWords(value);
+  if (words.length >= 2) return true;
+
+  return words.some((word) => BUSINESS_NAME_KEYWORDS.includes(word.toLowerCase()));
+}
+
+function isBlockedSingleTokenCustomerName(value: string): boolean {
+  const words = getMeaningfulCustomerNameWords(value);
+  if (words.length !== 1) return false;
+
+  return WEAK_SINGLE_TOKEN_NAMES.has(words[0].toLowerCase());
+}
+
+function getMeaningfulCustomerNameWords(value: string): string[] {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-zA-Z0-9\u4e00-\u9fff\u3400-\u4dbf\uF900-\uFAFF]/g, ''))
+    .filter((word) => word.length > 0);
 }

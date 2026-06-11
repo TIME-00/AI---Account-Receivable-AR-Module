@@ -64,14 +64,38 @@ export function validateMinLength(value: string, minLen: number, fieldName: stri
  * - Max 200 characters
  */
 export function validateCustomerName(name: string): void {
+  const normalized = name.trim().replace(/\s+/g, ' ');
+  const compact = normalized.replace(/\s+/g, '');
+
   // Check max length
-  validateMaxLength(name, 200, 'customer_name');
+  validateMaxLength(normalized, 200, 'customer_name');
+
+  if (normalized.length < 3) {
+    throw new ValidationError(
+      'Customer name must be at least 3 characters.',
+      { field: 'customer_name', value: normalized },
+    );
+  }
 
   // Not purely numeric
-  if (/^\d+$/.test(name)) {
+  if (/^\d+$/.test(compact)) {
     throw new ValidationError(
       'Customer name cannot be purely numeric.',
-      { field: 'customer_name', value: name },
+      { field: 'customer_name', value: normalized },
+    );
+  }
+
+  if (!/[a-zA-Z\u4e00-\u9fff\u3400-\u4dbf\uF900-\uFAFF]/.test(normalized)) {
+    throw new ValidationError(
+      'Customer name must include letters.',
+      { field: 'customer_name', value: normalized },
+    );
+  }
+
+  if (isMostlyRepeatedCustomerName(compact)) {
+    throw new ValidationError(
+      'Customer name cannot be mostly repeated characters.',
+      { field: 'customer_name', value: normalized },
     );
   }
 
@@ -80,12 +104,19 @@ export function validateCustomerName(name: string): void {
     `^[a-zA-Z0-9\\s${CUSTOMER_NAME_ALLOWED_SPECIAL.map(c => '\\' + c).join('')}\\u4e00-\\u9fff\\u3400-\\u4dbf\\uF900-\\uFAFF]+$`
   );
 
-  if (!allowedPattern.test(name)) {
+  if (!allowedPattern.test(normalized)) {
     throw new ValidationError(
       `Customer name contains disallowed special characters. Allowed: ${CUSTOMER_NAME_ALLOWED_SPECIAL.join(' ')}`,
       { field: 'customer_name', allowed_special: CUSTOMER_NAME_ALLOWED_SPECIAL },
     );
   }
+}
+
+function isMostlyRepeatedCustomerName(value: string): boolean {
+  const alphanumeric = value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  if (alphanumeric.length < 3) return false;
+
+  return new Set(alphanumeric.split('')).size === 1;
 }
 
 // ─── Email Validation ───────────────────────────────────────────────────────

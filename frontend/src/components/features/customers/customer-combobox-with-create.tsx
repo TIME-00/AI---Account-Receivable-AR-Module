@@ -13,6 +13,11 @@ import {
   getStateOptions,
 } from "@/lib/address-options";
 import {
+  findSimilarVisibleCustomer,
+  normalizeCustomerDisplayName,
+  validateCustomerNameQuality,
+} from "@/lib/customer-name-validation";
+import {
   useInlineCustomerCreate,
   type InlineCustomerCreatePayload,
 } from "@/hooks/use-inline-customer-create";
@@ -29,7 +34,7 @@ interface CustomerComboboxWithCreateProps {
 }
 
 const emptyQuickCreate = (customerName: string): InlineCustomerCreatePayload => ({
-  customer_name: normalizeDisplayName(customerName),
+  customer_name: normalizeCustomerDisplayName(customerName),
   customer_type: "Corporate",
   registration_no: "",
   bill_addr_line1: "",
@@ -71,6 +76,10 @@ export function CustomerComboboxWithCreate({
     [customers]
   );
   const normalizedQuery = normalizeCustomerName(query);
+  const queryNameCheck = useMemo(
+    () => validateCustomerNameQuality(normalizedQuery),
+    [normalizedQuery]
+  );
   const filteredCustomers = useMemo(() => {
     const match = normalizedQuery.toLocaleLowerCase();
     if (!match) return visibleCustomers;
@@ -81,7 +90,19 @@ export function CustomerComboboxWithCreate({
   const hasExactVisibleMatch = visibleCustomers.some(
     (customer) => normalizeCustomerName(customer.customer_name).toLocaleLowerCase() === normalizedQuery.toLocaleLowerCase()
   );
-  const canCreate = normalizedQuery.length > 0 && !hasExactVisibleMatch;
+  const canCreate = normalizedQuery.length > 0 && !hasExactVisibleMatch && !queryNameCheck.blockingError;
+
+  const quickNameCheck = useMemo(
+    () => validateCustomerNameQuality(quickCreate.customer_name, {
+      enforceBusinessName: true,
+      registrationNo: quickCreate.registration_no,
+    }),
+    [quickCreate.customer_name, quickCreate.registration_no]
+  );
+  const similarVisibleCustomer = useMemo(
+    () => findSimilarVisibleCustomer(quickCreate.customer_name, visibleCustomers),
+    [quickCreate.customer_name, visibleCustomers]
+  );
 
   const updateQuery = (value: string) => {
     setQuery(value);
@@ -140,10 +161,15 @@ export function CustomerComboboxWithCreate({
     event.preventDefault();
     setCreateError("");
 
+    if (quickNameCheck.blockingError) {
+      setCreateError(quickNameCheck.blockingError);
+      return;
+    }
+
     try {
       const result = await createCustomer.mutateAsync({
         ...quickCreate,
-        customer_name: normalizeDisplayName(quickCreate.customer_name),
+        customer_name: normalizeCustomerDisplayName(quickCreate.customer_name),
       });
       selectCustomer(result.customer);
       setIsModalOpen(false);
@@ -195,6 +221,11 @@ export function CustomerComboboxWithCreate({
             {filteredCustomers.length === 0 && !canCreate && (
               <p className="px-3 py-3 text-sm text-slate-500">No visible customers found.</p>
             )}
+            {normalizedQuery && queryNameCheck.blockingError && (
+              <p className="border-t border-slate-100 px-3 py-3 text-xs text-red-500">
+                {queryNameCheck.blockingError}
+              </p>
+            )}
             {canCreate && (
               <button
                 type="button"
@@ -232,7 +263,23 @@ export function CustomerComboboxWithCreate({
 
             <form onSubmit={submitQuickCreate} className="mt-5 space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
-                <QuickField label="Customer Name" value={quickCreate.customer_name} onChange={(value) => updateQuickCreate("customer_name", value)} />
+                <QuickField
+                  label="Customer Name"
+                  value={quickCreate.customer_name}
+                  onChange={(value) => updateQuickCreate("customer_name", value)}
+                  error={quickNameCheck.blockingError}
+                  description={
+                    <CustomerNameHints
+                      suffixSuggestion={quickNameCheck.suffixSuggestion}
+                      similarCustomer={similarVisibleCustomer}
+                      onApplySuggestion={(value) => updateQuickCreate("customer_name", value)}
+                      onSelectExisting={(customer) => {
+                        selectCustomer(customer);
+                        setIsModalOpen(false);
+                      }}
+                    />
+                  }
+                />
                 <QuickField label="Registration No." value={quickCreate.registration_no} onChange={(value) => updateQuickCreate("registration_no", value)} placeholder="Corporate registration number" />
                 <QuickField label="Billing Address" value={quickCreate.bill_addr_line1} onChange={(value) => updateQuickCreate("bill_addr_line1", value)} className="md:col-span-2" />
                 <label className="block">
@@ -280,7 +327,7 @@ export function CustomerComboboxWithCreate({
                 </Dialog.Close>
                 <button
                   type="submit"
-                  disabled={createCustomer.isPending}
+                  disabled={createCustomer.isPending || Boolean(quickNameCheck.blockingError)}
                   className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {createCustomer.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -291,6 +338,50 @@ export function CustomerComboboxWithCreate({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+    </div>
+  );
+}
+
+function CustomerNameHints({
+  suffixSuggestion,
+  similarCustomer,
+  onApplySuggestion,
+  onSelectExisting,
+}: {
+  suffixSuggestion: string | null;
+  similarCustomer: Customer | null;
+  onApplySuggestion: (value: string) => void;
+  onSelectExisting: (customer: Customer) => void;
+}) {
+  if (!suffixSuggestion && !similarCustomer) return null;
+
+  return (
+    <div className="space-y-2">
+      {suffixSuggestion && (
+        <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700">
+          Did you mean{" "}
+          <button
+            type="button"
+            onClick={() => onApplySuggestion(suffixSuggestion)}
+            className="font-semibold underline decoration-amber-400 underline-offset-2"
+          >
+            {suffixSuggestion}
+          </button>
+          ?
+        </p>
+      )}
+      {similarCustomer && (
+        <p className="rounded border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] text-sky-700">
+          Similar visible customer found:{" "}
+          <button
+            type="button"
+            onClick={() => onSelectExisting(similarCustomer)}
+            className="font-semibold underline decoration-sky-400 underline-offset-2"
+          >
+            {similarCustomer.customer_name} ({similarCustomer.customer_id})
+          </button>
+        </p>
+      )}
     </div>
   );
 }
@@ -338,6 +429,8 @@ function QuickField({
   type = "text",
   placeholder,
   className,
+  error,
+  description,
 }: {
   label: string;
   value: string;
@@ -345,6 +438,8 @@ function QuickField({
   type?: string;
   placeholder?: string;
   className?: string;
+  error?: string | null;
+  description?: React.ReactNode;
 }) {
   return (
     <label className={cn("block", className)}>
@@ -357,16 +452,14 @@ function QuickField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="input-premium w-full"
+        className={cn("input-premium w-full", error && "!border-red-500 !ring-red-500/30")}
       />
+      {error && <span className="mt-1 block text-xs text-red-500">{error}</span>}
+      {description && <div className="mt-1">{description}</div>}
     </label>
   );
 }
 
-function normalizeDisplayName(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
-}
-
 function normalizeCustomerName(value: string): string {
-  return normalizeDisplayName(value);
+  return normalizeCustomerDisplayName(value);
 }
