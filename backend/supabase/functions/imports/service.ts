@@ -155,6 +155,10 @@ function parseNumber(value: string, field: string): number {
   return num;
 }
 
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function rowError(field: string, message: string): Record<string, unknown> {
   return { field, message };
 }
@@ -530,6 +534,25 @@ export class ImportService {
             bank_account_resolution: bankAccount,
           };
           const receiptInput = validateCreateReceipt(mappedData);
+          if (autoPost) {
+            const preflight = await this.preflightExplicitReceiptImportOverAllocation(
+              auth,
+              resolved.customer.id,
+              mappedData,
+            );
+
+            if (preflight) {
+              await this.client.from('import_rows').update({
+                status: preflight.status,
+                invoice_id: null,
+                receipt_id: null,
+                mapped_data: preflight.mappedData,
+                validation_errors: null,
+              }).eq('id', row.id);
+              continue;
+            }
+          }
+
           created = await this.receiptService.createReceipt(auth, receiptInput);
           rowPatch.receipt_id = created.id;
 
@@ -596,6 +619,7 @@ export class ImportService {
       || row.status === 'Unmatched'
       || this.rowHasPostingError(row)
     ).length;
+    const finalSkippedRows = finalRows.filter((row) => row.status === 'Skipped').length;
 
     await this.updateBatch(batch.id, {
       status: 'Completed',
@@ -607,6 +631,7 @@ export class ImportService {
       created_customers_count: createdCustomerIds.size,
       posted_count: postedCount,
       allocated_count: allocatedCount,
+      skipped_count: finalSkippedRows,
       error_summary: errorSummary.length > 0 ? errorSummary : null,
     });
 
@@ -984,6 +1009,53 @@ export class ImportService {
     };
   }
 
+  private async preflightExplicitReceiptImportOverAllocation(
+    auth: AuthContext,
+    customerId: string,
+    mappedData: Record<string, unknown>,
+  ): Promise<{ status: ImportRowStatus; mappedData: Record<string, unknown> } | null> {
+    const invoiceReference = asString(mappedData, 'invoice_reference');
+    if (!invoiceReference || mappedData.allocation_amount === undefined) return null;
+
+    const explicitAmount = Number(mappedData.allocation_amount);
+    if (!Number.isFinite(explicitAmount) || explicitAmount <= 0) return null;
+
+    let invoice: Invoice;
+    try {
+      invoice = await this.resolveAllocationInvoice(
+        auth.companyId,
+        customerId,
+        asString(mappedData, 'currency'),
+        invoiceReference,
+      );
+    } catch {
+      return null;
+    }
+
+    const invoiceOutstanding = Number(invoice.outstanding);
+    if (explicitAmount <= invoiceOutstanding + 0.01) return null;
+
+    const receiptAmount = Number(mappedData.receipt_amount);
+    const allocationSuggestion = roundMoney(Math.min(receiptAmount, invoiceOutstanding));
+    const unappliedAmount = roundMoney(Math.max(receiptAmount - allocationSuggestion, 0));
+
+    return {
+      status: 'Skipped',
+      mappedData: {
+        ...mappedData,
+        invoice_id: invoice.id,
+        invoice_no: invoice.invoice_no,
+        allocation_status: 'Review Required',
+        review_required: true,
+        auto_post_eligible: false,
+        auto_post_block_reason: 'allocation_amount exceeds invoice outstanding',
+        overpayment_detected: true,
+        unapplied_amount: unappliedAmount,
+        allocation_suggestion: allocationSuggestion,
+      },
+    };
+  }
+
   private async allocateReceiptImportRow(
     auth: AuthContext,
     importRowId: string,
@@ -1016,6 +1088,8 @@ export class ImportService {
         ? Number(mappedData.allocation_amount)
         : undefined;
       const allocationAmount = explicitAmount ?? Math.min(Number(receipt.unallocated_amount), Number(invoice.outstanding));
+      const overpaymentDetected = explicitAmount === undefined
+        && Number(receipt.unallocated_amount) > Number(invoice.outstanding) + 0.005;
 
       if (!Number.isFinite(allocationAmount) || allocationAmount <= 0) {
         throw new ValidationError('allocation_amount must be greater than 0.', {
@@ -1036,6 +1110,7 @@ export class ImportService {
       if (!allocation?.id) {
         throw new Error('Allocation RPC completed but no allocation_details row was returned.');
       }
+      const updatedReceipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
 
       const allocatedMappedData: Record<string, unknown> = {
         ...mappedData,
@@ -1044,6 +1119,11 @@ export class ImportService {
         invoice_id: invoice.id,
         invoice_no: invoice.invoice_no,
         allocated_amount: allocation.allocated_amount,
+        ...(overpaymentDetected ? {
+          overpayment_detected: true,
+          unapplied_amount: Number(updatedReceipt.unallocated_amount),
+          allocation_suggestion: allocationAmount,
+        } : {}),
       };
 
       const { error: auditError } = await this.client.from('import_row_allocations').insert({

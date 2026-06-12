@@ -134,7 +134,7 @@ export default function ReceiptImportPage() {
             <FileSpreadsheet className="h-6 w-6 text-emerald-500" />
             Receipt Import
           </h1>
-          <p className="mt-1 text-sm text-slate-500">CSV/Excel Receipt Import - Draft Only</p>
+          <p className="mt-1 text-sm text-slate-500">CSV/Excel Receipt Import - draft by default, optional auto-post and exact allocation</p>
         </div>
         {step !== "upload" && step !== "result" && (
           <LoadingButton variant="ghost" size="sm" onClick={reset}>
@@ -505,8 +505,12 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
               const hasErrors = row.status === "Error" && row.validation_errors?.length;
               const resolution = row.mapped_data?.customer_resolution as ImportCustomerResolution | undefined;
               const errorFields = row.validation_errors?.map((e) => e.field) ?? [];
+              const reviewRequired = row.mapped_data?.review_required === true;
+              const autoPostBlockReason = row.mapped_data?.auto_post_block_reason;
+              const unappliedAmount = row.mapped_data?.unapplied_amount;
+              const allocationSuggestion = row.mapped_data?.allocation_suggestion;
               return (
-                <tr key={row.id} className={cn("transition-colors", hasErrors ? "bg-red-50/50" : "hover:bg-slate-50")}>
+                <tr key={row.id} className={cn("transition-colors", hasErrors ? "bg-red-50/50" : reviewRequired ? "bg-amber-50/50" : "hover:bg-slate-50")}>
                   <td className="px-3 py-2 font-mono text-xs text-slate-400">{row.row_number}</td>
                   {showValidation && (
                     <td className="px-3 py-2">
@@ -531,8 +535,23 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-700">{String(row.raw_data?.receipt_reference || "-")}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-700">{String(row.raw_data?.amount || "-")}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-700">
-                        {String(row.mapped_data?.allocation_status || "-")}
-                        {row.mapped_data?.invoice_no ? ` (${String(row.mapped_data.invoice_no)})` : ""}
+                        <div className="space-y-1">
+                          <p className={cn("font-medium", reviewRequired && "text-amber-700")}>
+                            {String(row.mapped_data?.allocation_status || "-")}
+                            {row.mapped_data?.invoice_no ? ` (${String(row.mapped_data.invoice_no)})` : ""}
+                          </p>
+                          {reviewRequired && (
+                            <p className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                              Review required before receipt creation
+                            </p>
+                          )}
+                          {allocationSuggestion !== undefined && (
+                            <p className="text-[10px] text-slate-500">Suggested allocation: {String(allocationSuggestion)}</p>
+                          )}
+                          {unappliedAmount !== undefined && (
+                            <p className="text-[10px] text-slate-500">Unapplied balance: {String(unappliedAmount)}</p>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2">
                         {row.validation_errors?.length ? (
@@ -543,6 +562,13 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                                 {err.message ?? err.error ?? "Validation error"}
                               </p>
                             ))}
+                          </div>
+                        ) : reviewRequired ? (
+                          <div className="space-y-0.5">
+                            <p className="text-xs text-amber-700">
+                              <code className="mr-1 rounded bg-amber-100 px-1 font-mono">review_required</code>
+                              {String(autoPostBlockReason || "Row needs manual review before posting/allocation.")}
+                            </p>
                           </div>
                         ) : row.status === "Valid" ? (
                           <span className="text-xs text-emerald-600">Valid</span>

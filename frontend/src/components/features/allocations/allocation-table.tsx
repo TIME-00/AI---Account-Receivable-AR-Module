@@ -173,7 +173,7 @@ export function AllocationTable({
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-6">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Receipt Available</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Receipt unallocated</p>
                   <p className="mt-0.5 font-mono text-base font-bold text-slate-900">{formatAmount(validation.availableBalance)}</p>
                 </div>
                 <span className="text-slate-400">−</span>
@@ -183,7 +183,7 @@ export function AllocationTable({
                 </div>
                 <span className="text-slate-400">=</span>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Remaining</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Unapplied receipt balance</p>
                   <p className={cn("mt-0.5 font-mono text-base font-bold", validation.remainingBalance < -0.005 ? "text-red-500" : validation.remainingBalance < 0.01 ? "text-emerald-500" : "text-slate-500")}>
                     {formatAmount(Math.max(0, validation.remainingBalance))}
                   </p>
@@ -194,7 +194,13 @@ export function AllocationTable({
                 {!validation.isBalanceValid && (
                   <div className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5">
                     <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-                    <span className="text-xs font-medium text-red-500">Allocation total exceeds receipt balance</span>
+                    <span className="text-xs font-medium text-red-500">Total allocation cannot exceed receipt unallocated amount</span>
+                  </div>
+                )}
+                {validation.isBalanceValid && validation.totalAllocating > 0 && validation.remainingBalance > 0.005 && (
+                  <div className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5">
+                    <Info className="h-3.5 w-3.5 text-amber-500" />
+                    <span className="text-xs font-medium text-amber-700">This receipt will retain an unapplied balance</span>
                   </div>
                 )}
                 {validation.canSubmit && (

@@ -188,17 +188,20 @@ export default function ReceiptDetailPage() {
           </p>
         </div>
 
-        {/* Unallocated */}
+        {/* Unapplied */}
         <div className={cn("glass-card p-5", receipt.unallocated_amount > 0 && "border-amber-200/60")}>
           <div className="flex items-center gap-2 mb-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
               <CreditCard className="h-4 w-4" />
             </div>
-            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Unallocated</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Unapplied Receipt Balance</p>
           </div>
           <p className={cn("text-xl font-bold font-mono", receipt.unallocated_amount > 0 ? "text-amber-600" : "text-slate-400")}>
             {formatCurrency(receipt.unallocated_amount, receipt.currency)}
           </p>
+          {receipt.unallocated_amount > 0.005 && (
+            <p className="mt-1 text-xs text-amber-700">Remaining amount is retained as unapplied cash.</p>
+          )}
         </div>
       </div>
 
@@ -225,7 +228,7 @@ export default function ReceiptDetailPage() {
         </div>
         <div className="mt-2 flex justify-between text-xs text-slate-400">
           <span>Applied: {formatAmount(receipt.allocated_amount)}</span>
-          <span>Available: {formatAmount(receipt.unallocated_amount)}</span>
+          <span>Unapplied: {formatAmount(receipt.unallocated_amount)}</span>
         </div>
       </div>
 

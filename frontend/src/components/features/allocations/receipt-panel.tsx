@@ -64,7 +64,7 @@ export function ReceiptPanel({
                     </div>
                     <div className="text-right">
                       <p className="font-mono text-sm font-semibold text-slate-900">{formatCurrency(r.receipt_amount, r.currency)}</p>
-                      <p className="font-mono text-[11px] text-emerald-500">Avail: {formatAmount(r.unallocated_amount)}</p>
+                      <p className="font-mono text-[11px] text-emerald-500">Unapplied: {formatAmount(r.unallocated_amount)}</p>
                     </div>
                   </div>
                   <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
@@ -79,7 +79,9 @@ export function ReceiptPanel({
                     </div>
                   </div>
                   {isSelected && projectedAlloc > 0 && (
-                    <p className="mt-1 text-[9px] text-brand-400/70">Projected utilization: {Math.min(projectedPct, 100).toFixed(1)}%</p>
+                    <p className="mt-1 text-[9px] text-brand-400/70">
+                      Projected utilization: {Math.min(projectedPct, 100).toFixed(1)}%
+                    </p>
                   )}
                 </button>
               );
