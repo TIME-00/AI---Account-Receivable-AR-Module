@@ -56,13 +56,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
         throw new ValidationError('allocations must be a non-empty array.');
       }
 
-      const result = await service.manualAllocate(auth, {
-        receipt_id,
-        allocations: allocations.map((a: Record<string, unknown>) => ({
-          invoice_id: requireString(a.invoice_id, 'invoice_id'),
+      const parsedAllocations = allocations.map((a: Record<string, unknown>) => {
+        const invoice_id = requireString(a.invoice_id, 'invoice_id');
+        validateUUID(invoice_id, 'invoice_id');
+
+        return {
+          invoice_id,
           amount: Number(a.amount),
           discount_amount: a.discount_amount ? Number(a.discount_amount) : undefined,
-        })),
+        };
+      });
+
+      const invoiceIds = parsedAllocations.map((allocation) => allocation.invoice_id.toLowerCase());
+      if (new Set(invoiceIds).size !== invoiceIds.length) {
+        throw new ValidationError(
+          'Duplicate invoice allocation rows are not allowed. Submit each invoice_id only once.',
+          { field: 'allocations', reason: 'duplicate_invoice_id' },
+        );
+      }
+
+      const result = await service.manualAllocate(auth, {
+        receipt_id,
+        allocations: parsedAllocations,
       });
       return jsonResponse(successResponse(result), 201);
     }

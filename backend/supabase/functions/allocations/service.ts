@@ -21,6 +21,7 @@ import {
 import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
 import { requireRole, requireCustomerAccess } from '../_shared/auth.ts';
+import { assertCustomerVisible } from '../_shared/visibility.ts';
 import { validateUUID } from '../_shared/validators.ts';
 import type {
   Receipt,
@@ -120,6 +121,7 @@ export class AllocationService {
     const receipt = await fetchById<Receipt>(this.client, 'receipts', input.receipt_id);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', input.receipt_id);
     await requireCustomerAccess(auth, receipt.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
 
     const startedAt = new Date(Date.now() - 1000).toISOString();
     for (const alloc of input.allocations) {
