@@ -509,6 +509,8 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
               const autoPostBlockReason = row.mapped_data?.auto_post_block_reason;
               const unappliedAmount = row.mapped_data?.unapplied_amount;
               const allocationSuggestion = row.mapped_data?.allocation_suggestion;
+              const allocationError = row.mapped_data?.allocation_error;
+              const allocationErrorReason = row.mapped_data?.allocation_error_reason;
               return (
                 <tr key={row.id} className={cn("transition-colors", hasErrors ? "bg-red-50/50" : reviewRequired ? "bg-amber-50/50" : "hover:bg-slate-50")}>
                   <td className="px-3 py-2 font-mono text-xs text-slate-400">{row.row_number}</td>
@@ -568,6 +570,17 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                             <p className="text-xs text-amber-700">
                               <code className="mr-1 rounded bg-amber-100 px-1 font-mono">review_required</code>
                               {String(autoPostBlockReason || "Row needs manual review before posting/allocation.")}
+                            </p>
+                          </div>
+                        ) : row.status === "Unmatched" && allocationError ? (
+                          <div className="space-y-0.5">
+                            <p className="text-xs text-amber-700">
+                              {allocationErrorReason != null && (
+                                <code className="mr-1 rounded bg-amber-100 px-1 font-mono">
+                                  {String(allocationErrorReason)}
+                                </code>
+                              )}
+                              {String(allocationError)}
                             </p>
                           </div>
                         ) : row.status === "Valid" ? (

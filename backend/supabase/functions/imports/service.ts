@@ -1153,6 +1153,7 @@ export class ImportService {
         },
       };
     } catch (error) {
+      const details = error instanceof ValidationError ? error.details : {};
       return {
         status: 'Unmatched',
         allocated: false,
@@ -1160,6 +1161,7 @@ export class ImportService {
           ...mappedData,
           allocation_status: 'Error',
           allocation_error: this.errorMessage(error),
+          allocation_error_reason: typeof details.reason === 'string' ? details.reason : 'allocation_failed',
         },
       };
     }
@@ -1177,25 +1179,54 @@ export class ImportService {
       .eq('company_id', companyId)
       .eq('invoice_no', invoiceReference)
       .eq('customer_id', customerId)
-      .eq('currency', currency)
-      .in('status', ['Open', 'Overdue', 'Partially Paid'])
       .limit(2);
 
     if (error) throw new Error(`Failed to resolve invoice_reference: ${error.message}`);
     if (!data || data.length === 0) {
-      throw new ValidationError(`No matching open invoice found for invoice_reference "${invoiceReference}".`, {
+      throw new ValidationError(`No invoice found for invoice_reference "${invoiceReference}" for this customer.`, {
         field: 'invoice_reference',
         invoice_reference: invoiceReference,
+        reason: 'invoice_not_found_for_customer',
       });
     }
     if (data.length > 1) {
-      throw new ValidationError(`Multiple open invoices matched invoice_reference "${invoiceReference}".`, {
+      throw new ValidationError(`Multiple invoices matched invoice_reference "${invoiceReference}".`, {
         field: 'invoice_reference',
         invoice_reference: invoiceReference,
+        reason: 'multiple_matches',
       });
     }
 
-    return data[0] as Invoice;
+    const invoice = data[0] as Invoice;
+    if (invoice.currency !== currency) {
+      throw new ValidationError(`Invoice ${invoice.invoice_no} currency (${invoice.currency}) does not match receipt currency (${currency}).`, {
+        field: 'invoice_reference',
+        invoice_reference: invoiceReference,
+        reason: 'currency_mismatch',
+        invoice_currency: invoice.currency,
+        receipt_currency: currency,
+      });
+    }
+
+    if (!['Open', 'Overdue', 'Partially Paid'].includes(invoice.status)) {
+      throw new ValidationError(`Invoice ${invoice.invoice_no} status (${invoice.status}) does not allow allocation.`, {
+        field: 'invoice_reference',
+        invoice_reference: invoiceReference,
+        reason: 'invoice_not_open',
+        invoice_status: invoice.status,
+      });
+    }
+
+    if (Number(invoice.outstanding) <= 0) {
+      throw new ValidationError(`Invoice ${invoice.invoice_no} has no outstanding balance to allocate.`, {
+        field: 'invoice_reference',
+        invoice_reference: invoiceReference,
+        reason: 'no_outstanding',
+        outstanding: invoice.outstanding,
+      });
+    }
+
+    return invoice;
   }
 
   private errorMessage(error: unknown): string {
