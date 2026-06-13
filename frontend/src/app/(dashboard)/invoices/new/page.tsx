@@ -107,6 +107,8 @@ export default function NewInvoicePage() {
           onCreateAndPost={inv.handleCreateAndPost}
           isCreating={inv.createMutation.isPending}
           isPosting={inv.postMutation.isPending}
+          isSubmitting={inv.isSubmitting}
+          submittingAction={inv.submittingAction}
         />
       )}
 

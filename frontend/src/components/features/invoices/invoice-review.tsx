@@ -17,6 +17,8 @@ interface InvoiceReviewProps {
   onCreateAndPost: () => void;
   isCreating: boolean;
   isPosting: boolean;
+  isSubmitting: boolean;
+  submittingAction: "draft" | "post" | null;
 }
 
 export function InvoiceReview({
@@ -28,6 +30,8 @@ export function InvoiceReview({
   onCreateAndPost,
   isCreating,
   isPosting,
+  isSubmitting,
+  submittingAction,
 }: InvoiceReviewProps) {
   return (
     <div className="animate-fade-in space-y-4">
@@ -124,7 +128,8 @@ export function InvoiceReview({
             type="button"
             variant="secondary"
             onClick={onCreateDraft}
-            isLoading={isCreating && !isPosting}
+            isLoading={submittingAction === "draft" || (isCreating && !isPosting)}
+            disabled={isSubmitting}
             loadingText="Saving..."
           >
             <FileText className="h-4 w-4" />
@@ -134,8 +139,9 @@ export function InvoiceReview({
             type="button"
             variant="primary"
             onClick={onCreateAndPost}
-            isLoading={isCreating && isPosting}
-            loadingText="Posting..."
+            isLoading={submittingAction === "post" || isPosting}
+            disabled={isSubmitting}
+            loadingText={isPosting ? "Posting..." : "Processing..."}
           >
             <Send className="h-4 w-4" />
             Create & Post

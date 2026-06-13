@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
-import { forwardRef, type ButtonHTMLAttributes } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type MouseEvent } from "react";
 
 interface LoadingButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   isLoading?: boolean;
@@ -38,14 +38,27 @@ export const LoadingButton = forwardRef<HTMLButtonElement, LoadingButtonProps>(
       size = "md",
       disabled,
       className,
+      onClick,
       ...props
     },
     ref
   ) => {
+    const isDisabled = isLoading || disabled;
+    const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+      if (isDisabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      onClick?.(event);
+    };
+
     return (
       <button
         ref={ref}
-        disabled={isLoading || disabled}
+        disabled={isDisabled}
+        aria-disabled={isDisabled}
+        onClick={handleClick}
         className={cn(
           "inline-flex items-center justify-center font-medium transition-all duration-200",
           "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",

@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -26,6 +26,8 @@ import {
 } from "@/hooks/use-invoices";
 import { ApiError } from "@/hooks/use-api";
 
+let invoiceSubmissionInFlight = false;
+
 /**
  * useInvoiceForm — Full orchestration hook for the Invoice Creation Workbench.
  *
@@ -43,6 +45,13 @@ import { ApiError } from "@/hooks/use-api";
 export function useInvoiceForm() {
   const router = useRouter();
 
+  useEffect(() => {
+    invoiceSubmissionInFlight = false;
+    return () => {
+      invoiceSubmissionInFlight = false;
+    };
+  }, []);
+
   // ─── Step State ──────────────────────────────────────────────────────
   const [currentStep, setCurrentStep] = useState(1);
 
@@ -53,6 +62,8 @@ export function useInvoiceForm() {
 
   // ─── Server Field Errors ─────────────────────────────────────────────
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const submissionLockRef = useRef(false);
+  const [submittingAction, setSubmittingAction] = useState<"draft" | "post" | null>(null);
 
   // ─── Form ────────────────────────────────────────────────────────────
   const form = useForm<InvoiceFormValues>({
@@ -77,6 +88,7 @@ export function useInvoiceForm() {
   // ─── Mutations ───────────────────────────────────────────────────────
   const createMutation = useCreateInvoice();
   const postMutation = usePostInvoice();
+  const isSubmitting = submittingAction !== null || createMutation.isPending || postMutation.isPending;
 
   const docType = form.watch("doc_type");
 
@@ -175,55 +187,87 @@ export function useInvoiceForm() {
 
   // ─── Submit Handlers ─────────────────────────────────────────────────
 
+  const beginSubmission = (action: "draft" | "post") => {
+    if (invoiceSubmissionInFlight || submissionLockRef.current || createMutation.isPending || postMutation.isPending) {
+      return false;
+    }
+    invoiceSubmissionInFlight = true;
+    submissionLockRef.current = true;
+    setSubmittingAction(action);
+    return true;
+  };
+
+  const endSubmission = () => {
+    invoiceSubmissionInFlight = false;
+    submissionLockRef.current = false;
+    setSubmittingAction(null);
+  };
+
   const handleCreateDraft = async () => {
-    setFieldErrors({});
-    const valid = await form.trigger();
-    if (!valid) {
-      // Surface the first validation error as a toast
-      const errors = form.formState.errors;
-      const firstError = Object.values(errors).find(Boolean);
-      const message = (firstError as any)?.message
-        ?? (firstError as any)?.root?.message
-        ?? "Please fix form validation errors before saving.";
-      toast.error("Validation Error", { description: String(message) });
+    if (!beginSubmission("draft")) {
       return;
     }
 
-    const values = form.getValues();
+    let shouldUnlock = true;
     try {
+      setFieldErrors({});
+      const valid = await form.trigger();
+      if (!valid) {
+        // Surface the first validation error as a toast
+        const errors = form.formState.errors;
+        const firstError = Object.values(errors).find(Boolean);
+        const message = (firstError as any)?.message
+          ?? (firstError as any)?.root?.message
+          ?? "Please fix form validation errors before saving.";
+        toast.error("Validation Error", { description: String(message) });
+        return;
+      }
+
+      const values = form.getValues();
       const result = await createMutation.mutateAsync(values);
       toast.success("Invoice Created", {
         description: `Draft ${result.invoice_no} has been saved.`,
       });
+      shouldUnlock = false;
       router.push("/invoices");
     } catch (error) {
       handleApiError(error);
+    } finally {
+      if (shouldUnlock) endSubmission();
     }
   };
 
   const handleCreateAndPost = async () => {
-    setFieldErrors({});
-    const valid = await form.trigger();
-    if (!valid) {
-      const errors = form.formState.errors;
-      const firstError = Object.values(errors).find(Boolean);
-      const message = (firstError as any)?.message
-        ?? (firstError as any)?.root?.message
-        ?? "Please fix form validation errors before posting.";
-      toast.error("Validation Error", { description: String(message) });
+    if (!beginSubmission("post")) {
       return;
     }
 
-    const values = form.getValues();
+    let shouldUnlock = true;
     try {
+      setFieldErrors({});
+      const valid = await form.trigger();
+      if (!valid) {
+        const errors = form.formState.errors;
+        const firstError = Object.values(errors).find(Boolean);
+        const message = (firstError as any)?.message
+          ?? (firstError as any)?.root?.message
+          ?? "Please fix form validation errors before posting.";
+        toast.error("Validation Error", { description: String(message) });
+        return;
+      }
+
+      const values = form.getValues();
       const draft = await createMutation.mutateAsync(values);
       const posted = await postMutation.mutateAsync({ invoiceId: draft.id });
       toast.success("Invoice Posted", {
         description: `${posted.invoice_no} posted successfully.${posted.je_no ? ` JE: ${posted.je_no}` : ""}`,
       });
+      shouldUnlock = false;
       router.push("/invoices");
     } catch (error) {
       handleApiError(error);
+    } finally {
+      if (shouldUnlock) endSubmission();
     }
   };
 
@@ -262,6 +306,8 @@ export function useInvoiceForm() {
     // Submit
     handleCreateDraft,
     handleCreateAndPost,
+    isSubmitting,
+    submittingAction,
     createMutation,
     postMutation,
   };
