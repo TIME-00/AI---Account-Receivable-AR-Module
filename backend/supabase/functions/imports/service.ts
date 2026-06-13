@@ -538,23 +538,21 @@ export class ImportService {
             bank_account_resolution: bankAccount,
           };
           const receiptInput = validateCreateReceipt(mappedData);
-          if (autoPost) {
-            const preflight = await this.preflightExplicitReceiptImportOverAllocation(
-              auth,
-              resolved.customer.id,
-              mappedData,
-            );
+          const preflight = await this.preflightReceiptImportAllocation(
+            auth,
+            resolved.customer.id,
+            mappedData,
+          );
 
-            if (preflight) {
-              await this.client.from('import_rows').update({
-                status: preflight.status,
-                invoice_id: null,
-                receipt_id: null,
-                mapped_data: preflight.mappedData,
-                validation_errors: null,
-              }).eq('id', row.id);
-              continue;
-            }
+          if (preflight) {
+            await this.client.from('import_rows').update({
+              status: preflight.status,
+              invoice_id: null,
+              receipt_id: null,
+              mapped_data: preflight.mappedData,
+              validation_errors: null,
+            }).eq('id', row.id);
+            continue;
           }
 
           created = await this.receiptService.createReceipt(auth, receiptInput);
@@ -1038,7 +1036,7 @@ export class ImportService {
     };
   }
 
-  private async preflightExplicitReceiptImportOverAllocation(
+  private async preflightReceiptImportAllocation(
     auth: AuthContext,
     customerId: string,
     mappedData: Record<string, unknown>,
@@ -1052,9 +1050,18 @@ export class ImportService {
     const discountAmount = mappedData.discount_amount !== undefined
       ? Number(mappedData.discount_amount)
       : 0;
-    if (explicitAmount === undefined && discountAmount <= 0) return null;
-    if (explicitAmount !== undefined && (!Number.isFinite(explicitAmount) || explicitAmount <= 0)) return null;
-    if (!Number.isFinite(discountAmount) || discountAmount < 0) return null;
+    if (explicitAmount !== undefined && (!Number.isFinite(explicitAmount) || explicitAmount <= 0)) {
+      throw new ValidationError('allocation_amount must be greater than 0.', {
+        field: 'allocation_amount',
+        invoice_reference: invoiceReference,
+      });
+    }
+    if (!Number.isFinite(discountAmount) || discountAmount < 0) {
+      throw new ValidationError('discount_amount cannot be negative.', {
+        field: 'discount_amount',
+        invoice_reference: invoiceReference,
+      });
+    }
 
     let invoice: Invoice;
     try {
@@ -1064,8 +1071,29 @@ export class ImportService {
         asString(mappedData, 'currency'),
         invoiceReference,
       );
-    } catch {
-      return null;
+    } catch (error) {
+      if (!(error instanceof ValidationError)) throw error;
+      const reason = typeof error.details.reason === 'string'
+        ? error.details.reason
+        : 'allocation_preflight_failed';
+      return {
+        status: this.importAllocationPreflightStatus(reason),
+        mappedData: {
+          ...mappedData,
+          allocation_status: reason === 'invoice_not_found_for_customer' || reason === 'currency_mismatch' || reason === 'multiple_matches'
+            ? 'Unmatched'
+            : 'Review Required',
+          review_required: true,
+          auto_post_eligible: false,
+          auto_post_block_reason: error.message,
+          allocation_error: error.message,
+          allocation_error_reason: reason,
+          invoice_status: error.details.invoice_status,
+          invoice_currency: error.details.invoice_currency,
+          receipt_currency: error.details.receipt_currency,
+          outstanding: error.details.outstanding,
+        },
+      };
     }
 
     const invoiceOutstanding = Number(invoice.outstanding);
@@ -1098,6 +1126,10 @@ export class ImportService {
         allocation_suggestion: allocationSuggestion,
       },
     };
+  }
+
+  private importAllocationPreflightStatus(reason: string): ImportRowStatus {
+    return ['invoice_not_open', 'no_outstanding'].includes(reason) ? 'Skipped' : 'Unmatched';
   }
 
   private async allocateReceiptImportRow(
