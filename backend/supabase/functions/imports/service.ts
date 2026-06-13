@@ -159,6 +159,10 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function hasImportValue(row: Record<string, unknown>, key: string): boolean {
+  return asString(row, key) !== '';
+}
+
 function rowError(field: string, message: string): Record<string, unknown> {
   return { field, message };
 }
@@ -810,15 +814,37 @@ export class ImportService {
       const allocationAmount = allocationAmountText
         ? parseNumber(allocationAmountText, 'allocation_amount')
         : undefined;
+      const discountAmount = hasImportValue(raw, 'discount_amount')
+        ? parseNumber(asString(raw, 'discount_amount'), 'discount_amount')
+        : undefined;
+      const bankChargeAmount = hasImportValue(raw, 'bank_charge_amount')
+        ? parseNumber(asString(raw, 'bank_charge_amount'), 'bank_charge_amount')
+        : undefined;
+      const shortPaymentReason = asString(raw, 'short_payment_reason').toLowerCase() || undefined;
 
       if (!invoiceReference && allocationAmount !== undefined) {
         throw new ValidationError('allocation_amount requires invoice_reference.', {
           field: 'allocation_amount',
         });
       }
+      if (!invoiceReference && discountAmount !== undefined) {
+        throw new ValidationError('discount_amount requires invoice_reference.', {
+          field: 'discount_amount',
+        });
+      }
       if (allocationAmount !== undefined && allocationAmount <= 0) {
         throw new ValidationError('allocation_amount must be greater than 0.', {
           field: 'allocation_amount',
+        });
+      }
+      if (discountAmount !== undefined && discountAmount < 0) {
+        throw new ValidationError('discount_amount cannot be negative.', {
+          field: 'discount_amount',
+        });
+      }
+      if (bankChargeAmount !== undefined && bankChargeAmount < 0) {
+        throw new ValidationError('bank_charge_amount cannot be negative.', {
+          field: 'bank_charge_amount',
         });
       }
       if (allocationAmount !== undefined && allocationAmount > receiptAmount + 0.01) {
@@ -845,6 +871,9 @@ export class ImportService {
         remarks,
         invoice_reference: invoiceReference,
         allocation_amount: allocationAmount,
+        discount_amount: discountAmount,
+        bank_charge_amount: bankChargeAmount,
+        short_payment_reason: shortPaymentReason,
         allocation_status: invoiceReference ? 'Pending' : 'None',
         internal_remarks: 'Created by Sprint F4 receipt import flow',
       };
@@ -1015,10 +1044,17 @@ export class ImportService {
     mappedData: Record<string, unknown>,
   ): Promise<{ status: ImportRowStatus; mappedData: Record<string, unknown> } | null> {
     const invoiceReference = asString(mappedData, 'invoice_reference');
-    if (!invoiceReference || mappedData.allocation_amount === undefined) return null;
+    if (!invoiceReference) return null;
 
-    const explicitAmount = Number(mappedData.allocation_amount);
-    if (!Number.isFinite(explicitAmount) || explicitAmount <= 0) return null;
+    const explicitAmount = mappedData.allocation_amount !== undefined
+      ? Number(mappedData.allocation_amount)
+      : undefined;
+    const discountAmount = mappedData.discount_amount !== undefined
+      ? Number(mappedData.discount_amount)
+      : 0;
+    if (explicitAmount === undefined && discountAmount <= 0) return null;
+    if (explicitAmount !== undefined && (!Number.isFinite(explicitAmount) || explicitAmount <= 0)) return null;
+    if (!Number.isFinite(discountAmount) || discountAmount < 0) return null;
 
     let invoice: Invoice;
     try {
@@ -1033,11 +1069,16 @@ export class ImportService {
     }
 
     const invoiceOutstanding = Number(invoice.outstanding);
-    if (explicitAmount <= invoiceOutstanding + 0.01) return null;
+    const allocationAmount = explicitAmount ?? Math.min(Number(mappedData.receipt_amount), invoiceOutstanding);
+    const settlementAmount = allocationAmount + discountAmount;
+    if (settlementAmount <= invoiceOutstanding + 0.01) return null;
 
     const receiptAmount = Number(mappedData.receipt_amount);
     const allocationSuggestion = roundMoney(Math.min(receiptAmount, invoiceOutstanding));
     const unappliedAmount = roundMoney(Math.max(receiptAmount - allocationSuggestion, 0));
+    const reason = discountAmount > 0
+      ? 'allocation_amount plus discount_amount exceeds invoice outstanding'
+      : 'allocation_amount exceeds invoice outstanding';
 
     return {
       status: 'Skipped',
@@ -1048,8 +1089,11 @@ export class ImportService {
         allocation_status: 'Review Required',
         review_required: true,
         auto_post_eligible: false,
-        auto_post_block_reason: 'allocation_amount exceeds invoice outstanding',
-        overpayment_detected: true,
+        auto_post_block_reason: reason,
+        overpayment_detected: discountAmount === 0,
+        discount_validation_error: discountAmount > 0 ? reason : undefined,
+        excess_settlement_amount: discountAmount > 0 ? roundMoney(settlementAmount - invoiceOutstanding) : undefined,
+        suggested_reason: discountAmount > 0 ? 'discount' : mappedData.suggested_reason,
         unapplied_amount: unappliedAmount,
         allocation_suggestion: allocationSuggestion,
       },
@@ -1087,13 +1131,30 @@ export class ImportService {
       const explicitAmount = mappedData.allocation_amount !== undefined
         ? Number(mappedData.allocation_amount)
         : undefined;
+      const discountAmount = mappedData.discount_amount !== undefined
+        ? Number(mappedData.discount_amount)
+        : 0;
+      const bankChargeAmount = mappedData.bank_charge_amount !== undefined
+        ? Number(mappedData.bank_charge_amount)
+        : undefined;
+      const shortPaymentReason = asString(mappedData, 'short_payment_reason');
       const allocationAmount = explicitAmount ?? Math.min(Number(receipt.unallocated_amount), Number(invoice.outstanding));
       const overpaymentDetected = explicitAmount === undefined
         && Number(receipt.unallocated_amount) > Number(invoice.outstanding) + 0.005;
+      const settlementAmount = allocationAmount + discountAmount;
+      const shortPaymentDifference = roundMoney(Math.max(Number(invoice.outstanding) - settlementAmount, 0));
+      const bankChargeDetected = bankChargeAmount !== undefined || shortPaymentReason === 'bank_charge';
+      const shortPaymentDetected = shortPaymentDifference > 0.005 || bankChargeDetected;
 
       if (!Number.isFinite(allocationAmount) || allocationAmount <= 0) {
         throw new ValidationError('allocation_amount must be greater than 0.', {
           field: 'allocation_amount',
+          invoice_reference: invoiceReference,
+        });
+      }
+      if (!Number.isFinite(discountAmount) || discountAmount < 0) {
+        throw new ValidationError('discount_amount cannot be negative.', {
+          field: 'discount_amount',
           invoice_reference: invoiceReference,
         });
       }
@@ -1103,6 +1164,7 @@ export class ImportService {
         allocations: [{
           invoice_id: invoice.id,
           amount: allocationAmount,
+          ...(discountAmount > 0 ? { discount_amount: discountAmount } : {}),
         }],
       });
 
@@ -1119,6 +1181,23 @@ export class ImportService {
         invoice_id: invoice.id,
         invoice_no: invoice.invoice_no,
         allocated_amount: allocation.allocated_amount,
+        ...(discountAmount > 0 ? {
+          discount_amount: discountAmount,
+          discount_applied: true,
+        } : {}),
+        ...(shortPaymentDetected ? {
+          short_payment_detected: true,
+          difference_amount: shortPaymentDifference > 0.005
+            ? shortPaymentDifference
+            : roundMoney(bankChargeAmount ?? 0),
+          suggested_reason: bankChargeDetected ? 'bank_charge' : 'underpayment',
+          review_required: bankChargeDetected ? true : false,
+        } : {}),
+        ...(bankChargeDetected ? {
+          bank_charge_amount: bankChargeAmount,
+          bank_charge_posting_required: true,
+          bank_charge_review_reason: 'Bank charge accounting is not automated in Batch 5. The received amount was allocated only; classify and post bank charges through a future GL-safe flow.',
+        } : {}),
         ...(overpaymentDetected ? {
           overpayment_detected: true,
           unapplied_amount: Number(updatedReceipt.unallocated_amount),

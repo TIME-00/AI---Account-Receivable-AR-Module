@@ -58,11 +58,14 @@ const RECEIPT_COLUMNS = [
   { name: "remarks", required: false, description: "Optional internal receipt remarks." },
   { name: "invoice_reference", required: false, description: "Optional exact invoice_no for one-receipt-to-one-invoice allocation." },
   { name: "allocation_amount", required: false, description: "Optional allocation amount. Requires invoice_reference and cannot exceed receipt amount." },
+  { name: "discount_amount", required: false, description: "Optional explicit sales discount. Never inferred from a short payment." },
+  { name: "bank_charge_amount", required: false, description: "Optional diagnostic-only bank charge amount. Not posted as discount." },
+  { name: "short_payment_reason", required: false, description: "Optional reason such as bank_charge. Bank charges require review." },
 ];
 
-const SAMPLE_CSV = `customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,receipt_date,currency,receipt_reference,payment_method,bank_account_code,bank_account_id,amount,cheque_date,remarks,invoice_reference,allocation_amount
-CUST-001,,,,,,,,,,,2026-05-28,SGD,TT-REF-001,TT,5141-2200-0001,,100.00,,Bank transfer receipt,INV-202605-00001,100.00
-,New Receipt Client Pte Ltd,202612346N,10 Anson Road,Downtown Core,Central,079903,SG,Alex Tan,+6561234567,alex.receipts@example.com,2026-05-28,SGD,CHQ-0001,CHQ,5141-2200-0001,,250.00,2026-05-27,Cheque receipt,,`;
+const SAMPLE_CSV = `customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,receipt_date,currency,receipt_reference,payment_method,bank_account_code,bank_account_id,amount,cheque_date,remarks,invoice_reference,allocation_amount,discount_amount,bank_charge_amount,short_payment_reason
+CUST-001,,,,,,,,,,,2026-05-28,SGD,TT-REF-001,TT,5141-2200-0001,,100.00,,Bank transfer receipt,INV-202605-00001,100.00,,,
+,New Receipt Client Pte Ltd,202612346N,10 Anson Road,Downtown Core,Central,079903,SG,Alex Tan,+6561234567,alex.receipts@example.com,2026-05-28,SGD,CHQ-0001,CHQ,5141-2200-0001,,250.00,2026-05-27,Cheque receipt,,,,`;
 
 const ROW_STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   Pending: { bg: "bg-slate-100", text: "text-slate-600", dot: "bg-slate-400" },
@@ -511,6 +514,12 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
               const allocationSuggestion = row.mapped_data?.allocation_suggestion;
               const allocationError = row.mapped_data?.allocation_error;
               const allocationErrorReason = row.mapped_data?.allocation_error_reason;
+              const shortPaymentDetected = row.mapped_data?.short_payment_detected === true;
+              const differenceAmount = row.mapped_data?.difference_amount;
+              const suggestedReason = row.mapped_data?.suggested_reason;
+              const discountAmount = row.mapped_data?.discount_amount;
+              const bankChargePostingRequired = row.mapped_data?.bank_charge_posting_required === true;
+              const bankChargeReviewReason = row.mapped_data?.bank_charge_review_reason;
               return (
                 <tr key={row.id} className={cn("transition-colors", hasErrors ? "bg-red-50/50" : reviewRequired ? "bg-amber-50/50" : "hover:bg-slate-50")}>
                   <td className="px-3 py-2 font-mono text-xs text-slate-400">{row.row_number}</td>
@@ -544,8 +553,20 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                           </p>
                           {reviewRequired && (
                             <p className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                              Review required before receipt creation
+                              Review required
                             </p>
+                          )}
+                          {discountAmount !== undefined && Number(discountAmount) > 0 && (
+                            <p className="text-[10px] text-purple-600">Explicit discount: {String(discountAmount)}</p>
+                          )}
+                          {shortPaymentDetected && (
+                            <p className="text-[10px] text-amber-700">
+                              Short payment: {String(differenceAmount ?? "-")}
+                              {suggestedReason ? ` (${String(suggestedReason)})` : ""}
+                            </p>
+                          )}
+                          {bankChargePostingRequired && (
+                            <p className="text-[10px] font-medium text-amber-700">Bank charge review required</p>
                           )}
                           {allocationSuggestion !== undefined && (
                             <p className="text-[10px] text-slate-500">Suggested allocation: {String(allocationSuggestion)}</p>
@@ -569,7 +590,7 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                           <div className="space-y-0.5">
                             <p className="text-xs text-amber-700">
                               <code className="mr-1 rounded bg-amber-100 px-1 font-mono">review_required</code>
-                              {String(autoPostBlockReason || "Row needs manual review before posting/allocation.")}
+                              {String(bankChargeReviewReason || autoPostBlockReason || "Row needs manual review before posting/allocation.")}
                             </p>
                           </div>
                         ) : row.status === "Unmatched" && allocationError ? (
