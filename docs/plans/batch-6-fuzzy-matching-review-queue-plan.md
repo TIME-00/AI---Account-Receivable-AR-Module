@@ -3,7 +3,7 @@
 **Date**: 2026-06-13  
 **Type**: Implementation plan / documentation only (no code changed in this document)  
 **Depends on**: Batch 2C (visibility guards), Batch 3 (allocation hardening), Batch 4 (overpayment), Batch 5 (discount/bank charge), Batch 5-Fix-A (import preflight), Batch 5-Fix-B (submit lock)  
-**Status**: 🟢 Codex-reviewed — **Approved with changes** applied (concrete review API, backend-first sub-batch order, explicit create-new rule, exact status mapping, threshold constants, expanded safety scope); ready for implementation approval
+**Status**: 🟢 Codex-reviewed (round 2) — **Approved with changes** applied (exact-raw-vs-normalized-only invoice rule, execute-time re-validation of approved selections, read-only Batch 6A scope, full safety scope); ready for implementation approval
 
 > [!IMPORTANT]
 > This is a plan only. No backend code, frontend code, migration, or RPC is changed here. Implementation happens in later, separately-reviewed steps.
@@ -60,12 +60,12 @@ Batch 6 introduces **suggestion-only** fuzzy matching. It changes the *no-exact-
 |--------|-------|----------|
 | **customer_name → existing visible customer** | `customer_name` with no exact normalized match | Generate ranked suggestions from **visible, in-scope, company** customers; route row to review **instead of `Create New`** when confidence is in the review band. |
 | **registration_no → high-confidence match** | `registration_no` present | Treat a normalized registration-number equality as a **high-confidence** customer match candidate (stronger signal than name). |
-| **invoice_reference → invoice_no normalization** | `invoice_reference` with no exact match | Compare against candidate `invoice_no`s using normalization (strip spaces/dashes/case) before declaring not-found. |
+| **invoice_reference → invoice_no normalization** | `invoice_reference` with no **exact raw** match | Compare against candidate `invoice_no`s using normalization (strip spaces/dashes/case/punctuation). A normalized-only match is a **suggestion** (`review_required`, status `Unmatched`) — **never** an automatic allocation (see §3.1.1-B). |
 | **invoice_reference typo suggestion** | normalized still no match | Offer the closest invoice_no(s) for the **same customer** as a suggestion (review), not an allocation. |
 | **receipt reference / remarks → invoice suggestion** | no `invoice_reference`, but `reference_no`/`remarks` resemble an invoice_no | **Optional, low-priority.** Offer a *suggestion only* if it is safe and unambiguous; otherwise leave as unallocated cash (Batch 4 behavior). Never auto-allocate from remarks. |
 
 > [!NOTE]
-> Fuzzy matching **adds a suggestion layer**; it does not weaken any existing exact-match path. Exact code / exact normalized name / exact invoice_no continue to behave exactly as today.
+> Fuzzy matching **adds a suggestion layer**; it does not weaken any existing exact-match path. Exact `customer_code`, exact normalized customer **name**, and **exact raw `invoice_no`** continue to behave exactly as today. **Normalized-only `invoice_no` matches are suggestions, not exact matches** (§3.1.1).
 
 ---
 
@@ -76,12 +76,31 @@ Batch 6 introduces **suggestion-only** fuzzy matching. It changes the *no-exact-
 > [!IMPORTANT]
 > All thresholds and the candidate cap are **conservative constants defined in code** (e.g. `_shared/fuzzy.ts`). **No database config key, no migration, no runtime tuning surface.** Conservative defaults are preferred so the system errs toward "route to review" rather than over-suggesting. **Fuzzy matching never auto-mutates** at any tier.
 
+> [!IMPORTANT]
+> **Batch 6A is conservative: an exact raw match can proceed; normalized-only or fuzzy matches are suggestions only.**
+> - The only **no-review** paths are: exact `customer_code`, exact normalized customer **name** (today's existing behavior), and **exact raw `invoice_no`** match.
+> - A **normalized-only** `invoice_no` match (differs only by spacing / dashes / case / punctuation) is **NOT** treated as a deterministic exact match in Batch 6A. It is a **suggestion** requiring review — never an automatic allocation. (See §3.1.1.)
+
 | Category | Meaning | Action |
 |----------|---------|--------|
-| **Exact / normalized-exact match** | exact code, exact normalized name, or exact (incl. normalized space/dash/case) `invoice_no` | Proceed as today — **no review**. |
-| **High-confidence suggestion** | normalized registration-number equality; invoice_no equal after normalization | **Suggest, default-selected, still requires explicit user confirm** before any mutation. |
+| **Exact match** | exact `customer_code`, exact normalized customer **name**, or **exact raw `invoice_no`** | Proceed through the existing flow — **no fuzzy review**. |
+| **High-confidence suggestion** | normalized registration-number equality; **normalized-only `invoice_no` match** (spacing/dash/case/punctuation) | **Suggestion only** → `review_required = true`; requires explicit user confirm in Batch 6B/6C before any mutation. **No automatic allocation.** |
 | **Review-required suggestion** | token/prefix similarity ≥ minimum threshold | **Suggest, require explicit user selection** — no default action. |
 | **Low confidence (ignored)** | similarity below the minimum threshold | **No suggestion** → treated as today (`Unmatched` for receipts; invoice-import `Create New` only per §4.1.1). |
+
+### 3.1.1 Exact raw vs. normalized-only invoice_no (explicit rule)
+
+> [!IMPORTANT]
+> **A. Exact raw `invoice_no` match** — if `invoice_reference` exactly equals `invoice.invoice_no` under the **current** exact-matching behavior, **and** the invoice passes the existing company / customer / currency / status / outstanding checks (`resolveAllocationInvoice`), it **may proceed through the existing flow without fuzzy review**. This is unchanged from today.
+>
+> **B. Normalized-only `invoice_no` match** — when `invoice_reference` matches an `invoice_no` **only after normalization** (spacing, dash, case, or punctuation-only differences):
+> - ❌ Do **not** treat it as a deterministic exact match in Batch 6A.
+> - ✅ Treat it as a **suggestion**.
+> - ✅ Set `mapped_data.review_required = true`.
+> - ✅ Use an existing status — **`Unmatched`** (the raw reference did not exactly resolve).
+> - ✅ Store `suggested_invoice_id` / `suggested_invoice_no` / `match_confidence` / reason (`normalized_invoice_no`) in `mapped_data`.
+> - ❌ **No** automatic allocation or financial mutation from a normalized-only match.
+> - ✅ User review (approve in Batch 6B / via the 6C UI) is required before the corrected reference re-enters the verified flow.
 
 ### 3.2 Signals (combined into a score)
 
@@ -121,7 +140,8 @@ Every case below maps to an **existing** status value. No new status is introduc
 
 | Case | `import_rows.status` | `review_required` | Notes |
 |------|----------------------|-------------------|-------|
-| **Exact match success** (code / normalized name / exact `invoice_no`) | `Valid` → `Created` → `Posted` → `Allocated` per the existing flow | `false` (unless a Category-2 diagnostic applies) | Unchanged from today. |
+| **Exact match success** (exact code / exact normalized name / **exact raw `invoice_no`**) | `Valid` → `Created` → `Posted` → `Allocated` per the existing flow | `false` (unless a Category-2 diagnostic applies) | Unchanged from today. No fuzzy review. |
+| **Normalized-only `invoice_no` match** (spacing/dash/case/punctuation differences) | `Unmatched` | `true` | **Suggestion only** (§3.1.1-B). Carries `suggested_invoice_*`, reason `normalized_invoice_no`. **No auto-allocation.** |
 | **Customer suggestion needed** (name typo, candidate(s) in review band) | `Unmatched` | `true` | Must **not** auto-create. Carries `customer_candidates`. |
 | **Invoice suggestion needed** (invoice_reference typo, candidate(s)) | `Unmatched` | `true` | Must **not** auto-allocate. Carries `invoice_candidates`. |
 | **Multiple candidate matches** (≥2 in/above review band) | `Unmatched` | `true` | Never auto-pick; top-N listed. |
@@ -201,16 +221,22 @@ Every case below maps to an **existing** status value. No new status is introduc
 
 ## 5. Frontend UX Design
 
-Enhance the existing import result tables (no new pages required initially):
+Enhance the existing import result tables (no new pages required initially).
 
+> [!IMPORTANT]
+> **Batch 6A ships only the read-only display items below** (Suggested Match block, confidence, reason, Review Required badge, non-allocatable marking). The **interactive** items (selection control, inline edit/re-check, reject, confirm) are **Batch 6C** and are wired to the Batch 6B review-resolution API — never to a direct Supabase write.
+
+**Read-only display (Batch 6A):**
 - **"Suggested Match" block** per review row: suggested customer (`code — name`) and/or suggested invoice (`invoice_no`, outstanding, currency).
 - **Confidence + reason**: show `match_confidence` (e.g. as %) and human-readable reason ("Closest name match", "Invoice number differs only by spacing").
 - **"Review Required" badge** (reuse existing amber styling).
+- **Non-allocatable candidates** are visually marked (greyed, "cannot allocate: Paid / currency mismatch") and unselectable.
+
+**Interactive review actions (Batch 6C — after the 6B API exists):**
 - **Selection control**: radio/select to pick among `customer_candidates` / `invoice_candidates`.
 - **Correct reference**: inline edit of `invoice_reference` / `customer_code`, then "re-check".
 - **Reject** suggestion button.
 - **Explicit confirm** required to proceed — **no auto-create / auto-allocate**. Submit reuses the Batch 5-Fix-B submit-lock pattern to prevent double-submit.
-- **Non-allocatable candidates** are visually marked (greyed, "cannot allocate: Paid / currency mismatch") and unselectable.
 
 ---
 
@@ -279,10 +305,40 @@ review: new RegExp(`^\\/${UUID}\\/rows\\/${UUID}\\/review\\/?$`, 'i'),
 
 **No frontend direct Supabase writes:** the frontend calls **only** this Edge Function route; it must not update `import_rows` / `mapped_data` directly via the Supabase client. All review mutations are server-mediated and authorization-checked.
 
-### 6.3 Human approval before mutation
-- No create/post/allocate occurs from suggestion generation **or** from the review route. Financial mutation happens **only** when an approved/edited row re-enters the existing verified `execute` create→post→allocate path and passes all checks.
+### 6.3 Approved-selection consumption at execute time (re-validation is mandatory)
 
-### 6.4 Hard prohibitions (unchanged)
+> [!CAUTION]
+> **Approved `mapped_data` selections must never be blindly trusted.** A selection written during review can become stale (customer hidden/deleted afterward, invoice paid/closed by another action, assignment changed, currency edited). The `execute` path must **re-validate from source** before it uses any approved `customer_id` / `invoice_id` — it must not treat the stored selection as authoritative.
+
+Before `execute` uses an approved customer/invoice selection to create / post / allocate, the backend **must re-validate, server-side, from current data**:
+
+1. **`company_id` scope** — batch, row, customer, and invoice all belong to `auth.companyId`.
+2. **Authenticated user role** — caller is permitted to execute imports (System Admin config-only / Auditor read-only blocked).
+3. **AR Clerk customer assignment** — `requireCustomerAccess(auth, customerId)` on the approved customer.
+4. **Customer not hidden** — `is_hidden = false` (re-checked now, not at suggestion time).
+5. **Customer not deleted** — `is_deleted = false`.
+6. **Invoice belongs to the same company** — `invoice.company_id = auth.companyId`.
+7. **Invoice belongs to the approved customer context** — `invoice.customer_id` equals the approved/resolved customer.
+8. **Invoice status is allocatable** — `Open` / `Overdue` / `Partially Paid`.
+9. **Invoice currency matches** the receipt / import-row currency.
+10. **Invoice `outstanding > 0`.**
+11. **`allocation_amount` / `discount_amount` rules** — `amount > 0`, `discount ≥ 0`, `amount + discount ≤ outstanding`.
+12. **Batch 5-Fix-A import allocation preflight** (`preflightReceiptImportAllocation`) re-runs in full.
+
+**On re-validation failure (any check above):**
+- ❌ Do **not** create / post / allocate.
+- ✅ Mark the row **back to review** using the **existing status mapping** (§4.1): `Unmatched` / `Skipped` / `Error` as appropriate, with `review_required = true` and the relevant `allocation_error_reason` / `auto_post_block_reason`.
+- ✅ Clear or supersede the stale selection so it cannot be reused without a fresh approval.
+
+**Guarantees:**
+- ❌ Do **not** trust stale `mapped_data` selections — every check is recomputed from live data at execute time.
+- ❌ Do **not** allow a frontend direct Supabase update to substitute for this server-side re-validation.
+- ✅ Approval **re-enters the existing verified import service paths** (`validateCreateInvoice` / `validateCreateReceipt` → Batch 5-Fix-A preflight → `post_receipt` / `allocate_receipt` RPCs) — **never** direct financial-table mutation.
+
+### 6.4 Human approval before mutation
+- No create/post/allocate occurs from suggestion generation **or** from the review route. Financial mutation happens **only** when an approved/edited row re-enters the existing verified `execute` create→post→allocate path **and passes the §6.3 re-validation**.
+
+### 6.5 Hard prohibitions (unchanged)
 - ❌ No direct `allocation_details` insert.
 - ❌ No direct `invoices.outstanding` update.
 - ❌ No direct `receipts.allocated_amount` / `unallocated_amount` update.
@@ -321,12 +377,14 @@ review: new RegExp(`^\\/${UUID}\\/rows\\/${UUID}\\/review\\/?$`, 'i'),
 | AC-7 | **Currency mismatch** is blocked (not selectable as allocatable). |
 | AC-8 | **AR Clerk** sees suggestions only within assignment scope; company-scoped for all. |
 | AC-9 | A **user-approved** correction proceeds through the **existing verified** import/create/post/allocate flow (Batch 5-Fix-A preflight re-runs). |
-| AC-10 | Existing **exact-match** imports (code, normalized name, exact invoice_no) still work unchanged. |
-| AC-11 | **Batch 5-Fix-A preflight** still rejects blocking rows before document creation. |
-| AC-12 | Batch 5 bank-charge **non-blocking** diagnostics still create/post/allocate. |
-| AC-13 | **No financial mutation** occurs from suggestion generation alone. |
-| AC-14 | `POST /allocations/auto` still returns **403 `AUTO_ALLOCATION_DISABLED`**. |
-| AC-15 | No new DB table / no new `import_rows.status` value / no migration (unless Codex approves). |
+| AC-10 | Existing **exact raw** matches (code, normalized name, exact raw invoice_no) still work unchanged with **no review**. |
+| AC-11 | A **normalized-only `invoice_no`** match (spacing/dash/case/punctuation) → `Unmatched` + `review_required` + `suggested_invoice_*`; **does not auto-allocate** (§3.1.1-B). |
+| AC-12 | An **approved selection that has gone stale** (customer later hidden/deleted, invoice later paid/closed, currency changed, assignment removed) → re-validation **fails** at execute time; **no create/post/allocate**; row returned to review per §6.3. |
+| AC-13 | **Batch 5-Fix-A preflight** still rejects blocking rows before document creation. |
+| AC-14 | Batch 5 bank-charge **non-blocking** diagnostics still create/post/allocate. |
+| AC-15 | **No financial mutation** occurs from suggestion generation **or** from the review route. |
+| AC-16 | `POST /allocations/auto` still returns **403 `AUTO_ALLOCATION_DISABLED`**. |
+| AC-17 | No new DB table / no new `import_rows.status` value / no migration (unless Codex approves); no OCR; no fully automatic posting; no backend idempotency. |
 
 ---
 
@@ -378,7 +436,9 @@ Evidence document (later): `docs/evidence/audit-remediation/BATCH_6_FUZZY_MATCHI
 - [ ] Confirms exact-match behavior is **unchanged** (no regression).
 - [ ] Confirms the **invoice-import create-new rule** (§4.1.1): create-new only when no above-threshold candidate **and** all validation/name/registration/visibility conditions hold; otherwise `Unmatched` + suggestions.
 - [ ] Confirms the **review-resolution route** design (§6.2): route shape, payload, the five actions, role checks, `companyId` enforcement, AR Clerk scope, hidden/deleted re-check at approval time, and that the route performs **no** financial mutation (only re-validation; mutation stays behind the existing `execute` path).
-- [ ] Confirms the **exact status mapping** (§4.1), including **currency mismatch → `Unmatched`**.
+- [ ] Confirms the **exact status mapping** (§4.1), including **currency mismatch → `Unmatched`** and **normalized-only `invoice_no` → `Unmatched` suggestion**.
+- [ ] Confirms the **exact-raw-vs-normalized-only invoice rule** (§3.1.1): exact raw may proceed; normalized-only is suggestion-only with `review_required`.
+- [ ] Confirms **approved-selection re-validation at execute time** (§6.3): stale selections are never trusted; all 12 checks recomputed from live data; failure returns the row to review with no mutation.
 - [ ] Confirms **thresholds are conservative code constants** (no DB config) and fuzzy matching **never auto-mutates**.
 - [ ] Confirms the **backend-first sub-batch order** (§12): 6-A diagnostics + read-only display, 6-B review API, 6-C UI actions, 6-D optional.
 - [ ] Confirms **no OCR**, **no fully automatic posting**, **no backend idempotency** in Batch 6.
@@ -436,6 +496,6 @@ Recommended order: **6-A → 6-B → 6-C**, with **6-D** optional/last.
 
 ---
 
-*Document created: 2026-06-13 · Updated 2026-06-13 (Codex review — concrete review API, sub-batch reorder, explicit create-new rule, exact status mapping, threshold constants, expanded safety scope)*  
-*Status: 🟢 Codex-reviewed — Approved with changes; ready for implementation approval*  
+*Document created: 2026-06-13 · Updated 2026-06-13 (Codex round 1 — concrete review API, sub-batch reorder, create-new rule, status mapping, threshold constants, safety scope) · Updated 2026-06-13 (Codex round 2 — exact-raw-vs-normalized-only invoice rule, execute-time re-validation of approved selections, read-only 6A scope)*  
+*Status: 🟢 Codex-reviewed (round 2) — Approved with changes; ready for implementation approval*  
 *Author: Claude (GenAI-assisted development)*
