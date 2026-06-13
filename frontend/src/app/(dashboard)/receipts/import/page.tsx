@@ -29,6 +29,8 @@ import {
   IMPORT_STEPS,
   useImport,
   type ImportCustomerResolution,
+  type ImportCustomerSuggestion,
+  type ImportInvoiceSuggestion,
   type ImportRow,
 } from "@/hooks/use-import";
 import { LoadingButton } from "@/components/ui/loading-button";
@@ -556,6 +558,7 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                               Review required
                             </p>
                           )}
+                          {reviewRequired && <SuggestionDiagnostics mappedData={row.mapped_data} compact />}
                           {discountAmount !== undefined && Number(discountAmount) > 0 && (
                             <p className="text-[10px] text-purple-600">Explicit discount: {String(discountAmount)}</p>
                           )}
@@ -592,6 +595,7 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                               <code className="mr-1 rounded bg-amber-100 px-1 font-mono">review_required</code>
                               {String(bankChargeReviewReason || autoPostBlockReason || "Row needs manual review before posting/allocation.")}
                             </p>
+                            <SuggestionDiagnostics mappedData={row.mapped_data} />
                           </div>
                         ) : row.status === "Unmatched" && allocationError ? (
                           <div className="space-y-0.5">
@@ -629,4 +633,59 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
       </div>
     </div>
   );
+}
+
+function SuggestionDiagnostics({
+  mappedData,
+  compact = false,
+}: {
+  mappedData: Record<string, unknown> | null;
+  compact?: boolean;
+}) {
+  const customers = suggestionArray<ImportCustomerSuggestion>(mappedData, "suggested_customers", "customer_candidates");
+  const invoices = suggestionArray<ImportInvoiceSuggestion>(mappedData, "suggested_invoices", "invoice_candidates");
+  const reason = String(mappedData?.suggestion_reason ?? mappedData?.allocation_error_reason ?? "manual_review_required");
+  const confidence = mappedData?.confidence ?? mappedData?.match_confidence;
+
+  if (customers.length === 0 && invoices.length === 0) return null;
+
+  return (
+    <div className={cn("space-y-1", compact ? "text-[10px]" : "text-xs")}>
+      {!compact && (
+        <p className="font-medium text-amber-700">
+          Suggested match
+          {confidence !== undefined ? ` - ${Math.round(Number(confidence) * 100)}% confidence` : ""}
+        </p>
+      )}
+      <p className="text-amber-700">Reason: {reason}</p>
+      {customers.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="font-medium text-slate-600">Suggested customer</p>
+          {customers.map((customer) => (
+            <p key={customer.customer_id} className="text-slate-600">
+              {customer.customer_code} - {customer.customer_name} ({Math.round(Number(customer.confidence) * 100)}%, {customer.reason})
+            </p>
+          ))}
+        </div>
+      )}
+      {invoices.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="font-medium text-slate-600">Suggested invoice</p>
+          {invoices.map((invoice) => (
+            <p key={invoice.invoice_id} className={cn("text-slate-600", invoice.allocatable === false && "text-slate-400")}>
+              {invoice.invoice_no} ({Math.round(Number(invoice.confidence) * 100)}%, {invoice.reason})
+              {invoice.outstanding !== undefined ? ` - outstanding ${String(invoice.outstanding)}` : ""}
+              {invoice.currency ? ` ${invoice.currency}` : ""}
+              {invoice.allocatable === false ? " - not allocatable" : ""}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function suggestionArray<T>(mappedData: Record<string, unknown> | null, preferred: string, fallback: string): T[] {
+  const value = mappedData?.[preferred] ?? mappedData?.[fallback];
+  return Array.isArray(value) ? value as T[] : [];
 }

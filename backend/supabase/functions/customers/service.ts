@@ -23,6 +23,12 @@ import {
 import type { AuthContext } from '../_shared/auth.ts';
 import { requireRole, requireCustomerAccess, getCustomerAccessFilter } from '../_shared/auth.ts';
 import { validateUUID, requireString, validateMinLength } from '../_shared/validators.ts';
+import {
+  FUZZY_CANDIDATE_LIMIT,
+  FUZZY_CUSTOMER_REVIEW_THRESHOLD,
+  normalizeIdentifier,
+  topFuzzyCandidates,
+} from '../_shared/fuzzy.ts';
 import type {
   Customer,
   CustomerCreditUtilization,
@@ -43,10 +49,21 @@ export interface ImportCustomerLookup {
 }
 
 export interface ImportCustomerClassification {
-  action: 'Matched Existing' | 'Create New';
+  action: 'Matched Existing' | 'Create New' | 'Review Required';
   customer: Customer | null;
-  matchedBy: 'customer_code' | 'normalized_name' | null;
+  matchedBy: 'customer_code' | 'normalized_name' | 'fuzzy_suggestion' | null;
   normalizedCustomerName: string;
+  suggestions?: ImportCustomerSuggestion[];
+  suggestionReason?: string;
+  confidence?: number;
+}
+
+export interface ImportCustomerSuggestion {
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  confidence: number;
+  reason: string;
 }
 
 // ─── Customer Service ───────────────────────────────────────────────────────
@@ -253,6 +270,19 @@ export class CustomerService {
         customer,
         matchedBy: 'normalized_name',
         normalizedCustomerName: customerName,
+      };
+    }
+
+    const suggestions = await this.findVisibleCustomerSuggestions(auth, customerName, registrationNo);
+    if (suggestions.length > 0) {
+      return {
+        action: 'Review Required',
+        customer: null,
+        matchedBy: 'fuzzy_suggestion',
+        normalizedCustomerName: customerName,
+        suggestions,
+        suggestionReason: suggestions.length > 1 ? 'multiple_customer_candidates' : suggestions[0].reason,
+        confidence: suggestions[0].confidence,
       };
     }
 
@@ -935,6 +965,61 @@ export class CustomerService {
     }
 
     return data as Customer | null;
+  }
+
+  private async findVisibleCustomerSuggestions(
+    auth: AuthContext,
+    customerName: string,
+    registrationNo?: string,
+  ): Promise<ImportCustomerSuggestion[]> {
+    const allowedIds = await getCustomerAccessFilter(auth);
+    if (allowedIds !== null && allowedIds.length === 0) return [];
+
+    let query = this.client
+      .from('customers')
+      .select('id, customer_id, customer_name, registration_no')
+      .eq('company_id', auth.companyId)
+      .eq('is_deleted', false)
+      .eq('is_hidden', false)
+      .limit(250);
+
+    if (allowedIds !== null) {
+      query = query.in('id', allowedIds);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(`Failed to find customer suggestions: ${error.message}`);
+
+    const visibleCustomers = (data ?? []) as Array<Pick<Customer, 'id' | 'customer_id' | 'customer_name' | 'registration_no'>>;
+    const normalizedRegistrationNo = registrationNo ? normalizeRegistrationNo(registrationNo) : '';
+
+    if (normalizedRegistrationNo) {
+      const registrationMatches = visibleCustomers
+        .filter((customer) => normalizeRegistrationNo(customer.registration_no ?? '') === normalizedRegistrationNo)
+        .slice(0, FUZZY_CANDIDATE_LIMIT)
+        .map((customer) => ({
+          customer_id: customer.id,
+          customer_code: customer.customer_id,
+          customer_name: customer.customer_name,
+          confidence: 0.98,
+          reason: 'registration_match',
+        }));
+
+      if (registrationMatches.length > 0) return registrationMatches;
+    }
+
+    return topFuzzyCandidates(
+      customerName,
+      visibleCustomers,
+      (customer) => customer.customer_name,
+      FUZZY_CUSTOMER_REVIEW_THRESHOLD,
+    ).map((candidate) => ({
+      customer_id: candidate.item.id,
+      customer_code: candidate.item.customer_id,
+      customer_name: candidate.item.customer_name,
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+    })).filter((candidate) => normalizeIdentifier(candidate.customer_name) !== normalizeIdentifier(customerName));
   }
 
   private assertImportCustomerDataConsistent(

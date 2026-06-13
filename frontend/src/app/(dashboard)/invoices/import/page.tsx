@@ -14,6 +14,8 @@ import {
   type ImportStep,
   type ImportRow,
   type ImportCustomerResolution,
+  type ImportCustomerSuggestion,
+  type ImportInvoiceSuggestion,
   type ImportBatchStatus,
 } from "@/hooks/use-import";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -733,12 +735,13 @@ function RowsTable({
             {rows.map((row) => {
               const hasErrors = row.status === "Error" && row.validation_errors?.length;
               const resolution = row.mapped_data?.customer_resolution as ImportCustomerResolution | undefined;
+              const reviewRequired = row.mapped_data?.review_required === true;
               return (
                 <tr
                   key={row.id}
                   className={cn(
                     "transition-colors",
-                    hasErrors ? "bg-red-50/50" : "hover:bg-slate-50"
+                    hasErrors ? "bg-red-50/50" : reviewRequired ? "bg-amber-50/50" : "hover:bg-slate-50"
                   )}
                 >
                   <td className="px-3 py-2 text-xs text-slate-400 font-mono">{row.row_number}</td>
@@ -796,6 +799,8 @@ function RowsTable({
                             </p>
                           ))}
                         </div>
+                      ) : reviewRequired ? (
+                        <SuggestionDiagnostics mappedData={row.mapped_data} />
                       ) : row.status === "Valid" ? (
                         <span className="text-xs text-emerald-600">✓ Valid</span>
                       ) : null}
@@ -823,4 +828,49 @@ function RowsTable({
       </div>
     </div>
   );
+}
+
+function SuggestionDiagnostics({ mappedData }: { mappedData: Record<string, unknown> | null }) {
+  const customers = suggestionArray<ImportCustomerSuggestion>(mappedData, "suggested_customers", "customer_candidates");
+  const invoices = suggestionArray<ImportInvoiceSuggestion>(mappedData, "suggested_invoices", "invoice_candidates");
+  const reason = String(mappedData?.suggestion_reason ?? mappedData?.allocation_error_reason ?? "manual_review_required");
+  const confidence = mappedData?.confidence ?? mappedData?.match_confidence;
+
+  return (
+    <div className="space-y-1 text-xs">
+      <p className="font-medium text-amber-700">
+        <code className="mr-1 rounded bg-amber-100 px-1 font-mono">review_required</code>
+        Suggested match needs review before import execution.
+      </p>
+      <p className="text-amber-700">
+        Reason: {reason}
+        {confidence !== undefined ? ` (${Math.round(Number(confidence) * 100)}% confidence)` : ""}
+      </p>
+      {customers.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="font-medium text-slate-600">Suggested customer match</p>
+          {customers.map((customer) => (
+            <p key={customer.customer_id} className="text-slate-600">
+              {customer.customer_code} - {customer.customer_name} ({Math.round(Number(customer.confidence) * 100)}%, {customer.reason})
+            </p>
+          ))}
+        </div>
+      )}
+      {invoices.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="font-medium text-slate-600">Suggested invoice match</p>
+          {invoices.map((invoice) => (
+            <p key={invoice.invoice_id} className="text-slate-600">
+              {invoice.invoice_no} ({Math.round(Number(invoice.confidence) * 100)}%, {invoice.reason})
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function suggestionArray<T>(mappedData: Record<string, unknown> | null, preferred: string, fallback: string): T[] {
+  const value = mappedData?.[preferred] ?? mappedData?.[fallback];
+  return Array.isArray(value) ? value as T[] : [];
 }

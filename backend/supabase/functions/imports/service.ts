@@ -33,6 +33,12 @@ import { parseXlsx } from './xlsx.ts';
 import { CustomerService } from '../customers/service.ts';
 import { validateCreateCustomer } from '../customers/validators.ts';
 import { COUNTRY_DEFAULTS } from '../_shared/constants.ts';
+import {
+  FUZZY_CANDIDATE_LIMIT,
+  FUZZY_INVOICE_REVIEW_THRESHOLD,
+  normalizeIdentifier,
+  topFuzzyCandidates,
+} from '../_shared/fuzzy.ts';
 
 const BUCKET = 'ar-imports';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
@@ -96,6 +102,7 @@ interface UploadInput {
 interface RowValidationResult {
   mappedData?: Record<string, unknown>;
   errors: Array<Record<string, unknown>>;
+  status?: ImportRowStatus;
 }
 
 interface ExecuteImportOptions {
@@ -103,11 +110,11 @@ interface ExecuteImportOptions {
 }
 
 interface CustomerResolutionDetails {
-  action: 'Matched Existing' | 'Create New';
+  action: 'Matched Existing' | 'Create New' | 'Review Required';
   customer_id: string | null;
   customer_code: string | null;
   customer_name: string;
-  matched_by: 'customer_code' | 'normalized_name' | 'created_in_batch' | null;
+  matched_by: 'customer_code' | 'normalized_name' | 'created_in_batch' | 'fuzzy_suggestion' | null;
 }
 
 interface ResolvedImportCustomer {
@@ -406,6 +413,8 @@ export class ImportService {
 
     let validRows = 0;
     let errorRows = 0;
+    let skippedRows = 0;
+    let unmatchedRows = 0;
     const errorSummary: Array<Record<string, unknown>> = [];
 
     for (const row of rows) {
@@ -422,11 +431,18 @@ export class ImportService {
           })
           .eq('id', row.id);
       } else {
-        validRows += 1;
+        const rowStatus = result.status ?? 'Valid';
+        if (rowStatus === 'Valid') {
+          validRows += 1;
+        } else if (rowStatus === 'Unmatched' || rowStatus === 'Skipped') {
+          errorRows += 1;
+          if (rowStatus === 'Unmatched') unmatchedRows += 1;
+          if (rowStatus === 'Skipped') skippedRows += 1;
+        }
         await this.client
           .from('import_rows')
           .update({
-            status: 'Valid',
+            status: rowStatus,
             mapped_data: result.mappedData,
             validation_errors: null,
           })
@@ -438,6 +454,8 @@ export class ImportService {
       status: 'Validated',
       valid_rows: validRows,
       error_rows: errorRows,
+      skipped_count: skippedRows,
+      unmatched_count: unmatchedRows,
       error_summary: errorSummary.length > 0 ? errorSummary : null,
     });
 
@@ -622,6 +640,7 @@ export class ImportService {
       || this.rowHasPostingError(row)
     ).length;
     const finalSkippedRows = finalRows.filter((row) => row.status === 'Skipped').length;
+    const finalUnmatchedRows = finalRows.filter((row) => row.status === 'Unmatched').length;
 
     await this.updateBatch(batch.id, {
       status: 'Completed',
@@ -634,6 +653,7 @@ export class ImportService {
       posted_count: postedCount,
       allocated_count: allocatedCount,
       skipped_count: finalSkippedRows,
+      unmatched_count: finalUnmatchedRows,
       error_summary: errorSummary.length > 0 ? errorSummary : null,
     });
 
@@ -719,6 +739,46 @@ export class ImportService {
       });
       const customer = classification.customer;
       let customerInput: CreateCustomerRequest | undefined;
+      const invoiceDate = asString(raw, 'invoice_date');
+      const rawCurrency = asString(raw, 'currency');
+      const description = asString(raw, 'description');
+      const quantity = parseNumber(asString(raw, 'quantity') || '1', 'quantity');
+      const unitPrice = parseNumber(asString(raw, 'unit_price'), 'unit_price');
+      const referenceNo = asString(raw, 'reference_no') || undefined;
+      const taxCodeId = await this.resolveTaxCode(auth.companyId, raw);
+
+      if (classification.action === 'Review Required') {
+        const currency = (rawCurrency || 'MYR').toUpperCase();
+        validateDate(invoiceDate, 'invoice_date');
+        validateCurrency(currency, 'currency');
+        validateInvoiceLines([{
+          description,
+          quantity,
+          unit_price: unitPrice,
+          tax_code_id: taxCodeId,
+        }]);
+
+        mappedData = {
+          doc_type: 'Invoice',
+          invoice_date: invoiceDate,
+          customer_id: null,
+          customer_input: null,
+          customer_resolution: this.toCustomerResolutionDetails(classification),
+          currency,
+          reference_no: referenceNo,
+          internal_remarks: 'Created by Sprint F4 import draft-only flow',
+          invoice_remarks: asString(raw, 'invoice_remarks') || undefined,
+          lines: [{
+            description,
+            quantity,
+            unit_price: unitPrice,
+            tax_code_id: taxCodeId,
+          }],
+          ...this.customerSuggestionDiagnostics(classification),
+        };
+
+        return { mappedData, errors, status: 'Unmatched' };
+      }
 
       if (customer) {
         await requireCustomerAccess(auth, customer.id);
@@ -726,18 +786,12 @@ export class ImportService {
         customerInput = this.validateNewCustomerInput(raw);
       }
 
-      const invoiceDate = asString(raw, 'invoice_date');
       const currency = (
-        asString(raw, 'currency')
+        rawCurrency
         || customer?.default_currency
         || COUNTRY_DEFAULTS[customerInput!.bill_country]?.currency
         || 'MYR'
       ).toUpperCase();
-      const description = asString(raw, 'description');
-      const quantity = parseNumber(asString(raw, 'quantity') || '1', 'quantity');
-      const unitPrice = parseNumber(asString(raw, 'unit_price'), 'unit_price');
-      const referenceNo = asString(raw, 'reference_no') || undefined;
-      const taxCodeId = await this.resolveTaxCode(auth.companyId, raw);
 
       mappedData = {
         doc_type: 'Invoice',
@@ -788,18 +842,12 @@ export class ImportService {
       const customer = classification.customer;
       let customerInput: CreateCustomerRequest | undefined;
 
-      if (customer) {
-        await requireCustomerAccess(auth, customer.id);
-      } else {
-        customerInput = this.validateNewCustomerInput(raw);
-      }
-
       const bankAccount = await this.resolveBankAccount(auth.companyId, raw);
       const receiptDate = asString(raw, 'receipt_date');
+      const rawCurrency = asString(raw, 'currency');
       const currency = (
-        asString(raw, 'currency')
+        rawCurrency
         || customer?.default_currency
-        || COUNTRY_DEFAULTS[customerInput!.bill_country]?.currency
         || 'MYR'
       ).toUpperCase();
       const receiptAmount = parseNumber(asString(raw, 'amount'), 'amount');
@@ -819,6 +867,55 @@ export class ImportService {
         ? parseNumber(asString(raw, 'bank_charge_amount'), 'bank_charge_amount')
         : undefined;
       const shortPaymentReason = asString(raw, 'short_payment_reason').toLowerCase() || undefined;
+
+      if (classification.action === 'Review Required') {
+        validateDate(receiptDate, 'receipt_date');
+        validateCurrency(currency, 'currency');
+
+        mappedData = {
+          receipt_date: receiptDate,
+          customer_id: null,
+          customer_input: null,
+          customer_resolution: this.toCustomerResolutionDetails(classification),
+          payment_method: asString(raw, 'payment_method'),
+          currency,
+          receipt_amount: receiptAmount,
+          bank_account_id: bankAccount.bank_account_id,
+          bank_account_resolution: bankAccount,
+          reference_no: referenceNo,
+          cheque_date: chequeDate,
+          value_date: valueDate,
+          remarks,
+          invoice_reference: invoiceReference,
+          allocation_amount: allocationAmount,
+          discount_amount: discountAmount,
+          bank_charge_amount: bankChargeAmount,
+          short_payment_reason: shortPaymentReason,
+          allocation_status: invoiceReference ? 'Pending Review' : 'None',
+          internal_remarks: 'Created by Sprint F4 receipt import flow',
+          ...this.customerSuggestionDiagnostics(classification),
+        };
+
+        validateCreateReceipt({
+          ...mappedData,
+          customer_id: NIL_UUID,
+        });
+
+        return { mappedData, errors, status: 'Unmatched' };
+      }
+
+      if (customer) {
+        await requireCustomerAccess(auth, customer.id);
+      } else {
+        customerInput = this.validateNewCustomerInput(raw);
+      }
+
+      const resolvedCurrency = (
+        rawCurrency
+        || customer?.default_currency
+        || COUNTRY_DEFAULTS[customerInput!.bill_country]?.currency
+        || 'MYR'
+      ).toUpperCase();
 
       if (!invoiceReference && allocationAmount !== undefined) {
         throw new ValidationError('allocation_amount requires invoice_reference.', {
@@ -859,7 +956,7 @@ export class ImportService {
         customer_input: customerInput,
         customer_resolution: this.toCustomerResolutionDetails(classification),
         payment_method: asString(raw, 'payment_method'),
-        currency,
+        currency: resolvedCurrency,
         receipt_amount: receiptAmount,
         bank_account_id: bankAccount.bank_account_id,
         bank_account_resolution: bankAccount,
@@ -880,6 +977,19 @@ export class ImportService {
         ...mappedData,
         customer_id: customer?.id ?? NIL_UUID,
       });
+
+      if (invoiceReference && customer) {
+        const invoiceReview = await this.invoiceReferenceSuggestionDiagnostics(
+          auth.companyId,
+          customer.id,
+          resolvedCurrency,
+          invoiceReference,
+          mappedData,
+        );
+        if (invoiceReview) {
+          return { mappedData: invoiceReview.mappedData, errors, status: invoiceReview.status };
+        }
+      }
     } catch (error) {
       errors.push(...errorToRowErrors(error));
     }
@@ -921,6 +1031,14 @@ export class ImportService {
       };
       cache.set(cacheKey, resolved);
       return resolved;
+    }
+
+    if (classification.action === 'Review Required') {
+      throw new ValidationError('Customer fuzzy match requires manual review before import execution.', {
+        field: 'customer_name',
+        reason: 'customer_suggestion_review_required',
+        suggestions: classification.suggestions,
+      });
     }
 
     const customerInput = this.validateNewCustomerInput(raw);
@@ -970,6 +1088,28 @@ export class ImportService {
       customer_code: classification.customer?.customer_id ?? null,
       customer_name: classification.customer?.customer_name ?? classification.normalizedCustomerName,
       matched_by: classification.matchedBy,
+    };
+  }
+
+  private customerSuggestionDiagnostics(
+    classification: Awaited<ReturnType<CustomerService['classifyImportCustomer']>>,
+  ): Record<string, unknown> {
+    const suggestions = classification.suggestions ?? [];
+    if (suggestions.length === 0) return {};
+
+    return {
+      review_required: true,
+      review_kind: 'customer_suggestion',
+      confidence: classification.confidence ?? suggestions[0].confidence,
+      suggestion_reason: classification.suggestionReason ?? suggestions[0].reason,
+      match_confidence: classification.confidence ?? suggestions[0].confidence,
+      match_reason_codes: [classification.suggestionReason ?? suggestions[0].reason],
+      suggested_customer_id: suggestions[0].customer_id,
+      suggested_customer_code: suggestions[0].customer_code,
+      suggested_customer_name: suggestions[0].customer_name,
+      suggested_customers: suggestions,
+      customer_candidates: suggestions,
+      user_action: 'pending',
     };
   }
 
@@ -1034,6 +1174,171 @@ export class ImportService {
       bank_name: bankAccount.bank_name,
       matched_by: matchedBy,
     };
+  }
+
+  private async invoiceReferenceSuggestionDiagnostics(
+    companyId: string,
+    customerId: string,
+    currency: string,
+    invoiceReference: string,
+    mappedData: Record<string, unknown>,
+  ): Promise<{ status: ImportRowStatus; mappedData: Record<string, unknown> } | null> {
+    const { data, error } = await this.client
+      .from('invoices')
+      .select('id, invoice_no, currency, status, outstanding')
+      .eq('company_id', companyId)
+      .eq('customer_id', customerId)
+      .limit(250);
+
+    if (error) throw new Error(`Failed to inspect invoice_reference suggestions: ${error.message}`);
+
+    const invoices = (data ?? []) as Array<Pick<Invoice, 'id' | 'invoice_no' | 'currency' | 'status' | 'outstanding'>>;
+    const rawMatch = invoices.find((invoice) => invoice.invoice_no === invoiceReference);
+    if (rawMatch) {
+      if (rawMatch.currency !== currency) {
+        return {
+          status: 'Unmatched',
+          mappedData: this.invoiceSuggestionMappedData(mappedData, 'currency_mismatch', [{
+            invoice_id: rawMatch.id,
+            invoice_no: rawMatch.invoice_no,
+            confidence: 1,
+            reason: 'exact_invoice_no_currency_mismatch',
+            outstanding: Number(rawMatch.outstanding),
+            currency: rawMatch.currency,
+            status: rawMatch.status,
+            allocatable: false,
+          }], 'Invoice reference matches an invoice, but its currency does not match the receipt currency.'),
+        };
+      }
+      if (!this.isAllocatableInvoice(rawMatch)) {
+        return {
+          status: 'Skipped',
+          mappedData: this.invoiceSuggestionMappedData(mappedData, Number(rawMatch.outstanding) <= 0 ? 'no_outstanding' : 'invoice_not_open', [{
+            invoice_id: rawMatch.id,
+            invoice_no: rawMatch.invoice_no,
+            confidence: 1,
+            reason: Number(rawMatch.outstanding) <= 0 ? 'no_outstanding' : 'invoice_not_open',
+            outstanding: Number(rawMatch.outstanding),
+            currency: rawMatch.currency,
+            status: rawMatch.status,
+            allocatable: false,
+          }], 'Invoice reference matches an invoice, but it is not currently allocatable.'),
+        };
+      }
+      return null;
+    }
+
+    const normalizedReference = normalizeIdentifier(invoiceReference);
+    const normalizedMatches = invoices
+      .filter((invoice) => normalizeIdentifier(invoice.invoice_no) === normalizedReference)
+      .slice(0, FUZZY_CANDIDATE_LIMIT)
+      .map((invoice) => this.invoiceCandidate(invoice, this.normalizedInvoiceSuggestionReason(invoice, currency), 0.97, currency));
+
+    if (normalizedMatches.length > 0) {
+      return {
+        status: normalizedMatches.some((candidate) => candidate.allocatable) ? 'Unmatched' : this.nonAllocatableSuggestionStatus(normalizedMatches),
+        mappedData: this.invoiceSuggestionMappedData(
+          mappedData,
+          'normalized_invoice_no',
+          normalizedMatches,
+          'Invoice reference differs from an existing invoice number only by spacing, case, or punctuation. Review is required before allocation.',
+        ),
+      };
+    }
+
+    const allocatableInvoices = invoices.filter((invoice) => invoice.currency === currency && this.isAllocatableInvoice(invoice));
+    const fuzzyMatches = topFuzzyCandidates(
+      invoiceReference,
+      allocatableInvoices,
+      (invoice) => invoice.invoice_no,
+      FUZZY_INVOICE_REVIEW_THRESHOLD,
+    ).map((candidate) => this.invoiceCandidate(candidate.item, candidate.reason, candidate.confidence, currency));
+
+    if (fuzzyMatches.length > 0) {
+      return {
+        status: 'Unmatched',
+        mappedData: this.invoiceSuggestionMappedData(
+          mappedData,
+          fuzzyMatches.length > 1 ? 'multiple_invoice_candidates' : String(fuzzyMatches[0].reason),
+          fuzzyMatches,
+          'Invoice reference did not match exactly. Review the suggested invoice before allocation.',
+        ),
+      };
+    }
+
+    return {
+      status: 'Unmatched',
+      mappedData: this.invoiceSuggestionMappedData(
+        mappedData,
+        'invoice_not_found',
+        [],
+        'No invoice found for this invoice_reference. Review is required before posting/allocation.',
+      ),
+    };
+  }
+
+  private invoiceCandidate(
+    invoice: Pick<Invoice, 'id' | 'invoice_no' | 'currency' | 'status' | 'outstanding'>,
+    reason: string,
+    confidence: number,
+    receiptCurrency: string,
+  ): Record<string, unknown> {
+    return {
+      invoice_id: invoice.id,
+      invoice_no: invoice.invoice_no,
+      confidence,
+      reason,
+      outstanding: Number(invoice.outstanding),
+      currency: invoice.currency,
+      status: invoice.status,
+      allocatable: invoice.currency === receiptCurrency && this.isAllocatableInvoice(invoice),
+    };
+  }
+
+  private normalizedInvoiceSuggestionReason(
+    invoice: Pick<Invoice, 'currency' | 'status' | 'outstanding'>,
+    receiptCurrency: string,
+  ): string {
+    if (invoice.currency !== receiptCurrency) return 'currency_mismatch';
+    if (Number(invoice.outstanding) <= 0) return 'no_outstanding';
+    if (!['Open', 'Overdue', 'Partially Paid'].includes(invoice.status)) return 'invoice_not_open';
+    return 'normalized_invoice_no';
+  }
+
+  private invoiceSuggestionMappedData(
+    mappedData: Record<string, unknown>,
+    reason: string,
+    candidates: Array<Record<string, unknown>>,
+    message: string,
+  ): Record<string, unknown> {
+    const top = candidates[0];
+    return {
+      ...mappedData,
+      review_required: true,
+      review_kind: mappedData.review_kind === 'customer_suggestion' ? 'both' : 'invoice_suggestion',
+      allocation_status: 'Review Required',
+      allocation_error: message,
+      allocation_error_reason: reason,
+      confidence: top?.confidence,
+      suggestion_reason: reason,
+      match_confidence: top?.confidence,
+      match_reason_codes: [reason],
+      suggested_invoice_id: top?.invoice_id ?? null,
+      suggested_invoice_no: top?.invoice_no ?? null,
+      suggested_invoices: candidates,
+      invoice_candidates: candidates,
+      user_action: 'pending',
+    };
+  }
+
+  private nonAllocatableSuggestionStatus(candidates: Array<Record<string, unknown>>): ImportRowStatus {
+    return candidates.some((candidate) => candidate.reason === 'no_outstanding' || candidate.reason === 'invoice_not_open')
+      ? 'Skipped'
+      : 'Unmatched';
+  }
+
+  private isAllocatableInvoice(invoice: Pick<Invoice, 'status' | 'outstanding'>): boolean {
+    return ['Open', 'Overdue', 'Partially Paid'].includes(invoice.status) && Number(invoice.outstanding) > 0;
   }
 
   private async preflightReceiptImportAllocation(

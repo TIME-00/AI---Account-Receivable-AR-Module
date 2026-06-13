@@ -65,11 +65,30 @@ export interface ImportRow {
 }
 
 export interface ImportCustomerResolution {
-  action: "Matched Existing" | "Create New";
+  action: "Matched Existing" | "Create New" | "Review Required";
   customer_id: string | null;
   customer_code: string | null;
   customer_name: string;
-  matched_by: "customer_code" | "normalized_name" | "created_in_batch" | null;
+  matched_by: "customer_code" | "normalized_name" | "created_in_batch" | "fuzzy_suggestion" | null;
+}
+
+export interface ImportCustomerSuggestion {
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface ImportInvoiceSuggestion {
+  invoice_id: string;
+  invoice_no: string;
+  confidence: number;
+  reason: string;
+  outstanding?: number;
+  currency?: string;
+  status?: string;
+  allocatable?: boolean;
 }
 
 export type ImportRowStatus =
