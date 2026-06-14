@@ -19,6 +19,7 @@ const ROUTES: Record<string, RegExp> = {
   parse:      new RegExp(`^\\/${UUID}\\/parse\\/?$`, 'i'),
   validate:   new RegExp(`^\\/${UUID}\\/validate\\/?$`, 'i'),
   execute:    new RegExp(`^\\/${UUID}\\/execute\\/?$`, 'i'),
+  review:     new RegExp(`^\\/${UUID}\\/rows\\/${UUID}\\/review\\/?$`, 'i'),
   rows:       new RegExp(`^\\/${UUID}\\/rows\\/?$`, 'i'),
   single:     new RegExp(`^\\/${UUID}\\/?$`, 'i'),
   collection: /^\/?$/i,
@@ -36,7 +37,12 @@ function matchRoute(url: URL): { route: string; params: Record<string, string> }
   const subPath = getSubPath(url.pathname);
   for (const [name, pattern] of Object.entries(ROUTES)) {
     const match = subPath.match(pattern);
-    if (match) return { route: name, params: match[1] ? { id: match[1] } : {} };
+    if (match) {
+      if (name === 'review') {
+        return { route: name, params: { id: match[1], batchId: match[1], rowId: match[2] } };
+      }
+      return { route: name, params: match[1] ? { id: match[1] } : {} };
+    }
   }
   return { route: 'notFound', params: {} };
 }
@@ -105,6 +111,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const result = await service.executeDraftCreation(auth, id, {
         autoPost: body.auto_post === true,
       });
+      return jsonResponse(successResponse(result));
+    }
+
+    if (route === 'review' && req.method === 'POST') {
+      const { batchId, rowId } = params;
+      validateUUID(batchId, 'batch_id');
+      validateUUID(rowId, 'row_id');
+      let body: Record<string, unknown> = {};
+      if (req.headers.get('Content-Type')?.includes('application/json')) {
+        const parsed = await req.json();
+        if (parsed && typeof parsed === 'object') {
+          body = parsed as Record<string, unknown>;
+        }
+      }
+      const result = await service.reviewRow(auth, batchId, rowId, body);
       return jsonResponse(successResponse(result));
     }
 
