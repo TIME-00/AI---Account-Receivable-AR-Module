@@ -120,6 +120,50 @@ export interface ImportBatchResponse {
 
 export type ImportType = "invoice" | "receipt";
 
+// ─── Review (Batch 6C) ────────────────────────────────────────────────────────
+
+export type ReviewAction =
+  | "approve_suggestion"
+  | "reject_suggestion"
+  | "edit_customer"
+  | "edit_invoice_reference"
+  | "retry_validation";
+
+export type ReviewResult =
+  | "approved_pending_retry"
+  | "rejected"
+  | "edited_pending_retry"
+  | "revalidated_valid"
+  | "revalidation_failed"
+  | "rejected_invalid_selection";
+
+/**
+ * Payload for POST /imports/:batchId/rows/:rowId/review.
+ * Only the fields relevant to `action` are sent. The frontend never writes
+ * a raw customer UUID into raw_data — edit_customer uses customer_code /
+ * customer_name (or an approved suggestion's customer_id), and the backend
+ * resolves and translates it to the canonical raw_data.customer_code.
+ */
+export interface ReviewRowPayload {
+  action: ReviewAction;
+  suggested_customer_id?: string;
+  suggested_invoice_id?: string;
+  customer_id?: string;
+  customer_code?: string;
+  customer_name?: string;
+  invoice_reference?: string;
+  review_note?: string;
+}
+
+/** Backend response shape from ImportService.reviewRow(). */
+export interface ReviewRowResult {
+  row: ImportRow;
+  action: ReviewAction;
+  review_result: ReviewResult;
+  revalidated: boolean;
+  messages: string[];
+}
+
 // ─── Step tracking ──────────────────────────────────────────────────────────
 
 export type ImportStep =
@@ -149,6 +193,8 @@ export function useImport(importType: ImportType = "invoice") {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-row/per-action loading map keyed by `${rowId}:${action}` (Batch 6C).
+  const [reviewLoading, setReviewLoading] = useState<Record<string, boolean>>({});
 
   /**
    * Step 1: Upload CSV or Excel file to imports Edge Function.
@@ -321,6 +367,48 @@ export function useImport(importType: ImportType = "invoice") {
   );
 
   /**
+   * Batch 6C — Resolve a single review_required row via the Batch 6B backend
+   * route. The frontend NEVER mutates financial state directly: this only calls
+   * POST /imports/:batchId/rows/:rowId/review and renders the row the backend
+   * returns. Approve/edit never mark a row Valid — only retry_validation can,
+   * and only on the backend.
+   */
+  const reviewImportRow = useCallback(
+    async (batchId: string, rowId: string, payload: ReviewRowPayload): Promise<ReviewRowResult> => {
+      const key = `${rowId}:${payload.action}`;
+      setReviewLoading((prev) => ({ ...prev, [key]: true }));
+      try {
+        const result = await api.post<ReviewRowResult>(
+          `/imports/${batchId}/rows/${rowId}/review`,
+          payload,
+        );
+        // Replace only the acted row from the backend response so other rows'
+        // in-progress review decisions are preserved (mirrors the backend's
+        // refreshBatchCounters, which never re-derives sibling rows).
+        if (result?.row) {
+          setRows((prev) => prev.map((r) => (r.id === result.row.id ? result.row : r)));
+        }
+        // After retry_validation the batch counters change server-side; refresh
+        // the batch summary so valid/error counts are not stale.
+        if (payload.action === "retry_validation") {
+          await refreshBatch(batchId);
+        }
+        if (result?.messages?.length) {
+          toast.success("Review Updated", { description: result.messages[0] });
+        }
+        return result;
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : "Review action failed";
+        toast.error("Review Failed", { description: msg });
+        throw err;
+      } finally {
+        setReviewLoading((prev) => ({ ...prev, [key]: false }));
+      }
+    },
+    [api, refreshBatch]
+  );
+
+  /**
    * Reset all state back to initial.
    */
   const reset = useCallback(() => {
@@ -329,6 +417,7 @@ export function useImport(importType: ImportType = "invoice") {
     setRows([]);
     setIsLoading(false);
     setError(null);
+    setReviewLoading({});
   }, []);
 
   return {
@@ -339,12 +428,14 @@ export function useImport(importType: ImportType = "invoice") {
     rows,
     isLoading,
     error,
+    reviewLoading,
     // Actions
     uploadFile,
     parseBatch,
     validateBatch,
     executeBatch,
     refreshBatch,
+    reviewImportRow,
     reset,
   };
 }

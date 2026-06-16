@@ -20,6 +20,7 @@ import {
 } from "@/hooks/use-import";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
+import { ReviewActions } from "@/components/features/imports/review-actions";
 import { cn, formatDate } from "@/lib/utils";
 import {
   Upload, FileText, ChevronLeft, ChevronRight, CheckCircle2,
@@ -81,8 +82,8 @@ const BATCH_STATUS_COLORS: Record<string, string> = {
 
 export default function InvoiceImportPage() {
   const {
-    step, setStep, batch, rows, isLoading, error,
-    uploadFile, parseBatch, validateBatch, executeBatch, reset,
+    step, setStep, batch, rows, isLoading, error, reviewLoading,
+    uploadFile, parseBatch, validateBatch, executeBatch, reviewImportRow, reset,
   } = useImport();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -490,7 +491,13 @@ export default function InvoiceImportPage() {
               </div>
             )}
 
-            <RowsTable rows={rows} showValidation={true} />
+            <RowsTable
+              rows={rows}
+              showValidation={true}
+              batchId={batch.id}
+              reviewImportRow={reviewImportRow}
+              reviewLoading={reviewLoading}
+            />
           </div>
         )}
 
@@ -564,7 +571,14 @@ export default function InvoiceImportPage() {
             {/* Row details */}
             <div>
               <h3 className="text-sm font-semibold text-slate-700 mb-2">Row Details</h3>
-              <RowsTable rows={rows} showValidation={true} showResult={true} />
+              <RowsTable
+                rows={rows}
+                showValidation={true}
+                showResult={true}
+                batchId={batch.id}
+                reviewImportRow={reviewImportRow}
+                reviewLoading={reviewLoading}
+              />
             </div>
 
             {/* Actions */}
@@ -664,10 +678,16 @@ function RowsTable({
   rows,
   showValidation,
   showResult,
+  batchId,
+  reviewImportRow,
+  reviewLoading,
 }: {
   rows: ImportRow[];
   showValidation?: boolean;
   showResult?: boolean;
+  batchId?: string;
+  reviewImportRow?: ReturnType<typeof useImport>["reviewImportRow"];
+  reviewLoading?: ReturnType<typeof useImport>["reviewLoading"];
 }) {
   if (rows.length === 0) {
     return (
@@ -800,7 +820,17 @@ function RowsTable({
                           ))}
                         </div>
                       ) : reviewRequired ? (
-                        <SuggestionDiagnostics mappedData={row.mapped_data} />
+                        <>
+                          <SuggestionDiagnostics mappedData={row.mapped_data} />
+                          {batchId && reviewImportRow && reviewLoading && (
+                            <ReviewActions
+                              batchId={batchId}
+                              row={row}
+                              reviewLoading={reviewLoading}
+                              reviewImportRow={reviewImportRow}
+                            />
+                          )}
+                        </>
                       ) : row.status === "Valid" ? (
                         <span className="text-xs text-emerald-600">✓ Valid</span>
                       ) : null}

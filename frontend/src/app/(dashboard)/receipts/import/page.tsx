@@ -35,6 +35,7 @@ import {
 } from "@/hooks/use-import";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { ReviewActions } from "@/components/features/imports/review-actions";
 import { cn, formatDate } from "@/lib/utils";
 
 const RECEIPT_COLUMNS = [
@@ -88,10 +89,12 @@ export default function ReceiptImportPage() {
     rows,
     isLoading,
     error,
+    reviewLoading,
     uploadFile,
     parseBatch,
     validateBatch,
     executeBatch,
+    reviewImportRow,
     reset,
   } = useImport("receipt");
 
@@ -375,7 +378,13 @@ export default function ReceiptImportPage() {
               <SummaryCard label="Error Rows" value={batch.error_rows} color="red" />
               <SummaryCard label="Total Rows" value={batch.total_rows} color="slate" />
             </div>
-            <RowsTable rows={rows} showValidation />
+            <RowsTable
+              rows={rows}
+              showValidation
+              batchId={batch.id}
+              reviewImportRow={reviewImportRow}
+              reviewLoading={reviewLoading}
+            />
           </div>
         )}
 
@@ -407,7 +416,14 @@ export default function ReceiptImportPage() {
               {batch.completed_at && <MetaRow label="Completed At" value={formatDate(batch.completed_at)} />}
             </div>
 
-            <RowsTable rows={rows} showValidation showResult />
+            <RowsTable
+              rows={rows}
+              showValidation
+              showResult
+              batchId={batch.id}
+              reviewImportRow={reviewImportRow}
+              reviewLoading={reviewLoading}
+            />
 
             <div className="flex items-center justify-between pt-2">
               <LoadingButton variant="secondary" size="md" onClick={reset}>
@@ -466,7 +482,21 @@ function RowStatusBadge({ status }: { status: string }) {
   );
 }
 
-function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; showValidation?: boolean; showResult?: boolean }) {
+function RowsTable({
+  rows,
+  showValidation,
+  showResult,
+  batchId,
+  reviewImportRow,
+  reviewLoading,
+}: {
+  rows: ImportRow[];
+  showValidation?: boolean;
+  showResult?: boolean;
+  batchId?: string;
+  reviewImportRow?: ReturnType<typeof useImport>["reviewImportRow"];
+  reviewLoading?: ReturnType<typeof useImport>["reviewLoading"];
+}) {
   if (rows.length === 0) {
     return (
       <div className="rounded-xl border border-slate-200 p-8 text-center">
@@ -596,6 +626,14 @@ function RowsTable({ rows, showValidation, showResult }: { rows: ImportRow[]; sh
                               {String(bankChargeReviewReason || autoPostBlockReason || "Row needs manual review before posting/allocation.")}
                             </p>
                             <SuggestionDiagnostics mappedData={row.mapped_data} />
+                            {batchId && reviewImportRow && reviewLoading && (
+                              <ReviewActions
+                                batchId={batchId}
+                                row={row}
+                                reviewLoading={reviewLoading}
+                                reviewImportRow={reviewImportRow}
+                              />
+                            )}
                           </div>
                         ) : row.status === "Unmatched" && allocationError ? (
                           <div className="space-y-0.5">
