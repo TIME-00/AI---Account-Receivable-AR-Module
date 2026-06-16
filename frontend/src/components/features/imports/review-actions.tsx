@@ -117,7 +117,7 @@ export function ReviewActions({
   const showInvoiceApprove = meta.reviewKind === "invoice_suggestion" || meta.reviewKind === "both";
 
   return (
-    <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-2">
+    <div className="mt-2 max-w-full space-y-2 overflow-hidden whitespace-normal break-words rounded-lg border border-amber-200 bg-amber-50/60 p-2">
       {/* ── Rejected state ─────────────────────────────────────────────── */}
       {isRejected ? (
         <div className="space-y-2">
@@ -166,20 +166,28 @@ export function ReviewActions({
 
           {/* ── Approve suggested customer(s) ──────────────────────────── */}
           {showCustomerApprove && meta.customers.length > 0 && (
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Approve customer</p>
               {meta.customers.map((c) => (
                 <LoadingButton
                   key={c.customer_id}
                   variant="secondary"
                   size="sm"
+                  className="h-auto w-full items-start justify-start whitespace-normal break-words py-1.5 text-left"
                   isLoading={loading("approve_suggestion")}
                   loadingText="Approving..."
                   disabled={anyLoading}
+                  title={`Approve ${c.customer_code} · ${c.customer_name}`}
                   onClick={() => run({ action: "approve_suggestion", suggested_customer_id: c.customer_id })}
                 >
-                  <UserCheck className="h-3.5 w-3.5" />
-                  {c.customer_code} · {c.customer_name} ({Math.round(Number(c.confidence) * 100)}%)
+                  <UserCheck className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="font-mono font-semibold text-slate-700">{c.customer_code}</span>
+                    <span className="break-words text-slate-700">{c.customer_name}</span>
+                    <span className="text-[10px] text-slate-500">
+                      {Math.round(Number(c.confidence) * 100)}% · {c.reason}
+                    </span>
+                  </span>
                 </LoadingButton>
               ))}
             </div>
@@ -187,7 +195,7 @@ export function ReviewActions({
 
           {/* ── Approve suggested invoice(s) ───────────────────────────── */}
           {showInvoiceApprove && meta.invoices.length > 0 && (
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Approve invoice</p>
               {meta.invoices.map((inv) => {
                 const notAllocatable = inv.allocatable === false;
@@ -196,15 +204,23 @@ export function ReviewActions({
                     key={inv.invoice_id}
                     variant="secondary"
                     size="sm"
+                    className="h-auto w-full items-start justify-start whitespace-normal break-words py-1.5 text-left"
                     isLoading={loading("approve_suggestion")}
                     loadingText="Approving..."
                     disabled={anyLoading || notAllocatable}
-                    title={notAllocatable ? "Not allocatable (paid, no outstanding, or currency mismatch)" : undefined}
+                    title={notAllocatable ? "Not allocatable (paid, no outstanding, or currency mismatch)" : `Approve ${inv.invoice_no}`}
                     onClick={() => run({ action: "approve_suggestion", suggested_invoice_id: inv.invoice_id })}
                   >
-                    <Check className="h-3.5 w-3.5" />
-                    {inv.invoice_no} ({Math.round(Number(inv.confidence) * 100)}%)
-                    {notAllocatable ? " — not allocatable" : ""}
+                    <Check className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-mono font-semibold text-slate-700">{inv.invoice_no}</span>
+                      <span className="text-[10px] text-slate-500">
+                        {Math.round(Number(inv.confidence) * 100)}% · {inv.reason}
+                      </span>
+                      {notAllocatable && (
+                        <span className="text-[10px] font-medium text-amber-700">Not allocatable</span>
+                      )}
+                    </span>
                   </LoadingButton>
                 );
               })}
@@ -329,14 +345,14 @@ function EditControls({
 
       {/* Customer edit: customer_code / customer_name only — never a raw UUID. */}
       {editMode === "customer" && (
-        <div className="flex flex-wrap items-end gap-1.5 rounded-md border border-slate-200 bg-white p-2">
+        <div className="flex max-w-full flex-col gap-1.5 rounded-md border border-slate-200 bg-white p-2">
           <label className="flex flex-col gap-0.5 text-[10px] font-medium text-slate-500">
             Customer code
             <input
               value={customerCode}
               onChange={(e) => setCustomerCode(e.target.value)}
               placeholder="e.g. CUST-001"
-              className="h-7 w-40 rounded border border-slate-300 px-2 text-xs text-slate-700"
+              className="h-7 w-full max-w-full rounded border border-slate-300 px-2 text-xs text-slate-700"
             />
           </label>
           <label className="flex flex-col gap-0.5 text-[10px] font-medium text-slate-500">
@@ -345,12 +361,13 @@ function EditControls({
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="Exact visible customer name"
-              className="h-7 w-52 rounded border border-slate-300 px-2 text-xs text-slate-700"
+              className="h-7 w-full max-w-full rounded border border-slate-300 px-2 text-xs text-slate-700"
             />
           </label>
           <LoadingButton
             variant="secondary"
             size="sm"
+            className="w-full"
             isLoading={loading("edit_customer")}
             loadingText="Saving..."
             disabled={disabled || (!customerCode.trim() && !customerName.trim())}
@@ -370,19 +387,20 @@ function EditControls({
 
       {/* Invoice reference edit. */}
       {editMode === "invoice" && (
-        <div className="flex flex-wrap items-end gap-1.5 rounded-md border border-slate-200 bg-white p-2">
+        <div className="flex max-w-full flex-col gap-1.5 rounded-md border border-slate-200 bg-white p-2">
           <label className="flex flex-col gap-0.5 text-[10px] font-medium text-slate-500">
             Invoice reference
             <input
               value={invoiceReference}
               onChange={(e) => setInvoiceReference(e.target.value)}
               placeholder="e.g. INV-202606-00063"
-              className="h-7 w-52 rounded border border-slate-300 px-2 text-xs text-slate-700"
+              className="h-7 w-full max-w-full rounded border border-slate-300 px-2 text-xs text-slate-700"
             />
           </label>
           <LoadingButton
             variant="secondary"
             size="sm"
+            className="w-full"
             isLoading={loading("edit_invoice_reference")}
             loadingText="Saving..."
             disabled={disabled || !invoiceReference.trim()}

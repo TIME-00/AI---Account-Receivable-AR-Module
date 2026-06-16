@@ -1976,6 +1976,7 @@ export class ImportService {
     message: string,
   ): Record<string, unknown> {
     const top = candidates[0];
+    const autoRejected = candidates.length === 0 && reason === 'invoice_not_found';
     return {
       ...mappedData,
       review_required: true,
@@ -1991,7 +1992,13 @@ export class ImportService {
       suggested_invoice_no: top?.invoice_no ?? null,
       suggested_invoices: candidates,
       invoice_candidates: candidates,
-      user_action: 'pending',
+      user_action: autoRejected ? 'auto_rejected' : 'pending',
+      ...(autoRejected ? {
+        review_result: 'rejected',
+        rejected_at: new Date().toISOString(),
+        auto_rejected: true,
+        auto_reject_reason: reason,
+      } : {}),
     };
   }
 
