@@ -151,6 +151,25 @@ interface ReviewRowResult {
   messages: string[];
 }
 
+const REVIEW_AUDIT_FIELDS = [
+  'user_action',
+  'approved_customer_id',
+  'approved_customer_code',
+  'approved_customer_name',
+  'approved_invoice_id',
+  'approved_invoice_no',
+  'approved_by',
+  'approved_at',
+  'edited_customer_id',
+  'edited_customer_code',
+  'edited_customer_name',
+  'edited_invoice_reference',
+  'edited_by',
+  'edited_at',
+  'rejected_at',
+  'review_note',
+] as const;
+
 function hasAnyRole(auth: AuthContext, allowed: string[]): boolean {
   return auth.roles.some((role) => allowed.includes(role));
 }
@@ -193,6 +212,20 @@ function hasImportValue(row: Record<string, unknown>, key: string): boolean {
 
 function rowError(field: string, message: string): Record<string, unknown> {
   return { field, message };
+}
+
+function preserveReviewAuditFields(
+  previous: Record<string, unknown> | null,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!previous) return next;
+  const merged = { ...next };
+  for (const field of REVIEW_AUDIT_FIELDS) {
+    if (previous[field] !== undefined) {
+      merged[field] = previous[field];
+    }
+  }
+  return merged;
 }
 
 function isAllowedImportFileType(fileType: string): fileType is ImportFileType {
@@ -1091,8 +1124,9 @@ export class ImportService {
     const result = await this.validateRow(auth, batch.import_type, row.raw_data);
     const status: ImportRowStatus = result.errors.length > 0 ? 'Error' : result.status ?? 'Valid';
     const reviewResult = status === 'Valid' ? 'revalidated_valid' : 'revalidation_failed';
+    const validationMappedData = result.mappedData ?? {};
     const mappedData = {
-      ...(result.mappedData ?? row.mapped_data ?? {}),
+      ...preserveReviewAuditFields(row.mapped_data, validationMappedData),
       review_result: reviewResult,
       revalidated_at: new Date().toISOString(),
       revalidated_by: auth.userId,
