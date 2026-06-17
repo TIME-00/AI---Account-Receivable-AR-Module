@@ -15,7 +15,6 @@ import {
   Copy,
   Eye,
   FileSpreadsheet,
-  FileText,
   Info,
   Loader2,
   RotateCcw,
@@ -84,15 +83,12 @@ const ROW_STATUS_COLORS: Record<string, { bg: string; text: string; dot: string 
 export default function ReceiptImportPage() {
   const {
     step,
-    setStep,
     batch,
     rows,
     isLoading,
     error,
     reviewLoading,
-    uploadFile,
-    parseBatch,
-    validateBatch,
+    uploadAndValidate,
     executeBatch,
     reviewImportRow,
     reset,
@@ -102,7 +98,9 @@ export default function ReceiptImportPage() {
   const [dragActive, setDragActive] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [autoPost, setAutoPost] = useState(false);
+  // Batch 6C UX Fix: Auto-Post & Allocate defaults ON for receipts (frontend
+  // default only; execution still runs through verified backend RPCs).
+  const [autoPost, setAutoPost] = useState(true);
   const currentStepIndex = IMPORT_STEPS.findIndex((s) => s.key === step);
 
   const handleFile = useCallback(
@@ -118,9 +116,10 @@ export default function ReceiptImportPage() {
         toast.error("File Too Large", { description: `Maximum file size for .${ext} is ${maxLabel}.` });
         return;
       }
-      uploadFile(file);
+      // Batch 6C UX Fix: upload then auto parse + validate in one action.
+      uploadAndValidate(file);
     },
-    [uploadFile],
+    [uploadAndValidate],
   );
 
   const copyTemplate = useCallback(() => {
@@ -304,41 +303,7 @@ export default function ReceiptImportPage() {
           </div>
         )}
 
-        {step === "parse" && batch && (
-          <div className="space-y-6 text-center">
-            <div className="flex flex-col items-center gap-4">
-              <div className="rounded-2xl bg-blue-100 p-4">
-                <FileText className="h-10 w-10 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-lg font-semibold text-slate-700">File Uploaded Successfully</p>
-                <p className="mt-1 text-sm text-slate-500">{batch.file_name} - Batch: {batch.id.slice(0, 8)}...</p>
-              </div>
-            </div>
-            <LoadingButton variant="primary" size="lg" isLoading={isLoading} loadingText="Parsing..." onClick={() => parseBatch(batch.id)}>
-              <Table2 className="h-4 w-4" />
-              Parse File
-            </LoadingButton>
-          </div>
-        )}
-
-        {step === "preview" && batch && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-800">Preview Parsed Rows</h2>
-                <p className="text-sm text-slate-500">{rows.length} rows extracted from {batch.file_name}</p>
-              </div>
-              <LoadingButton variant="primary" size="md" isLoading={isLoading} loadingText="Validating..." onClick={() => validateBatch(batch.id)}>
-                <CheckCircle2 className="h-4 w-4" />
-                Validate Rows
-              </LoadingButton>
-            </div>
-            <RowsTable rows={rows} />
-          </div>
-        )}
-
-        {step === "execute" && batch && (
+        {step === "validate" && batch && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>

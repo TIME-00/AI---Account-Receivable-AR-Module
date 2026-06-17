@@ -23,7 +23,7 @@ import { LoadingButton } from "@/components/ui/loading-button";
 import { ReviewActions } from "@/components/features/imports/review-actions";
 import { cn, formatDate } from "@/lib/utils";
 import {
-  Upload, FileText, ChevronLeft, ChevronRight, CheckCircle2,
+  Upload, FileText, ChevronRight, CheckCircle2,
   XCircle, AlertTriangle, Loader2, ArrowLeft, RotateCcw,
   FileSpreadsheet, Info, Copy, Eye, Check, Table2, Zap,
 } from "lucide-react";
@@ -82,8 +82,8 @@ const BATCH_STATUS_COLORS: Record<string, string> = {
 
 export default function InvoiceImportPage() {
   const {
-    step, setStep, batch, rows, isLoading, error, reviewLoading,
-    uploadFile, parseBatch, validateBatch, executeBatch, reviewImportRow, reset,
+    step, batch, rows, isLoading, error, reviewLoading,
+    uploadAndValidate, executeBatch, reviewImportRow, reset,
   } = useImport();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,9 +106,10 @@ export default function InvoiceImportPage() {
         toast.error("File Too Large", { description: `Maximum file size for .${ext} is ${maxLabel}.` });
         return;
       }
-      uploadFile(file);
+      // Batch 6C UX Fix: upload then auto parse + validate in one action.
+      uploadAndValidate(file);
     },
-    [uploadFile]
+    [uploadAndValidate]
   );
 
   const handleDrop = useCallback(
@@ -371,61 +372,8 @@ export default function InvoiceImportPage() {
           </div>
         )}
 
-        {/* ── Step 2: Parse ───────────────────────────────────────────── */}
-        {step === "parse" && batch && (
-          <div className="space-y-6 text-center">
-            <div className="flex flex-col items-center gap-4">
-              <div className="rounded-2xl bg-blue-100 p-4">
-                <FileText className="h-10 w-10 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-lg font-semibold text-slate-700">File Uploaded Successfully</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {batch.file_name} · Batch: {batch.id.slice(0, 8)}...
-                </p>
-              </div>
-            </div>
-            <LoadingButton
-              variant="primary"
-              size="lg"
-              isLoading={isLoading}
-              loadingText="Parsing CSV..."
-              onClick={() => parseBatch(batch.id)}
-            >
-              <Table2 className="h-4 w-4" />
-              Parse CSV File
-            </LoadingButton>
-          </div>
-        )}
-
-        {/* ── Step 3: Preview ─────────────────────────────────────────── */}
-        {step === "preview" && batch && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-800">Preview Parsed Rows</h2>
-                <p className="text-sm text-slate-500">
-                  {rows.length} rows extracted from {batch.file_name}
-                </p>
-              </div>
-              <LoadingButton
-                variant="primary"
-                size="md"
-                isLoading={isLoading}
-                loadingText="Validating..."
-                onClick={() => validateBatch(batch.id)}
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                Validate Rows
-              </LoadingButton>
-            </div>
-
-            <RowsTable rows={rows} showValidation={false} />
-          </div>
-        )}
-
-        {/* ── Step 4: Validate → Execute ──────────────────────────────── */}
-        {step === "execute" && batch && (
+        {/* ── Step 2: Validate → Create Drafts ────────────────────────── */}
+        {step === "validate" && batch && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -435,14 +383,6 @@ export default function InvoiceImportPage() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <LoadingButton
-                  variant="secondary"
-                  size="md"
-                  onClick={() => setStep("preview")}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Back
-                </LoadingButton>
                 <LoadingButton
                   variant="primary"
                   size="md"

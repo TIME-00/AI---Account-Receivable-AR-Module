@@ -99,10 +99,17 @@ export function ReviewActions({
     ([key, busy]) => busy && key.startsWith(`${row.id}:`),
   );
 
-  async function run(payload: ReviewRowPayload) {
+  async function run(payload: ReviewRowPayload, options?: { thenRetry?: boolean }) {
     setLocalError(null);
     try {
       await reviewImportRow(batchId, row.id, payload);
+      if (options?.thenRetry) {
+        // Batch 6C UX Fix: approve/edit never marks the row Valid on its own
+        // (backend contract unchanged). We chain an explicit retry_validation so
+        // the user does not have to click Retry manually. If this fails, the row
+        // stays reviewable/editable and the backend error is shown below.
+        await reviewImportRow(batchId, row.id, { action: "retry_validation" });
+      }
       setEditMode("none");
       setCustomerCode("");
       setCustomerName("");
@@ -174,11 +181,11 @@ export function ReviewActions({
                   variant="secondary"
                   size="sm"
                   className="h-auto w-full items-start justify-start whitespace-normal break-words py-1.5 text-left"
-                  isLoading={loading("approve_suggestion")}
-                  loadingText="Approving..."
+                  isLoading={loading("approve_suggestion") || loading("retry_validation")}
+                  loadingText="Approving & validating..."
                   disabled={anyLoading}
                   title={`Approve ${c.customer_code} · ${c.customer_name}`}
-                  onClick={() => run({ action: "approve_suggestion", suggested_customer_id: c.customer_id })}
+                  onClick={() => run({ action: "approve_suggestion", suggested_customer_id: c.customer_id }, { thenRetry: true })}
                 >
                   <UserCheck className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                   <span className="flex min-w-0 flex-col">
@@ -205,11 +212,11 @@ export function ReviewActions({
                     variant="secondary"
                     size="sm"
                     className="h-auto w-full items-start justify-start whitespace-normal break-words py-1.5 text-left"
-                    isLoading={loading("approve_suggestion")}
-                    loadingText="Approving..."
+                    isLoading={loading("approve_suggestion") || loading("retry_validation")}
+                    loadingText="Approving & validating..."
                     disabled={anyLoading || notAllocatable}
                     title={notAllocatable ? "Not allocatable (paid, no outstanding, or currency mismatch)" : `Approve ${inv.invoice_no}`}
-                    onClick={() => run({ action: "approve_suggestion", suggested_invoice_id: inv.invoice_id })}
+                    onClick={() => run({ action: "approve_suggestion", suggested_invoice_id: inv.invoice_id }, { thenRetry: true })}
                   >
                     <Check className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                     <span className="flex min-w-0 flex-col">
@@ -296,7 +303,7 @@ interface EditControlsProps {
   setInvoiceReference: (v: string) => void;
   loading: (action: ReviewAction) => boolean;
   disabled: boolean;
-  run: (payload: ReviewRowPayload) => void;
+  run: (payload: ReviewRowPayload, options?: { thenRetry?: boolean }) => void;
 }
 
 function EditControls({
@@ -368,15 +375,18 @@ function EditControls({
             variant="secondary"
             size="sm"
             className="w-full"
-            isLoading={loading("edit_customer")}
-            loadingText="Saving..."
+            isLoading={loading("edit_customer") || loading("retry_validation")}
+            loadingText="Saving & validating..."
             disabled={disabled || (!customerCode.trim() && !customerName.trim())}
             onClick={() =>
-              run({
-                action: "edit_customer",
-                ...(customerCode.trim() ? { customer_code: customerCode.trim() } : {}),
-                ...(!customerCode.trim() && customerName.trim() ? { customer_name: customerName.trim() } : {}),
-              })
+              run(
+                {
+                  action: "edit_customer",
+                  ...(customerCode.trim() ? { customer_code: customerCode.trim() } : {}),
+                  ...(!customerCode.trim() && customerName.trim() ? { customer_name: customerName.trim() } : {}),
+                },
+                { thenRetry: true },
+              )
             }
           >
             <Check className="h-3.5 w-3.5" />
@@ -401,10 +411,10 @@ function EditControls({
             variant="secondary"
             size="sm"
             className="w-full"
-            isLoading={loading("edit_invoice_reference")}
-            loadingText="Saving..."
+            isLoading={loading("edit_invoice_reference") || loading("retry_validation")}
+            loadingText="Saving & validating..."
             disabled={disabled || !invoiceReference.trim()}
-            onClick={() => run({ action: "edit_invoice_reference", invoice_reference: invoiceReference.trim() })}
+            onClick={() => run({ action: "edit_invoice_reference", invoice_reference: invoiceReference.trim() }, { thenRetry: true })}
           >
             <Check className="h-3.5 w-3.5" />
             Save reference

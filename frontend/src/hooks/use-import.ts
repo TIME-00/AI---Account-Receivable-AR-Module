@@ -166,21 +166,19 @@ export interface ReviewRowResult {
 
 // ─── Step tracking ──────────────────────────────────────────────────────────
 
+// Batch 6C UX Fix — simplified 4-step user flow. Parse + Preview are no longer
+// user-visible steps; the hook parses and validates automatically after upload.
 export type ImportStep =
   | "upload"
-  | "parse"
-  | "preview"
   | "validate"
   | "execute"
   | "result";
 
 export const IMPORT_STEPS: { key: ImportStep; label: string; number: number }[] = [
   { key: "upload", label: "Upload File", number: 1 },
-  { key: "parse", label: "Parse", number: 2 },
-  { key: "preview", label: "Preview & Edit", number: 3 },
-  { key: "validate", label: "Validate", number: 4 },
-  { key: "execute", label: "Create Drafts", number: 5 },
-  { key: "result", label: "Result", number: 6 },
+  { key: "validate", label: "Validate", number: 2 },
+  { key: "execute", label: "Create Drafts", number: 3 },
+  { key: "result", label: "Result", number: 4 },
 ];
 
 // ─── Hook ───────────────────────────────────────────────────────────────────
@@ -244,7 +242,8 @@ export function useImport(importType: ImportType = "invoice") {
         if (payload.rows && Array.isArray(payload.rows)) {
           setRows(payload.rows);
         }
-        setStep("parse");
+        // Batch 6C UX Fix: stay on the "upload" step; the caller chains
+        // parse + validate automatically and lands the user on "validate".
         toast.success("File Uploaded", { description: `Batch: ${batchData.id?.slice(0, 8)}...` });
         return batchData;
       } catch (err) {
@@ -273,8 +272,8 @@ export function useImport(importType: ImportType = "invoice") {
         const parsedRows = result.rows ?? [];
         setBatch(batchData);
         setRows(Array.isArray(parsedRows) ? parsedRows : []);
-        setStep("preview");
-        toast.success("File Parsed", { description: `${parsedRows.length} rows extracted` });
+        // Batch 6C UX Fix: parsing is now an internal step (no user-visible
+        // Preview screen and no separate toast); validation follows immediately.
         return batchData;
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : "Parse failed";
@@ -301,7 +300,7 @@ export function useImport(importType: ImportType = "invoice") {
         const validatedRows = result.rows ?? [];
         setBatch(batchData);
         setRows(Array.isArray(validatedRows) ? validatedRows : []);
-        setStep("execute");
+        setStep("validate");
         toast.success("Validation Complete", {
           description: `${batchData.valid_rows} valid, ${batchData.error_rows} errors`,
         });
@@ -315,6 +314,29 @@ export function useImport(importType: ImportType = "invoice") {
       }
     },
     [api]
+  );
+
+  /**
+   * Batch 6C UX Fix — upload → auto parse → auto validate in one user action.
+   * Lands the user on the "validate" step (validation results) regardless of
+   * outcome. Parse/validate errors surface via the shared `error` state on the
+   * Validate screen. No financial document is created here.
+   */
+  const uploadAndValidate = useCallback(
+    async (file: File) => {
+      const uploaded = await uploadFile(file);
+      if (!uploaded) return undefined;
+      try {
+        await parseBatch(uploaded.id);
+        await validateBatch(uploaded.id);
+      } catch {
+        // Surface the parse/validate error on the Validate step; `error` is
+        // already set by the failing call. (Re-thrown errors are non-fatal here.)
+        setStep("validate");
+      }
+      return uploaded;
+    },
+    [uploadFile, parseBatch, validateBatch]
   );
 
   /**
@@ -431,6 +453,7 @@ export function useImport(importType: ImportType = "invoice") {
     reviewLoading,
     // Actions
     uploadFile,
+    uploadAndValidate,
     parseBatch,
     validateBatch,
     executeBatch,
