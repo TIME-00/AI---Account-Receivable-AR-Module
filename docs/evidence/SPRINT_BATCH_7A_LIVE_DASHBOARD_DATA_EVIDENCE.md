@@ -745,3 +745,102 @@ frontend live dashboard integration has now been completed against that verified
 contract. Production SQL/deployment verification and authenticated dashboard,
 forbidden-parameter, and `/allocations/auto` smoke all passed. The production
 backend is fully cleared for frontend release.
+
+## Vercel production frontend smoke
+
+**Production frontend URL:** `https://account-receivable-module.vercel.app/`
+**Smoke date:** 2026-06-19
+**Role tested:** Finance Manager
+
+Local `HEAD`, local `origin/main`, and the remote `main` branch all resolved to:
+
+```text
+4b0e638 feat(dashboard): integrate live AR dashboard metrics
+```
+
+The production URL returned HTTP 200 from Vercel and loaded the Next.js
+application rather than a 404, deployment-not-found, or Vercel build-error page.
+Public Vercel response headers and repository metadata did not expose the exact
+deployment Git SHA, so commit attribution could not be verified directly from
+Vercel metadata. Runtime inspection confirmed that the deployed application
+contains and executes the Batch 7A dashboard implementation introduced by
+commit `4b0e638`.
+
+### Login and dashboard render
+
+An existing production Finance Manager authenticated successfully through the
+production login page. The password, access token, refresh token, browser
+session data, cookies, and Supabase keys were not printed or copied into this
+evidence. The isolated incognito browser session and temporary profile were
+removed after testing.
+
+The dashboard loaded at the production root route without a runtime crash. No
+old flat-contract error, missing nested-field error, or `.map()` exception was
+observed.
+
+Network inspection confirmed:
+
+```text
+GET /functions/v1/reports/dashboard?trend_months=6
+```
+
+The request completed with the expected CORS preflight HTTP 204 followed by the
+dashboard HTTP 200 response.
+
+### Live dashboard UI verification
+
+The rendered production dashboard displayed:
+
+- Total Outstanding AR;
+- Overdue Outstanding and overdue invoice count;
+- Unapplied Cash;
+- Current Month Collections;
+- Current Month Posted Invoices;
+- Import Rows Needing Review;
+- Open, Partially Paid, Overdue, and Paid invoice status counts;
+- five aging buckets;
+- six-month Collection Trend;
+- Top Outstanding Customers;
+- Customer Credit Rating Distribution.
+
+Production runtime values included non-zero outstanding AR, unapplied cash,
+collections, invoice counts, and top-customer rows. Zero overdue values rendered
+cleanly as `MYR 0.00` and `0 overdue invoice(s)`.
+
+UI detail verification:
+
+- scope label displayed `Company scope`, as expected for Finance Manager;
+- business date displayed from `meta.as_of_date`;
+- last-updated timestamp displayed from `meta.calculated_at`;
+- manual Refresh was clickable;
+- the visible `Refreshing…` state appeared during a throttled refresh;
+- refresh completed with dashboard HTTP 200 and the page remained rendered;
+- credit-rating text states that ratings are maintained customer ratings and
+  not a predictive/AI score;
+- `AR & Cash Position` states that gross outstanding AR, overdue AR, and
+  unapplied cash are shown separately;
+- the mock DSO chart was absent.
+
+The fully empty aging/composition/trend/customer states were not triggered
+because production contains non-zero data. Their deployed labels/components were
+present, and zero overdue values rendered without error.
+
+### Browser console and network safety
+
+- no JavaScript runtime exception was observed;
+- no dashboard API failure was observed;
+- the only browser console error was a non-functional missing
+  `https://account-receivable-module.vercel.app/favicon.ico` HTTP 404;
+- no frontend request to `POST /allocations/auto` was observed;
+- no direct browser request to Supabase REST financial tables
+  `invoices`, `receipts`, or `allocation_details` was observed;
+- dashboard financial data was loaded through the backend `reports` endpoint.
+
+No production user was created or reset. No customer or financial fixture was
+created. No code file was changed during this smoke test other than this
+evidence document. No migration or Supabase deployment was run. No commit or
+push was performed.
+
+Batch 7A is fully complete: backend staging and production verification,
+production authenticated backend release gate, frontend integration review,
+commit/push, and Vercel production frontend runtime smoke have all passed.
