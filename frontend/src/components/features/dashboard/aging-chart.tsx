@@ -19,6 +19,8 @@ interface AgingChartProps {
 }
 
 export function AgingChart({ data, isLoading }: AgingChartProps) {
+  const hasData = data.some((bucket) => bucket.amount > 0 || bucket.count > 0);
+
   return (
     <div className="chart-container">
       <div className="mb-4 flex items-center justify-between">
@@ -35,6 +37,11 @@ export function AgingChart({ data, isLoading }: AgingChartProps) {
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+          </div>
+        ) : !hasData ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
+            <p className="text-sm font-medium text-slate-500">No outstanding invoices</p>
+            <p className="text-xs text-slate-400">Aging buckets will appear here once invoices are outstanding.</p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

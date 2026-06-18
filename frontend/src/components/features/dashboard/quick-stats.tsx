@@ -1,45 +1,59 @@
 "use client";
 
-import { formatCurrency } from "@/lib/utils";
-import { Users, TrendingUp, Receipt, DollarSign } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { FileCheck2, Clock, FileMinus, Inbox } from "lucide-react";
 
 interface QuickStatsProps {
-  totalCustomers: number | string;
-  collectionRate: string;
-  totalReceipts: number | string;
-  creditBalance: number;
+  /** Posted invoices in the current business month (kpis.current_month_posted_invoices). */
+  postedThisMonth: number | string;
+  /** Overdue invoice count (kpis.overdue_invoice_count). */
+  overdueInvoices: number | string;
+  /** Unpaid invoices total (invoice_status_counts.unpaid_total). */
+  unpaidInvoices: number | string;
+  /** Import rows awaiting review (kpis.import_rows_needing_review). */
+  importReview: number | string;
 }
 
-export function QuickStats({ totalCustomers, collectionRate, totalReceipts, creditBalance }: QuickStatsProps) {
+export function QuickStats({
+  postedThisMonth,
+  overdueInvoices,
+  unpaidInvoices,
+  importReview,
+}: QuickStatsProps) {
+  const importPending =
+    typeof importReview === "number" ? importReview > 0 : importReview !== "0" && importReview !== "-";
+
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
       <div className="glass-card p-4">
         <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-brand-500" />
-          <span className="text-xs font-medium text-slate-500">Active Customers</span>
+          <FileCheck2 className="h-4 w-4 text-emerald-500" />
+          <span className="text-xs font-medium text-slate-500">Posted This Month</span>
         </div>
-        <p className="mt-2 text-xl font-bold text-slate-900">{totalCustomers}</p>
+        <p className="mt-2 text-xl font-bold text-slate-900">{postedThisMonth}</p>
       </div>
       <div className="glass-card p-4">
         <div className="flex items-center gap-2">
-          <TrendingUp className="h-4 w-4 text-emerald-500" />
-          <span className="text-xs font-medium text-slate-500">Collection Rate</span>
+          <Clock className="h-4 w-4 text-red-500" />
+          <span className="text-xs font-medium text-slate-500">Overdue Invoices</span>
         </div>
-        <p className="mt-2 text-xl font-bold text-slate-900">{collectionRate}</p>
+        <p className="mt-2 text-xl font-bold text-slate-900">{overdueInvoices}</p>
       </div>
       <div className="glass-card p-4">
         <div className="flex items-center gap-2">
-          <Receipt className="h-4 w-4 text-amber-500" />
-          <span className="text-xs font-medium text-slate-500">Unapplied Receipts</span>
+          <FileMinus className="h-4 w-4 text-amber-500" />
+          <span className="text-xs font-medium text-slate-500">Unpaid Invoices</span>
         </div>
-        <p className="mt-2 text-xl font-bold text-slate-900">{totalReceipts}</p>
+        <p className="mt-2 text-xl font-bold text-slate-900">{unpaidInvoices}</p>
       </div>
-      <div className="glass-card p-4">
+      <div className={cn("glass-card p-4", importPending && "ring-1 ring-amber-300")}>
         <div className="flex items-center gap-2">
-          <DollarSign className="h-4 w-4 text-purple-500" />
-          <span className="text-xs font-medium text-slate-500">Credit Balance</span>
+          <Inbox className={cn("h-4 w-4", importPending ? "text-amber-600" : "text-slate-400")} />
+          <span className="text-xs font-medium text-slate-500">Import Rows to Review</span>
         </div>
-        <p className="mt-2 text-xl font-bold text-slate-900">{formatCurrency(creditBalance)}</p>
+        <p className={cn("mt-2 text-xl font-bold", importPending ? "text-amber-700" : "text-slate-900")}>
+          {importReview}
+        </p>
       </div>
     </div>
   );

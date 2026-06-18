@@ -1,21 +1,49 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
-import type { DashboardSummary, ARSummary, CustomerAgingRow } from "@/types";
+import type { ARSummary, CustomerAgingRow, LiveDashboardMetrics } from "@/types";
+
+const DEFAULT_TREND_MONTHS = 6;
 
 /**
- * Fetch dashboard KPI summary.
- * Calls: GET /reports/dashboard
+ * Fetch the live AR dashboard metrics (Batch 7A).
+ * Calls: GET /reports/dashboard?trend_months=<n>
+ *
+ * Returns the nested base-currency contract ({@link LiveDashboardMetrics}).
+ * Polls in the foreground only so the dashboard stays current during a demo
+ * without burning quota while the tab is hidden.
+ *
+ * `silent: true` suppresses the global error toast so the dashboard can render
+ * its own inline error/empty states (e.g. 403 for System Admin-only users)
+ * instead of surfacing a duplicate toast.
  */
-export function useDashboardSummary() {
+export function useDashboardMetrics(trendMonths: number = DEFAULT_TREND_MONTHS) {
   const api = useApi();
 
-  return useQuery({
-    queryKey: ["dashboard", "summary"],
-    queryFn: () => api.get<DashboardSummary>("/reports/dashboard"),
-    staleTime: 60 * 1000, // 1 minute — dashboard data refreshes less frequently
+  const query = useQuery({
+    queryKey: ["dashboard", "metrics", trendMonths],
+    queryFn: () =>
+      api.get<LiveDashboardMetrics>("/reports/dashboard", {
+        params: { trend_months: trendMonths },
+        silent: true,
+      }),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    placeholderData: keepPreviousData,
+    retry: false,
   });
+
+  return {
+    ...query,
+    metrics: query.data,
+    /** True only on the first load (no previously cached data shown). */
+    isLoading: query.isLoading,
+    /** True for background refreshes while previous data is still displayed. */
+    isRefreshing: query.isFetching && !query.isLoading,
+  };
 }
 
 /**

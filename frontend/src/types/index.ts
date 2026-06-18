@@ -310,6 +310,11 @@ export interface CustomerAgingRow {
   bucket_over_90: number;
 }
 
+/**
+ * @deprecated Legacy flat dashboard shape. Superseded by {@link LiveDashboardMetrics}
+ * (the nested base-currency contract from `GET /reports/dashboard`). Kept only for
+ * temporary compatibility; do not use for new dashboard visuals.
+ */
 export interface DashboardSummary {
   total_invoices: number;
   open_invoices: number;
@@ -318,6 +323,105 @@ export interface DashboardSummary {
   total_ar_balance: number;
   total_overdue_balance: number;
   total_credit_balance: number;
+  overdue_percentage: number;
+}
+
+// ─── Live Dashboard Contract (Batch 7A) ─────────────────────────────────────
+// Mirrors backend/supabase/functions/reports/dashboard-types.ts exactly.
+// All `*_base` amounts are in the company base currency (meta.base_currency).
+
+export type DashboardScope = "assigned_customers" | "company";
+export type AgingBucketKey = "current" | "1_30" | "31_60" | "61_90" | "over_90";
+
+export interface DashboardMeta {
+  company_id: string;
+  base_currency: string;
+  /** Business as-of date (YYYY-MM-DD), derived server-side from BUSINESS_TIME_ZONE. */
+  as_of_date: string;
+  /** ISO timestamp the metrics were calculated at. */
+  calculated_at: string;
+  scope: DashboardScope;
+  trend_months: number;
+}
+
+export interface DashboardKpis {
+  total_outstanding_ar: number;
+  overdue_outstanding: number;
+  overdue_invoice_count: number;
+  unapplied_cash: number;
+  current_month_collections: number;
+  current_month_posted_invoices: number;
+  import_rows_needing_review: number;
+}
+
+export interface DashboardInvoiceStatusCounts {
+  open: number;
+  partially_paid: number;
+  overdue_status: number;
+  paid: number;
+  unpaid_total: number;
+}
+
+export interface DashboardAgingBucket {
+  key: AgingBucketKey;
+  label: string;
+  invoice_count: number;
+  outstanding_base: number;
+  percentage: number;
+}
+
+export interface DashboardCollectionTrendPoint {
+  /** Calendar month, YYYY-MM. */
+  month: string;
+  collected_base: number;
+  receipt_count: number;
+}
+
+export interface DashboardTopCustomer {
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  outstanding_base: number;
+  overdue_base: number;
+  overdue_invoice_count: number;
+}
+
+export interface DashboardCreditRatingRow {
+  /** Maintained customer master credit rating — NOT a predictive/AI score. */
+  rating: CreditRating;
+  customer_count: number;
+  outstanding_base: number;
+}
+
+/**
+ * Nested live dashboard contract returned by `GET /reports/dashboard`.
+ * Source of truth for all dashboard visuals. The deprecated top-level aliases
+ * are retained only for transitional compatibility and must not back new visuals.
+ */
+export interface LiveDashboardMetrics {
+  meta: DashboardMeta;
+  kpis: DashboardKpis;
+  invoice_status_counts: DashboardInvoiceStatusCounts;
+  aging_buckets: DashboardAgingBucket[];
+  collection_trend: DashboardCollectionTrendPoint[];
+  top_outstanding_customers: DashboardTopCustomer[];
+  credit_rating_distribution: DashboardCreditRatingRow[];
+
+  /** @deprecated Compatibility alias — use invoice_status_counts / kpis. */
+  total_invoices: number;
+  /** @deprecated Compatibility alias. */
+  open_invoices: number;
+  /** @deprecated Compatibility alias. */
+  overdue_invoices: number;
+  /** @deprecated Compatibility alias. */
+  total_receipts: number;
+  /** @deprecated Legacy transaction-currency alias. */
+  total_ar_balance: number;
+  /** @deprecated Legacy transaction-currency alias. */
+  total_overdue_balance: number;
+  /** @deprecated Legacy unapplied-receipt + credit-note alias. */
+  total_credit_balance: number;
+  /** @deprecated Compatibility alias. */
   overdue_percentage: number;
 }
 

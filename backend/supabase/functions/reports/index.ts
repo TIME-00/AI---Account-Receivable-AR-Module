@@ -10,6 +10,33 @@ import { errorResponse, successResponse, ValidationError } from '../_shared/erro
 import { parsePagination, validateDate } from '../_shared/validators.ts';
 import { ReportService } from './service.ts';
 
+const DEFAULT_BUSINESS_TIME_ZONE = 'Asia/Kuala_Lumpur';
+
+function formatDateInTimeZone(date: Date, timeZone: string): string {
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  } catch {
+    throw new Error('Invalid BUSINESS_TIME_ZONE configuration.');
+  }
+
+  const parts = formatter.formatToParts(date);
+  const year = parts.find(part => part.type === 'year')?.value;
+  const month = parts.find(part => part.type === 'month')?.value;
+  const day = parts.find(part => part.type === 'day')?.value;
+
+  if (!year || !month || !day) {
+    throw new Error('Unable to derive the current business date.');
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
 // ─── Route Matching ─────────────────────────────────────────────────────────
 // The Supabase edge runtime may deliver various path prefixes:
 //   /functions/v1/reports/dashboard  OR  /reports/dashboard  OR  /dashboard
@@ -102,7 +129,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // ── Dashboard ──
     if (route === 'dashboard' && req.method === 'GET') {
-      const result = await service.getDashboardSummary(auth);
+      const forbiddenDashboardParams = [
+        'company_id',
+        'user_id',
+        'scope_mode',
+        'as_of_date',
+      ];
+      const suppliedForbiddenParam = forbiddenDashboardParams.find(param =>
+        url.searchParams.has(param)
+      );
+      if (suppliedForbiddenParam) {
+        throw new ValidationError(
+          `${suppliedForbiddenParam} is not accepted by the dashboard endpoint.`,
+        );
+      }
+
+      const trendMonthsText = url.searchParams.get('trend_months');
+      const trendMonths = trendMonthsText === null
+        ? 6
+        : Number(trendMonthsText);
+
+      if (!Number.isInteger(trendMonths) || trendMonths < 1 || trendMonths > 12) {
+        throw new ValidationError('trend_months must be an integer from 1 to 12.');
+      }
+
+      const businessTimeZone = Deno.env.get('BUSINESS_TIME_ZONE')?.trim()
+        || DEFAULT_BUSINESS_TIME_ZONE;
+      const businessDate = formatDateInTimeZone(new Date(), businessTimeZone);
+      const result = await service.getDashboardMetrics(
+        auth,
+        businessDate,
+        trendMonths,
+      );
       return jsonResponse(successResponse(result));
     }
 

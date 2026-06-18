@@ -7,13 +7,68 @@
 
 import { SupabaseClient } from 'supabase';
 import { getAdminClient, fetchById } from '../_shared/db.ts';
-import { NotFoundError } from '../_shared/errors.ts';
+import {
+  AuthorizationError,
+  BusinessError,
+  NotFoundError,
+} from '../_shared/errors.ts';
 import type { AuthContext } from '../_shared/auth.ts';
-import { requireRole, requireCustomerAccess, getCustomerAccessFilter } from '../_shared/auth.ts';
+import {
+  requireAnyRole,
+  requireRole,
+  requireCustomerAccess,
+  getCustomerAccessFilter,
+} from '../_shared/auth.ts';
 import { validateUUID, validateDate } from '../_shared/validators.ts';
 import type { PaginationParams } from '../_shared/types.ts';
 import { roundTo2 } from '../invoices/calculator.ts';
 import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
+import { validateDashboardMetricsResponse } from './dashboard-types.ts';
+import type { LiveDashboardMetrics } from './dashboard-types.ts';
+
+const DASHBOARD_READ_ROLES = [
+  'AR Clerk',
+  'AR Supervisor',
+  'Finance Manager',
+  'Auditor',
+] as const;
+
+const DASHBOARD_COMPANY_SCOPE_ROLES = new Set([
+  'AR Supervisor',
+  'Finance Manager',
+  'Auditor',
+]);
+
+interface DashboardRpcError {
+  code?: string;
+  message?: string;
+}
+
+function mapDashboardRpcError(error: DashboardRpcError): Error {
+  const message = error.message ?? '';
+
+  if (error.code === '42501' || message.startsWith('AUTH:')) {
+    return new AuthorizationError('Dashboard access is not permitted.');
+  }
+
+  if (message.startsWith('NOT_FOUND:')) {
+    return new BusinessError('NOT_FOUND', 'Active company not found.', 404);
+  }
+
+  if (message.startsWith('BR-DASH-001:')) {
+    return new BusinessError(
+      'BR-DASH-001',
+      message.slice('BR-DASH-001:'.length).trim(),
+      400,
+    );
+  }
+
+  console.error('[reports/dashboard] RPC failed:', {
+    code: error.code,
+    message: error.message,
+  });
+  return new Error('Failed to load dashboard metrics.');
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -449,62 +504,43 @@ export class ReportService {
   // ════════════════════════════════════════════════════════════════════════
 
   /**
-   * Quick dashboard numbers for the AR module home screen.
+   * Return the live, base-currency dashboard contract plus deprecated aliases.
    */
-  async getDashboardSummary(
+  async getDashboardMetrics(
     auth: AuthContext,
-  ): Promise<Record<string, unknown>> {
-    requireRole(auth, 'AR Clerk');
-    const visibleCustomerIds = await this.getReadableVisibleCustomerIds(auth);
-    if (visibleCustomerIds.length === 0) {
-      return {
-        total_invoices: 0,
-        open_invoices: 0,
-        overdue_invoices: 0,
-        total_receipts: 0,
-        total_ar_balance: 0,
-        total_overdue_balance: 0,
-        total_credit_balance: 0,
-        overdue_percentage: 0,
-      };
+    businessDate: string,
+    trendMonths = 6,
+  ): Promise<LiveDashboardMetrics> {
+    requireAnyRole(auth, [...DASHBOARD_READ_ROLES]);
+    validateDate(businessDate, 'business_date');
+
+    if (!Number.isInteger(trendMonths) || trendMonths < 1 || trendMonths > 12) {
+      throw new BusinessError(
+        'BR-DASH-001',
+        'trend_months must be between 1 and 12',
+      );
     }
 
-    const [
-      { count: totalInvoices },
-      { count: openInvoices },
-      { count: overdueInvoices },
-      { count: totalReceipts },
-    ] = await Promise.all([
-      this.client.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).neq('status', 'Draft').neq('status', 'Cancelled'),
-      this.client.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).eq('status', 'Open'),
-      this.client.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).eq('status', 'Overdue'),
-      this.client.from('receipts').select('*', { count: 'exact', head: true })
-        .eq('company_id', auth.companyId).in('customer_id', visibleCustomerIds).neq('status', 'Draft').neq('status', 'Cancelled'),
-    ]);
+    const hasCompanyScope = auth.roles.some(role =>
+      DASHBOARD_COMPANY_SCOPE_ROLES.has(role)
+    );
+    const scopeMode = hasCompanyScope ? 'company' : 'assigned';
 
-    // Totals from v_customer_ar_summary
-    const { data: arSummary } = await this.client
-      .from('v_customer_ar_summary')
-      .select('total_ar_balance, overdue_ar_balance, credit_balance')
-      .eq('company_id', auth.companyId)
-      .in('id', visibleCustomerIds);
+    const { data, error } = await this.client.rpc(
+      'get_ar_dashboard_metrics',
+      {
+        p_company_id: auth.companyId,
+        p_user_id: auth.userId,
+        p_scope_mode: scopeMode,
+        p_as_of_date: businessDate,
+        p_trend_months: trendMonths,
+      },
+    );
 
-    const totalAR = (arSummary ?? []).reduce((s, r) => s + Number(r.total_ar_balance ?? 0), 0);
-    const totalOverdue = (arSummary ?? []).reduce((s, r) => s + Number(r.overdue_ar_balance ?? 0), 0);
-    const totalCredit = (arSummary ?? []).reduce((s, r) => s + Number(r.credit_balance ?? 0), 0);
+    if (error) {
+      throw mapDashboardRpcError(error);
+    }
 
-    return {
-      total_invoices: totalInvoices ?? 0,
-      open_invoices: openInvoices ?? 0,
-      overdue_invoices: overdueInvoices ?? 0,
-      total_receipts: totalReceipts ?? 0,
-      total_ar_balance: roundTo2(totalAR),
-      total_overdue_balance: roundTo2(totalOverdue),
-      total_credit_balance: roundTo2(totalCredit),
-      overdue_percentage: totalAR > 0 ? roundTo2((totalOverdue / totalAR) * 100) : 0,
-    };
+    return validateDashboardMetricsResponse(data);
   }
 }
