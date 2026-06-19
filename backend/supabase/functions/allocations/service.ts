@@ -20,7 +20,7 @@ import {
 } from '../_shared/errors.ts';
 import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
-import { requireRole, requireCustomerAccess } from '../_shared/auth.ts';
+import { requireAnyRole, requireRole, requireCustomerAccess } from '../_shared/auth.ts';
 import { assertCustomerVisible } from '../_shared/visibility.ts';
 import { validateUUID } from '../_shared/validators.ts';
 import type {
@@ -48,11 +48,6 @@ export interface ManualAllocationInput {
     amount: number;
     discount_amount?: number;
   }>;
-}
-
-export interface AutoAllocationInput {
-  receipt_id: string;
-  method: 'FIFO' | 'AmountMatch';
 }
 
 export interface ReverseAllocationInput {
@@ -156,59 +151,12 @@ export class AllocationService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // AUTO ALLOCATION (FIFO / Amount Match)
+  // AUTO ALLOCATION MUTATION (DISABLED)
   // ════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Automatically allocate a receipt using FIFO or Amount Match algorithm.
-   * Returns the proposed allocations, then executes them via manualAllocate.
-   */
-  async autoAllocate(
-    auth: AuthContext,
-    input: AutoAllocationInput,
-  ): Promise<AllocationDetail[]> {
-    requireRole(auth, 'AR Clerk');
-    validateUUID(input.receipt_id, 'receipt_id');
-
-    const receipt = await fetchById<Receipt>(this.client, 'receipts', input.receipt_id);
-    if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', input.receipt_id);
-
-    if (receipt.unallocated_amount <= 0) {
-      throw new BusinessError('BR-REC-001', 'Receipt has no unallocated balance.', 400);
-    }
-
-    // Fetch outstanding invoices for this customer + same currency
-    const candidates = await this.getOutstandingInvoices(
-      auth.companyId,
-      receipt.customer_id,
-      receipt.currency,
-    );
-
-    if (candidates.length === 0) {
-      throw new BusinessError('BR-REC-001', 'No outstanding invoices found for this customer.', 400);
-    }
-
-    // Apply algorithm
-    let proposals: AllocationProposal[];
-    if (input.method === 'FIFO') {
-      proposals = allocateFIFO(candidates, receipt.unallocated_amount, receipt.exchange_rate);
-    } else {
-      proposals = allocateAmountMatch(candidates, receipt.unallocated_amount, receipt.exchange_rate);
-    }
-
-    if (proposals.length === 0) {
-      throw new BusinessError('BR-REC-001', 'Auto-allocation algorithm found no suitable matches.', 400);
-    }
-
-    // Execute allocations via manualAllocate (reuse all validation logic)
-    return this.manualAllocate(auth, {
-      receipt_id: input.receipt_id,
-      allocations: proposals.map(p => ({
-        invoice_id: p.invoice_id,
-        amount: p.allocated_amount,
-      })),
-    });
-  }
+  // No executable service method exists for automatic allocation. The HTTP
+  // route remains a hard 403. FIFO/AmountMatch are retained only for read-only
+  // preview and user-confirmed manual allocation assistance.
 
   // ════════════════════════════════════════════════════════════════════════
   // PREVIEW AUTO ALLOCATION (Dry run — no changes)
@@ -223,10 +171,13 @@ export class AllocationService {
     receiptId: string,
     method: 'FIFO' | 'AmountMatch',
   ): Promise<AllocationProposal[]> {
+    requireAnyRole(auth, ['AR Clerk', 'AR Supervisor', 'Finance Manager', 'Auditor']);
     validateUUID(receiptId, 'receipt_id');
 
     const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
+    await requireCustomerAccess(auth, receipt.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
 
     const candidates = await this.getOutstandingInvoices(
       auth.companyId,

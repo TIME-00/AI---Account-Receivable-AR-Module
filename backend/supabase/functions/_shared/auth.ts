@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { getAdminClient, getUserClient } from './db.ts';
-import { AuthenticationError, AuthorizationError } from './errors.ts';
+import { AuthenticationError, AuthorizationError, NotFoundError } from './errors.ts';
 import { ROLE_HIERARCHY } from './constants.ts';
 import type { UserRole } from './types.ts';
 
@@ -151,6 +151,20 @@ export function requireOperationalRole(auth: AuthContext): void {
 }
 
 /**
+ * Check if the user may read operational AR data.
+ * System Admin is configuration-only and is intentionally excluded.
+ */
+export function requireOperationalReadRole(auth: AuthContext): void {
+  const operationalReadRoles: UserRole[] = [
+    'AR Clerk',
+    'AR Supervisor',
+    'Finance Manager',
+    'Auditor',
+  ];
+  requireAnyRole(auth, operationalReadRoles);
+}
+
+/**
  * Check if the user can access a specific customer's data.
  * AR Clerk: only assigned customers.
  * AR Supervisor+: all customers.
@@ -162,14 +176,32 @@ export async function requireCustomerAccess(
   auth: AuthContext,
   customerInternalId: string,  // UUID — customers.id
 ): Promise<void> {
-  // AR Supervisor, Finance Manager, System Admin, Auditor can see all
-  const fullAccessRoles: UserRole[] = ['AR Supervisor', 'Finance Manager', 'System Admin', 'Auditor'];
+  requireOperationalReadRole(auth);
+
+  const adminClient = getAdminClient();
+  const { data: visibleCustomer, error: visibilityError } = await adminClient
+    .from('customers')
+    .select('id')
+    .eq('id', customerInternalId)
+    .eq('company_id', auth.companyId)
+    .eq('is_deleted', false)
+    .eq('is_hidden', false)
+    .maybeSingle();
+
+  if (visibilityError) {
+    throw new Error(`Failed to verify customer visibility: ${visibilityError.message}`);
+  }
+  if (!visibleCustomer) {
+    throw new NotFoundError('Customer', customerInternalId);
+  }
+
+  // AR Supervisor, Finance Manager, and Auditor can see all operational customers.
+  const fullAccessRoles: UserRole[] = ['AR Supervisor', 'Finance Manager', 'Auditor'];
   if (auth.roles.some(r => fullAccessRoles.includes(r))) {
     return; // Full access
   }
 
   // AR Clerk — check customer assignment
-  const adminClient = getAdminClient();
   const { data, error } = await adminClient
     .from('user_customer_assignments')
     .select('id')
@@ -194,7 +226,9 @@ export async function requireCustomerAccess(
 export async function getCustomerAccessFilter(
   auth: AuthContext,
 ): Promise<string[] | null> {
-  const fullAccessRoles: UserRole[] = ['AR Supervisor', 'Finance Manager', 'System Admin', 'Auditor'];
+  requireOperationalReadRole(auth);
+
+  const fullAccessRoles: UserRole[] = ['AR Supervisor', 'Finance Manager', 'Auditor'];
   if (auth.roles.some(r => fullAccessRoles.includes(r))) {
     return null; // No filter needed — full access
   }
@@ -212,7 +246,22 @@ export async function getCustomerAccessFilter(
     throw new Error(`Failed to fetch customer assignments: ${error.message}`);
   }
 
-  return (data ?? []).map((r: { customer_id: string }) => r.customer_id);
+  const assignedIds = (data ?? []).map((r: { customer_id: string }) => r.customer_id);
+  if (assignedIds.length === 0) return [];
+
+  const { data: visibleCustomers, error: visibilityError } = await adminClient
+    .from('customers')
+    .select('id')
+    .eq('company_id', auth.companyId)
+    .eq('is_deleted', false)
+    .eq('is_hidden', false)
+    .in('id', assignedIds);
+
+  if (visibilityError) {
+    throw new Error(`Failed to filter visible customer assignments: ${visibilityError.message}`);
+  }
+
+  return (visibleCustomers ?? []).map((customer: { id: string }) => customer.id);
 }
 
 // ─── Convenience: Extract company ID from request ───────────────────────────

@@ -351,12 +351,8 @@ export class CustomerService {
       .from('customers')
       .select('*', { count: 'exact' })
       .eq('company_id', auth.companyId)
-      .eq('is_hidden', false);
-
-    // Soft-delete filter
-    if (!filters.include_deleted) {
-      query = query.eq('is_deleted', false);
-    }
+      .eq('is_hidden', false)
+      .eq('is_deleted', false);
 
     // AR Clerk scope filter
     if (allowedIds !== null) {

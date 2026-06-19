@@ -170,7 +170,10 @@ export class InvoiceService {
     lines: CreateInvoiceLineInput[],
     exchangeRate?: number,
   ): Promise<InvoiceLine[]> {
+    requireRole(auth, 'AR Clerk');
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
+    await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
     const rate = exchangeRate ?? invoice.exchange_rate;
 
     // Get current max line_no
@@ -253,7 +256,10 @@ export class InvoiceService {
     lineId: string,
     data: Partial<CreateInvoiceLineInput>,
   ): Promise<InvoiceLine> {
+    requireRole(auth, 'AR Clerk');
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
+    await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
     const line = await fetchById<InvoiceLine>(this.client, 'invoice_lines', lineId);
     if (line.invoice_id !== invoiceId) throw new NotFoundError('InvoiceLine', lineId);
@@ -319,7 +325,13 @@ export class InvoiceService {
    * Delete a line item from a Draft invoice.
    */
   async deleteLine(auth: AuthContext, invoiceId: string, lineId: string): Promise<void> {
+    requireRole(auth, 'AR Clerk');
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
+    await requireCustomerAccess(auth, invoice.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
+
+    const line = await fetchById<InvoiceLine>(this.client, 'invoice_lines', lineId);
+    if (line.invoice_id !== invoiceId) throw new NotFoundError('InvoiceLine', lineId);
 
     const { error } = await this.client
       .from('invoice_lines')
@@ -561,6 +573,7 @@ export class InvoiceService {
     invoiceId: string,
     data: Partial<CreateInvoiceInput>,
   ): Promise<Invoice> {
+    requireRole(auth, 'AR Clerk');
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
     await requireCustomerAccess(auth, invoice.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
@@ -592,6 +605,7 @@ export class InvoiceService {
    * Delete a Draft invoice and its lines.
    */
   async deleteDraftInvoice(auth: AuthContext, invoiceId: string): Promise<void> {
+    requireRole(auth, 'AR Clerk');
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
     await requireCustomerAccess(auth, invoice.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
