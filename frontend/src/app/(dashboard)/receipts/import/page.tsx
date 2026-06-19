@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import {
   IMPORT_STEPS,
+  summarizeValidationCounts,
   useImport,
   type ImportCustomerResolution,
   type ImportCustomerSuggestion,
@@ -103,6 +104,9 @@ export default function ReceiptImportPage() {
   const [autoPost, setAutoPost] = useState(true);
   const currentStepIndex = IMPORT_STEPS.findIndex((s) => s.key === step);
 
+  // Non-overlapping presentation counts (active review vs. error/unmatched/skipped).
+  const { needsReview: needsReviewCount, errors: errorCount } = summarizeValidationCounts(rows);
+
   const handleFile = useCallback(
     (file: File) => {
       const ext = file.name.split(".").pop()?.toLowerCase();
@@ -141,7 +145,7 @@ export default function ReceiptImportPage() {
             <FileSpreadsheet className="h-6 w-6 text-emerald-500" />
             Receipt Import
           </h1>
-          <p className="mt-1 text-sm text-slate-500">CSV/Excel Receipt Import - draft by default, optional auto-post and exact allocation</p>
+          <p className="mt-1 text-sm text-slate-500">CSV/Excel Receipt Import — Auto-Post &amp; Allocate is ON by default (turn it off on the Validate step for draft-only)</p>
         </div>
         {step !== "upload" && step !== "result" && (
           <LoadingButton variant="ghost" size="sm" onClick={reset}>
@@ -155,10 +159,10 @@ export default function ReceiptImportPage() {
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-500" />
           <div className="text-sm">
-            <p className="font-semibold text-amber-800">Draft by Default, Optional Auto-Post</p>
+            <p className="font-semibold text-amber-800">Auto-Post &amp; Allocate is ON by default</p>
             <ul className="mt-1 space-y-0.5 text-amber-700">
-              <li>Default imports create <strong>Draft</strong> receipts only.</li>
-              <li>If Auto-Post & Allocate is explicitly enabled, receipts will be posted and exact invoice references may be allocated using verified financial RPCs.</li>
+              <li><strong>Auto-Post &amp; Allocate is enabled by default.</strong> On execution, valid receipts are posted and exact invoice references are allocated using verified financial RPCs — this is not a draft-only import.</li>
+              <li>To create <strong>Draft</strong> receipts only, turn off <strong>Auto-Post &amp; Allocate</strong> on the Validate step before executing.</li>
               <li>CSV and Excel (.xlsx) files are supported. PDF/Image/OCR are not part of this phase.</li>
             </ul>
           </div>
@@ -338,9 +342,10 @@ export default function ReceiptImportPage() {
                 Receipts will be posted immediately. Posted receipts with exact invoice references will be allocated. This creates financial entries through verified P1 RPCs and cannot be treated as a draft-only import.
               </div>
             )}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <SummaryCard label="Valid Rows" value={batch.valid_rows} color="emerald" />
-              <SummaryCard label="Error Rows" value={batch.error_rows} color="red" />
+              <SummaryCard label="Needs Review" value={needsReviewCount} color="amber" />
+              <SummaryCard label="Error Rows" value={errorCount} color="red" />
               <SummaryCard label="Total Rows" value={batch.total_rows} color="slate" />
             </div>
             <RowsTable

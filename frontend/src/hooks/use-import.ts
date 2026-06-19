@@ -164,6 +164,54 @@ export interface ReviewRowResult {
   messages: string[];
 }
 
+// ─── Validation summary counts (presentation-only) ────────────────────────────
+// These derive non-overlapping display counts from the row list. They do NOT
+// change the backend contract or reinterpret persisted statuses — they only
+// bucket rows for the wizard summary. A row that is still an *active* review
+// item must not also be counted as an error, and an auto-rejected /
+// correction-only row (review_required stays true) must not be counted as an
+// active review item.
+
+/**
+ * `review_result` values that are terminal/handled — the row is no longer an
+ * *active* "Needs Review" item: resolved to Valid, approved, or rejected
+ * (including server-side auto-reject / correction-only). Rows that are still
+ * actionable (fresh review rows, edited-pending-retry, revalidation-failed)
+ * remain "Needs Review".
+ */
+const RESOLVED_REVIEW_RESULTS = new Set<string>([
+  "revalidated_valid",
+  "approved_pending_retry",
+  "rejected",
+  "rejected_invalid_selection",
+]);
+
+/** True when the row still needs a reviewer to act on it. */
+export function isActiveReviewRow(row: ImportRow): boolean {
+  if (row.mapped_data?.review_required !== true) return false;
+  const result = row.mapped_data?.review_result;
+  return !(typeof result === "string" && RESOLVED_REVIEW_RESULTS.has(result));
+}
+
+/**
+ * Non-overlapping presentation counts for the import validation summary.
+ * `needsReview` counts only *active* review items; `errors` counts
+ * error/unmatched/skipped rows that are not active review items (so an
+ * auto-rejected row shows under Errors, not Needs Review).
+ */
+export function summarizeValidationCounts(rows: ImportRow[]): { needsReview: number; errors: number } {
+  let needsReview = 0;
+  let errors = 0;
+  for (const row of rows) {
+    if (isActiveReviewRow(row)) {
+      needsReview += 1;
+    } else if (row.status === "Error" || row.status === "Unmatched" || row.status === "Skipped") {
+      errors += 1;
+    }
+  }
+  return { needsReview, errors };
+}
+
 // ─── Step tracking ──────────────────────────────────────────────────────────
 
 // Batch 6C UX Fix — simplified 4-step user flow. Parse + Preview are no longer

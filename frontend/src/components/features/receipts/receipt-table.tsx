@@ -129,7 +129,7 @@ export function ReceiptTable({
                         </div>
                         <div className="mt-0.5 flex justify-between text-[9px] text-slate-400">
                           <span>Applied: {formatAmount(r.allocated_amount)}</span>
-                          <span>Avail: {formatAmount(r.unallocated_amount)}</span>
+                          <span>Unapplied: {formatAmount(r.unallocated_amount)}</span>
                         </div>
                       </td>
                       <td className="px-3 py-3 text-center"><StatusBadge status={r.status} /></td>

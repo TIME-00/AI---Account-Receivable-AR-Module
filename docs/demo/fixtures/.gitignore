@@ -1,0 +1,4 @@
+# Generated upload-ready demo files contain a real run id and real in-demo
+# invoice numbers substituted from the masked templates. Keep them untracked.
+generated/
+*.generated.csv

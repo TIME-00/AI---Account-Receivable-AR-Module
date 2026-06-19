@@ -1,0 +1,2 @@
+customer_code,customer_name,registration_no,bill_addr_line1,bill_city,bill_state,bill_postal,bill_country,contact_name,contact_phone,contact_email,receipt_date,currency,receipt_reference,payment_method,bank_account_code,bank_account_id,amount,cheque_date,remarks,invoice_reference,allocation_amount,discount_amount,bank_charge_amount,short_payment_reason
+CUST-REPLACE-001,,,,,,,,,,,DATE-REPLACE,CURRENCY-REPLACE,DEMO-REPLACERUNID-RCPT-OVERPAY,TT,BANK-ACCOUNT-REPLACE-001,,150.00,,DEMO overpayment - 50.00 expected as unapplied cash,INVOICE-REFERENCE-C,100.00,,,

@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import {
   useImport,
   IMPORT_STEPS,
+  summarizeValidationCounts,
   type ImportStep,
   type ImportRow,
   type ImportCustomerResolution,
@@ -143,6 +144,9 @@ export default function InvoiceImportPage() {
 
   const currentStepIndex = IMPORT_STEPS.findIndex((s) => s.key === step);
 
+  // Non-overlapping presentation counts (active review vs. error/unmatched/skipped).
+  const { needsReview: needsReviewCount, errors: errorCount } = summarizeValidationCounts(rows);
+
   // ── Render ──────────────────────────────────────────────────────────
 
   return (
@@ -180,12 +184,12 @@ export default function InvoiceImportPage() {
         <div className="flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5 flex-shrink-0" />
           <div className="text-sm">
-            <p className="font-semibold text-amber-800">Draft Creation Only</p>
+            <p className="font-semibold text-amber-800">Creates Draft Invoices Only</p>
             <ul className="mt-1 space-y-0.5 text-amber-700">
-              <li>• Created invoices remain <strong>Draft</strong> — they are not posted.</li>
-              <li>• Receipt import is not available yet.</li>
-              <li>• Payment allocation is not available yet.</li>
-              <li>• CSV and Excel (.xlsx) files are supported. PDF/Image coming in later phases.</li>
+              <li>• Every imported row creates a <strong>Draft</strong> invoice — nothing is posted by this import.</li>
+              <li>• Post each invoice later from the invoice list or detail page when you are ready.</li>
+              <li>• Receipts and payment allocation are handled separately (Receipts → Import or New Receipt).</li>
+              <li>• CSV and Excel (.xlsx) files are supported. PDF/Image import is not part of this phase.</li>
             </ul>
           </div>
         </div>
@@ -397,8 +401,8 @@ export default function InvoiceImportPage() {
               </div>
             </div>
 
-            {/* Validation summary */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* Validation summary: valid / needs-review / error / total */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <SummaryCard
                 label="Valid Rows"
                 value={batch.valid_rows}
@@ -406,8 +410,14 @@ export default function InvoiceImportPage() {
                 color="emerald"
               />
               <SummaryCard
+                label="Needs Review"
+                value={needsReviewCount}
+                icon={<AlertTriangle className="h-5 w-5 text-amber-500" />}
+                color="amber"
+              />
+              <SummaryCard
                 label="Error Rows"
-                value={batch.error_rows}
+                value={errorCount}
                 icon={<XCircle className="h-5 w-5 text-red-500" />}
                 color="red"
               />
