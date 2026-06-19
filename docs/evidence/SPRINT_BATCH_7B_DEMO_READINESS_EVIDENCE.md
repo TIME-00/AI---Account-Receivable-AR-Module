@@ -156,3 +156,45 @@ All Batch 7B implementation items complete: UI polish applied, dashboard verifie
 change), masked fixture templates and generator structure created (not executed), build PASS, safety
 checks clean. **Ready for Codex post-implementation review.** No commit/push/deploy performed —
 awaiting review and explicit approval.
+
+## 11. Vercel production frontend smoke
+
+**Smoke date:** 2026-06-19
+
+**Production frontend:** `https://account-receivable-module.vercel.app/`
+
+**Role tested:** Finance Manager (no password, token, cookie, or Supabase key recorded)
+
+- **Deployment source:** local `HEAD` and `origin/main` both resolved to Batch 7B commit
+  `0321343`. The production URL returned HTTP 200 with a Vercel deployment response and no 404,
+  deployment-not-found, or build-error page. Exact Git commit metadata was not exposed by the
+  available Vercel response headers. Runtime verification confirmed the unique Batch 7B wording
+  and UI changes are deployed.
+- **Dashboard regression:** PASS. The dashboard rendered without a runtime crash and called
+  `GET /reports/dashboard?trend_months=6`; the authenticated request returned HTTP 200 (with the
+  expected HTTP 204 preflight also observed). Company scope, business as-of date, last-updated
+  timestamp, and Refresh control rendered. Manual Refresh triggered another HTTP 200 dashboard
+  request without a runtime exception. No mock DSO chart was present. Maintained customer-rating
+  wording and **AR & Cash Position** wording remained correct.
+- **Invoice Import UI:** PASS. The page rendered and states **Creates Draft Invoices Only**. The
+  obsolete claims that receipt import and payment allocation are unavailable are absent. The
+  deployed route includes the **Valid Rows / Needs Review / Error Rows / Total Rows** validation
+  labels. No file was uploaded and no import was executed.
+- **Receipt Import UI:** PASS. The page rendered and clearly states **Auto-Post & Allocate is ON by
+  default**, with instructions to turn it off for draft-only import. The deployed route includes
+  the **Valid Rows / Needs Review / Error Rows / Total Rows** validation labels. No file was
+  uploaded and no import was executed.
+- **Receipts list:** PASS. The page rendered and uses **Unapplied** rather than the misleading
+  **Avail** wording. No mutation action was performed.
+- **Console/network safety:** PASS. No runtime exceptions, console errors, or critical loading
+  failures were observed across the tested pages. No request to `POST /allocations/auto` and no
+  direct browser request to Supabase REST financial tables (`invoices`, `receipts`, or
+  `allocation_details`) was observed.
+- **Data/deployment safety:** No fixture was generated or executed. No upload-ready runtime CSV was
+  created. No invoice, receipt, allocation, or other persistent financial record was created. No
+  production data was mutated. No Supabase deployment or manual Vercel deployment command was run.
+- **Repository safety:** This smoke step changed only this evidence file. No commit or push was
+  performed during the smoke step.
+
+**Production smoke result:** PASS. Batch 7B runtime implementation is fully verified; only the final
+evidence commit/push remains.
