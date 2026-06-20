@@ -174,7 +174,20 @@ export class AllocationService {
     requireAnyRole(auth, ['AR Clerk', 'AR Supervisor', 'Finance Manager', 'Auditor']);
     validateUUID(receiptId, 'receipt_id');
 
-    const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
+    const { data: receiptData, error: receiptError } = await this.client
+      .from('receipts')
+      .select('*')
+      .eq('id', receiptId)
+      .maybeSingle();
+
+    if (receiptError) {
+      throw new Error(`Failed to fetch receipt(${receiptId}): ${receiptError.message}`);
+    }
+    if (!receiptData) {
+      throw new NotFoundError('Receipt', receiptId);
+    }
+
+    const receipt = receiptData as Receipt;
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
     await requireCustomerAccess(auth, receipt.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);

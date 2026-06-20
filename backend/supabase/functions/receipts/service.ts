@@ -22,7 +22,12 @@ import {
 } from '../_shared/errors.ts';
 import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
-import { requireRole, requireCustomerAccess, getCustomerAccessFilter } from '../_shared/auth.ts';
+import {
+  requireRole,
+  requireOperationalReadRole,
+  requireCustomerAccess,
+  getCustomerAccessFilter,
+} from '../_shared/auth.ts';
 import { validateUUID } from '../_shared/validators.ts';
 import type {
   Receipt,
@@ -378,6 +383,7 @@ export class ReceiptService {
   // ════════════════════════════════════════════════════════════════════════
 
   async getReceiptById(auth: AuthContext, receiptId: string): Promise<Receipt> {
+    requireOperationalReadRole(auth);
     validateUUID(receiptId, 'id');
     const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
@@ -391,6 +397,7 @@ export class ReceiptService {
     filters: Record<string, string | undefined>,
     pagination: PaginationParams,
   ): Promise<{ receipts: Receipt[]; total: number }> {
+    requireOperationalReadRole(auth);
     const allowedIds = await getCustomerAccessFilter(auth);
     const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
     if (visibleCustomerIds.length === 0) return { receipts: [], total: 0 };
@@ -432,6 +439,7 @@ export class ReceiptService {
     auth: AuthContext,
     customerId: string,
   ): Promise<Receipt[]> {
+    requireOperationalReadRole(auth);
     validateUUID(customerId, 'customer_id');
     await requireCustomerAccess(auth, customerId);
     await assertCustomerVisible(this.client, auth.companyId, customerId);

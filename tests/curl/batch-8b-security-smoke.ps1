@@ -24,6 +24,7 @@
 # ============================================================================
 
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Net.Http
 
 $required = @(
   "SUPABASE_URL",
@@ -55,37 +56,47 @@ function Invoke-Status {
     [object]$Body = $null
   )
 
-  $headers = @{
-    Authorization = "Bearer $Token"
-    apikey = $env:SUPABASE_ANON_KEY
-    "X-Company-Id" = $env:COMPANY_ID
-  }
-
+  $client = $null
+  $request = $null
+  $response = $null
   try {
-    $params = @{
-      Method = $Method
-      Uri = $Url
-      Headers = $headers
-    }
+    $client = New-Object System.Net.Http.HttpClient
+    $request = New-Object System.Net.Http.HttpRequestMessage
+    $request.Method = New-Object System.Net.Http.HttpMethod($Method.ToUpperInvariant())
+    $request.RequestUri = [Uri]$Url
+
+    [void]$request.Headers.TryAddWithoutValidation("Authorization", "Bearer $Token")
+    [void]$request.Headers.TryAddWithoutValidation("apikey", $env:SUPABASE_ANON_KEY)
+    [void]$request.Headers.TryAddWithoutValidation("X-Company-Id", $env:COMPANY_ID)
+
     if ($null -ne $Body) {
-      $params.ContentType = "application/json"
-      $params.Body = $Body | ConvertTo-Json -Depth 6
+      $json = $Body | ConvertTo-Json -Depth 6 -Compress
+      $request.Content = New-Object System.Net.Http.StringContent(
+        $json,
+        [System.Text.Encoding]::UTF8,
+        "application/json"
+      )
     }
-    $response = Invoke-WebRequest @params
-    return @{
-      Status = [int]$response.StatusCode
-      Body = if ($response.Content) { $response.Content | ConvertFrom-Json } else { $null }
-    }
-  } catch {
-    if ($_.Exception.Response) {
-      $status = [int]$_.Exception.Response.StatusCode
-      $content = $_.ErrorDetails.Message
-      return @{
-        Status = $status
-        Body = if ($content) { $content | ConvertFrom-Json } else { $null }
+
+    $response = $client.SendAsync($request).GetAwaiter().GetResult()
+    $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    $parsedBody = $null
+    if (-not [string]::IsNullOrWhiteSpace($content)) {
+      try {
+        $parsedBody = $content | ConvertFrom-Json
+      } catch {
+        $parsedBody = @{ raw = $content }
       }
     }
-    throw
+
+    return @{
+      Status = [int]$response.StatusCode
+      Body = $parsedBody
+    }
+  } finally {
+    if ($null -ne $response) { $response.Dispose() }
+    if ($null -ne $request) { $request.Dispose() }
+    if ($null -ne $client) { $client.Dispose() }
   }
 }
 

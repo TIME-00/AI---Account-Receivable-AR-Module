@@ -261,7 +261,7 @@ export class InvoiceService {
     await requireCustomerAccess(auth, invoice.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
-    const line = await fetchById<InvoiceLine>(this.client, 'invoice_lines', lineId);
+    const line = await this.fetchInvoiceLineOrThrow(lineId);
     if (line.invoice_id !== invoiceId) throw new NotFoundError('InvoiceLine', lineId);
 
     // Build update payload with recalculation
@@ -330,7 +330,7 @@ export class InvoiceService {
     await requireCustomerAccess(auth, invoice.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
-    const line = await fetchById<InvoiceLine>(this.client, 'invoice_lines', lineId);
+    const line = await this.fetchInvoiceLineOrThrow(lineId);
     if (line.invoice_id !== invoiceId) throw new NotFoundError('InvoiceLine', lineId);
 
     const { error } = await this.client
@@ -429,7 +429,7 @@ export class InvoiceService {
     requireRole(auth, 'AR Supervisor');
     validateUUID(invoiceId, 'id');
 
-    const invoice = await fetchById<Invoice>(this.client, 'invoices', invoiceId);
+    const invoice = await this.fetchInvoiceOrThrow(invoiceId);
     if (invoice.company_id !== auth.companyId) throw new NotFoundError('Invoice', invoiceId);
     await requireCustomerAccess(auth, invoice.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
@@ -508,7 +508,7 @@ export class InvoiceService {
   ): Promise<Invoice & { lines: InvoiceLine[] }> {
     validateUUID(invoiceId, 'id');
 
-    const invoice = await fetchById<Invoice>(this.client, 'invoices', invoiceId);
+    const invoice = await this.fetchInvoiceOrThrow(invoiceId);
     if (invoice.company_id !== auth.companyId) throw new NotFoundError('Invoice', invoiceId);
 
     await requireCustomerAccess(auth, invoice.customer_id);
@@ -647,12 +647,54 @@ export class InvoiceService {
    */
   private async requireDraftInvoice(invoiceId: string, companyId: string): Promise<Invoice> {
     validateUUID(invoiceId, 'id');
-    const invoice = await fetchById<Invoice>(this.client, 'invoices', invoiceId);
+    const invoice = await this.fetchInvoiceOrThrow(invoiceId);
     if (invoice.company_id !== companyId) throw new NotFoundError('Invoice', invoiceId);
     if (invoice.status !== 'Draft') {
       throw BRErrors.INV_001_IMMUTABLE('status');
     }
     return invoice;
+  }
+
+  /**
+   * Fetch an invoice while preserving the distinction between an absent row
+   * (404) and an unexpected database/query failure (500).
+   */
+  private async fetchInvoiceOrThrow(invoiceId: string): Promise<Invoice> {
+    const { data, error } = await this.client
+      .from('invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to fetch invoices(${invoiceId}): ${error.message}`);
+    }
+    if (!data) {
+      throw new NotFoundError('Invoice', invoiceId);
+    }
+
+    return data as Invoice;
+  }
+
+  /**
+   * Fetch an invoice line with the same missing-row semantics as invoices.
+   */
+  private async fetchInvoiceLineOrThrow(lineId: string): Promise<InvoiceLine> {
+    validateUUID(lineId, 'line_id');
+    const { data, error } = await this.client
+      .from('invoice_lines')
+      .select('*')
+      .eq('id', lineId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to fetch invoice_lines(${lineId}): ${error.message}`);
+    }
+    if (!data) {
+      throw new NotFoundError('InvoiceLine', lineId);
+    }
+
+    return data as InvoiceLine;
   }
 
   /**
