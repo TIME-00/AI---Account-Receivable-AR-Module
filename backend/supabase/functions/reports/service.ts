@@ -15,7 +15,7 @@ import {
 import type { AuthContext } from '../_shared/auth.ts';
 import {
   requireAnyRole,
-  requireRole,
+  requireOperationalReadRole,
   requireCustomerAccess,
   getCustomerAccessFilter,
 } from '../_shared/auth.ts';
@@ -158,7 +158,7 @@ export class ReportService {
     auth: AuthContext,
     asOfDate?: string,
   ): Promise<ARSummary> {
-    requireRole(auth, 'AR Clerk');
+    requireOperationalReadRole(auth);
     const refDate = asOfDate ?? new Date().toISOString().slice(0, 10);
     const visibleCustomerIds = await this.getReadableVisibleCustomerIds(auth);
     if (visibleCustomerIds.length === 0) {
@@ -261,7 +261,7 @@ export class ReportService {
     asOfDate?: string,
     pagination?: PaginationParams,
   ): Promise<{ rows: CustomerAgingRow[]; total: number }> {
-    requireRole(auth, 'AR Clerk');
+    requireOperationalReadRole(auth);
     const refDate = asOfDate ?? new Date().toISOString().slice(0, 10);
     const today = new Date(refDate);
 
@@ -354,7 +354,7 @@ export class ReportService {
     periodFrom: string,
     periodTo: string,
   ): Promise<CustomerStatement> {
-    requireRole(auth, 'AR Clerk');
+    requireOperationalReadRole(auth);
     validateUUID(customerId, 'customer_id');
     validateDate(periodFrom, 'period_from');
     validateDate(periodTo, 'period_to');

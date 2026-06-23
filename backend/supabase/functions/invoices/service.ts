@@ -143,18 +143,43 @@ export class InvoiceService {
       throw new Error(`Failed to create invoice: ${error.message}`);
     }
 
-    // Insert lines if provided
-    let createdLines: InvoiceLine[] = [];
-    if (lines && lines.length > 0) {
-      createdLines = await this.addLines(auth, invoice.id, lines, exchangeRate);
+    try {
+      // Insert lines if provided.
+      let createdLines: InvoiceLine[] = [];
+      if (lines && lines.length > 0) {
+        createdLines = await this.addLines(auth, invoice.id, lines, exchangeRate);
+        if (createdLines.length !== lines.length) {
+          throw new Error(
+            `Invoice line persistence mismatch: expected ${lines.length}, created ${createdLines.length}.`,
+          );
+        }
+      }
 
-      // Recalculate totals
-      await this.recalculateTotals(invoice.id, exchangeRate);
+      // Re-fetch for updated totals.
+      const result = await fetchById<Invoice>(this.client, 'invoices', invoice.id);
+      return { ...result, lines: createdLines };
+    } catch (error) {
+      // The import row is linked only after this method returns. Clean up a
+      // partially created draft here so callers cannot mark it Created.
+      const { error: lineCleanupError } = await this.client
+        .from('invoice_lines')
+        .delete()
+        .eq('invoice_id', invoice.id);
+      const { error: invoiceCleanupError } = await this.client
+        .from('invoices')
+        .delete()
+        .eq('id', invoice.id)
+        .eq('status', 'Draft');
+
+      if (lineCleanupError || invoiceCleanupError) {
+        throw new Error(
+          `Invoice creation failed and cleanup was incomplete: ${
+            lineCleanupError?.message ?? invoiceCleanupError?.message
+          }. Original error: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
+      throw error;
     }
-
-    // Re-fetch for updated totals
-    const result = await fetchById<Invoice>(this.client, 'invoices', invoice.id);
-    return { ...result, lines: createdLines };
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -609,6 +634,21 @@ export class InvoiceService {
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
     await requireCustomerAccess(auth, invoice.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
+
+    const { count: importReferenceCount, error: importReferenceError } = await this.client
+      .from('import_rows')
+      .select('id', { count: 'exact', head: true })
+      .eq('invoice_id', invoiceId);
+
+    if (importReferenceError) {
+      throw new Error(`Failed to check invoice import references: ${importReferenceError.message}`);
+    }
+    if ((importReferenceCount ?? 0) > 0) {
+      throw new ConflictError(
+        'Imported draft invoices are retained as import audit evidence and cannot be deleted. '
+        + 'Post and cancel the invoice through the supported workflow when cleanup is required.',
+      );
+    }
 
     // Delete lines first (CASCADE should handle, but explicit is safer)
     await this.client.from('invoice_lines').delete().eq('invoice_id', invoiceId);
