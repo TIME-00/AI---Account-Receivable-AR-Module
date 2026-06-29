@@ -6,7 +6,6 @@
     "https://esm.sh/iceberg-js@^0.8.1?target=denonext": "https://esm.sh/iceberg-js@0.8.1?target=denonext"
   },
   "remote": {
-    "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs": "1a0fb062ee9781b13f6687371b202aaefc53b6ce55b530c027e01f9c087b77db",
     "https://esm.sh/@supabase/auth-js@2.100.1/denonext/auth-js.mjs": "751557d2d055a38d73c9cab104519f0a264417166498139948e333b63aec8677",
     "https://esm.sh/@supabase/functions-js@2.100.1/denonext/functions-js.mjs": "9a293b1dd13d64771d7e33f2eb6c53491a964e96faa477b5f939df16e70aedcf",
     "https://esm.sh/@supabase/phoenix@0.4.0/denonext/phoenix.mjs": "d9187057b2e3276d1110b9d814f737d4f8eff7f8b2765c4aa6bf7c7c30d070c9",

@@ -3,7 +3,8 @@
 // Excel Invoice Import, Draft Only
 // ============================================================================
 
-import { read, utils, SSF } from 'xlsx';
+// @deno-types="./vendor/sheetjs-0.20.3/types/index.d.ts"
+import { read, utils, SSF } from './vendor/sheetjs-0.20.3/xlsx.mjs';
 import { ValidationError } from '../_shared/errors.ts';
 
 export interface ParsedXlsx {

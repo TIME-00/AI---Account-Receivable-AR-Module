@@ -1,6 +1,5 @@
 {
   "imports": {
-    "supabase": "https://esm.sh/@supabase/supabase-js@2",
-    "xlsx": "https://esm.sh/xlsx@0.18.5?target=deno"
+    "supabase": "https://esm.sh/@supabase/supabase-js@2"
   }
 }
