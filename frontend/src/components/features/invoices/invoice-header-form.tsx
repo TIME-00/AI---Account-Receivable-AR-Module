@@ -149,6 +149,11 @@ export function InvoiceHeaderForm({
               </option>
             ))}
           </select>
+          {paymentTerms.length === 0 && (
+            <p className="mt-1 text-xs text-slate-400">
+              No payment terms are configured for this company yet.
+            </p>
+          )}
           {calculatedDueDate && (
             <p className="mt-1 flex items-center gap-1 text-xs text-emerald-500">
               <CalendarDays className="h-3 w-3" />

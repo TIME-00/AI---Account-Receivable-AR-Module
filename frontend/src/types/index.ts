@@ -20,6 +20,48 @@ export type AllocationStatus = "Active" | "Reversed";
 export type JESourceType = "INV" | "RCT" | "CN" | "DN" | "REV" | "ADJ" | "WO";
 export type UserRole = "AR Clerk" | "AR Supervisor" | "Finance Manager" | "System Admin" | "Auditor";
 
+// ─── Auth / Context ─────────────────────────────────────────────────────────
+
+export interface AuthCapabilities {
+  can_read_operational_data: boolean;
+  can_create_customer: boolean;
+  can_update_customer: boolean;
+  can_create_invoice: boolean;
+  can_update_draft_invoice: boolean;
+  can_post_invoice: boolean;
+  can_cancel_invoice: boolean;
+  can_create_receipt: boolean;
+  can_post_receipt: boolean;
+  can_cancel_receipt: boolean;
+  can_allocate_receipt: boolean;
+  can_reverse_allocation: boolean;
+  can_handle_bounced_cheque: boolean;
+  can_read_reports: boolean;
+  can_execute_imports: boolean;
+  can_review_import_rows: boolean;
+  can_read_config: boolean;
+  can_write_config: boolean;
+  is_read_only: boolean;
+  is_system_admin_only: boolean;
+}
+
+export interface AuthContextResponse {
+  user: {
+    id: string;
+    email: string | null;
+  };
+  company: {
+    id: string;
+    code: string | null;
+    name: string | null;
+    base_currency: string | null;
+    country: string | null;
+  };
+  roles: UserRole[];
+  highest_role: UserRole;
+  capabilities: AuthCapabilities;
+}
+
 // ─── API Envelope ───────────────────────────────────────────────────────────
 
 export interface APIResponse<T = unknown> {
@@ -227,6 +269,55 @@ export interface BankAccount {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// ─── Read-only Lookups ───────────────────────────────────────────────────────
+
+export interface TaxCode {
+  id: string;
+  company_id: string;
+  tax_code: string;
+  tax_name: string;
+  tax_type: "Output" | "Input";
+  rate: number;
+  effective_from: string;
+  effective_to: string | null;
+  country: string;
+  gl_account_id: string | null;
+  is_active: boolean;
+}
+
+export interface PaymentTerm {
+  id: string;
+  company_id: string;
+  term_code: string;
+  term_name: string;
+  term_type: "Fixed Days" | "End of Month" | "Prepaid" | "COD" | "Custom";
+  days: number | null;
+  description: string | null;
+  is_active: boolean;
+}
+
+// ─── Global Search / Notifications ──────────────────────────────────────────
+
+export interface GlobalSearchResult {
+  type: "customer" | "invoice" | "receipt";
+  id: string;
+  title: string;
+  subtitle: string;
+  route: string;
+  metadata: Record<string, string | number | null>;
+}
+
+export interface NotificationItem {
+  id: string;
+  type: "import_review" | "import_error" | "overdue_ar";
+  severity: "info" | "warning" | "error";
+  title: string;
+  message: string;
+  route: string;
+  created_at: string | null;
+  metadata: Record<string, string | number | null>;
 }
 
 // ─── Allocation ─────────────────────────────────────────────────────────────

@@ -59,7 +59,7 @@ const permissions: { action: string; roles: Record<string, boolean> }[] = [
 ];
 
 export default function RolesPage() {
-  const { role: currentRole } = useUserRole();
+  const { role: currentRole, isLoading: roleLoading } = useUserRole();
 
   return (
     <div className="space-y-6">
@@ -89,9 +89,11 @@ export default function RolesPage() {
           </div>
           <div>
             <p className="text-sm font-medium text-slate-800">Your Current Role</p>
-            <p className="text-lg font-bold text-purple-600">{currentRole ?? "Not configured"}</p>
+            <p className="text-lg font-bold text-purple-600">
+              {roleLoading ? "Loading…" : currentRole ?? "Read-only"}
+            </p>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              Source: NEXT_PUBLIC_DEMO_USER_ROLE environment variable (Sprint F1 demo fallback)
+              Source: authenticated context (GET /auth/me) — assigned by an administrator
             </p>
           </div>
         </div>

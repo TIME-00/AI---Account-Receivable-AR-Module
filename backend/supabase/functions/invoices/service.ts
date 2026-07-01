@@ -51,6 +51,34 @@ export class InvoiceService {
     this.customerService = new CustomerService(this.client);
   }
 
+  private async resolveTaxRateForInvoiceLine(
+    companyId: string,
+    taxCodeId: string,
+    invoiceDate: string,
+  ): Promise<number> {
+    const { data: taxCode, error } = await this.client
+      .from('tax_codes')
+      .select('rate')
+      .eq('id', taxCodeId)
+      .eq('company_id', companyId)
+      .eq('is_active', true)
+      .lte('effective_from', invoiceDate)
+      .or(`effective_to.is.null,effective_to.gte.${invoiceDate}`)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to validate tax code: ${error.message}`);
+    }
+
+    if (!taxCode) {
+      throw new ValidationError('tax_code_id is not active, effective, or available for this company.', {
+        field: 'tax_code_id',
+      });
+    }
+
+    return Number(taxCode.rate);
+  }
+
   // ════════════════════════════════════════════════════════════════════════
   // CREATE INVOICE (Draft)
   // ════════════════════════════════════════════════════════════════════════
@@ -217,13 +245,11 @@ export class InvoiceService {
       // Resolve tax rate from tax_code_id
       let taxRate = 0;
       if (line.tax_code_id) {
-        const { data: tc } = await this.client
-          .from('tax_codes')
-          .select('rate')
-          .eq('id', line.tax_code_id)
-          .eq('is_active', true)
-          .single();
-        if (tc) taxRate = Number(tc.rate);
+        taxRate = await this.resolveTaxRateForInvoiceLine(
+          auth.companyId,
+          line.tax_code_id,
+          invoice.invoice_date,
+        );
       }
 
       // Calculate amounts (BR-INV-CALC-001/002/003)
@@ -299,13 +325,11 @@ export class InvoiceService {
     let taxRate = line.tax_rate;
     if (data.tax_code_id !== undefined) {
       if (data.tax_code_id) {
-        const { data: tc } = await this.client
-          .from('tax_codes')
-          .select('rate')
-          .eq('id', data.tax_code_id)
-          .eq('is_active', true)
-          .single();
-        taxRate = tc ? Number(tc.rate) : 0;
+        taxRate = await this.resolveTaxRateForInvoiceLine(
+          auth.companyId,
+          data.tax_code_id,
+          invoice.invoice_date,
+        );
       } else {
         taxRate = 0;
       }

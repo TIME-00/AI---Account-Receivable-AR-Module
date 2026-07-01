@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Shield, FileText, Banknote, XCircle, UserCheck, Lock, Info } from "lucide-react";
+import { Shield, FileText, XCircle, UserCheck, Lock, Info } from "lucide-react";
 
 const auditCapabilities = [
   {
@@ -30,14 +30,6 @@ const auditCapabilities = [
   },
 ];
 
-const exampleEntries = [
-  { action: "Invoice Posted", user: "demo.finance@tsh.com", document: "INV-2026-0001", timestamp: "2026-05-27 09:15:22" },
-  { action: "Receipt Created", user: "demo.finance@tsh.com", document: "RCT-2026-0001", timestamp: "2026-05-27 09:20:41" },
-  { action: "Receipt Posted", user: "demo.finance@tsh.com", document: "RCT-2026-0001", timestamp: "2026-05-27 09:21:03" },
-  { action: "Allocation Manual", user: "demo.finance@tsh.com", document: "RCT-2026-0001 → INV-2026-0001", timestamp: "2026-05-27 09:25:17" },
-  { action: "Invoice Cancelled", user: "demo.finance@tsh.com", document: "INV-2026-0002", timestamp: "2026-05-27 10:05:33" },
-];
-
 export default function AuditLogPage() {
   return (
     <div className="space-y-6">
@@ -52,8 +44,8 @@ export default function AuditLogPage() {
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Audit Trail</h1>
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-medium text-slate-400">
-            Prototype Placeholder
+          <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-medium text-blue-600">
+            Capability Reference
           </span>
         </div>
         <p className="mt-1 text-sm text-slate-500">System auditability and transaction tracking</p>
@@ -90,48 +82,15 @@ export default function AuditLogPage() {
         })}
       </div>
 
-      {/* Example Audit Entries */}
-      <div className="glass-card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <div className="flex items-center gap-2">
-            <Shield className="h-4 w-4 text-slate-400" />
-            <h2 className="text-sm font-semibold text-slate-700">Example Audit Entries</h2>
-          </div>
-          <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium text-amber-600">
-            ⚠️ Example data — for demonstration purposes only
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/50">
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-slate-500">Action</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-slate-500">User</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-slate-500">Document</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase text-slate-500">Timestamp</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {exampleEntries.map((entry, i) => (
-                <tr key={i} className="text-slate-600">
-                  <td className="px-4 py-2.5 text-xs font-medium">{entry.action}</td>
-                  <td className="px-4 py-2.5 text-xs font-mono">{entry.user}</td>
-                  <td className="px-4 py-2.5 text-xs font-mono">{entry.document}</td>
-                  <td className="px-4 py-2.5 text-xs font-mono text-slate-400">{entry.timestamp}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="border-t border-slate-200 bg-amber-50/50 px-4 py-2 text-center">
-          <p className="text-[10px] text-amber-600">⚠️ The entries above are example data for demonstration purposes only. No live audit log API exists.</p>
-        </div>
-      </div>
-
-      {/* Future Sprint Note */}
-      <div className="glass-card flex flex-col items-center justify-center py-8">
+      {/* Viewer scope note (no fabricated data) */}
+      <div className="glass-card flex flex-col items-center justify-center py-10 text-center">
         <Shield className="h-8 w-8 text-slate-300" />
-        <p className="mt-3 text-sm text-slate-500">Full audit log viewer will be available in a future sprint.</p>
+        <p className="mt-3 text-sm font-medium text-slate-600">No audit-log viewer is available yet.</p>
+        <p className="mt-1 max-w-md text-xs text-slate-400">
+          Audit columns are captured on every transaction by the backend (see the capabilities above).
+          A searchable audit-log viewer requires a dedicated read API and is planned for a future batch.
+          To keep this screen honest, no sample audit rows are shown.
+        </p>
       </div>
     </div>
   );

@@ -46,11 +46,11 @@ export default function JournalEntriesPage() {
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Journal Entries</h1>
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-medium text-slate-400">
-            Prototype Placeholder
+          <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-medium text-blue-600">
+            Reference Guide
           </span>
         </div>
-        <p className="mt-1 text-sm text-slate-500">Auto-generated from AR transactions</p>
+        <p className="mt-1 text-sm text-slate-500">How AR transactions post to the general ledger</p>
       </div>
 
       {/* Info Banner */}
@@ -118,11 +118,13 @@ export default function JournalEntriesPage() {
         </div>
       </div>
 
-      {/* Placeholder Note */}
+      {/* Scope Note */}
       <div className="glass-card flex flex-col items-center justify-center py-10">
         <BookOpen className="h-8 w-8 text-slate-300" />
-        <p className="mt-3 text-sm text-slate-500">Full journal entry listing and drill-down will be available in a future sprint</p>
-        <p className="mt-1 text-[10px] text-slate-400">The GET /journal-entries API is not yet verified for frontend use.</p>
+        <p className="mt-3 text-sm text-slate-500">This page is a reference guide to AR journal entries.</p>
+        <p className="mt-1 text-[10px] text-slate-400">
+          A full journal-entry listing and drill-down viewer requires a dedicated read API and is planned for a future batch.
+        </p>
       </div>
     </div>
   );

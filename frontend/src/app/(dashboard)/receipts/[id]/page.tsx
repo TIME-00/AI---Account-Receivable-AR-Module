@@ -264,7 +264,7 @@ export default function ReceiptDetailPage() {
             <span className="font-medium">{formatDate(receipt.posted_at)}</span>.
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            JE numbers appear in the post confirmation toast. Journal Entry detail pages are coming soon.
+            JE numbers appear in the post confirmation toast. See the Journal Entries reference guide for how AR postings map to the general ledger.
           </p>
         </div>
       )}

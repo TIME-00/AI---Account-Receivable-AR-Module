@@ -7,7 +7,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
-import type { Invoice, InvoiceLine, Customer } from "@/types";
+import type { Invoice, InvoiceLine, Customer, TaxCode, PaymentTerm } from "@/types";
 import type { TaxCodeOption, PaymentTermOption } from "@/hooks/use-invoice-calculator";
 import {
   filterVisibleCustomerRecords,
@@ -38,9 +38,11 @@ interface CreateInvoicePayload {
     unit_price: number;
     discount_pct?: number;
     discount_amt?: number;
-    // SAFETY: tax_code_id is intentionally omitted from payload.
-    // Mock tax codes (tc-sr6 etc.) must NEVER be sent to backend.
-    // Tax calculation is frontend display-only for the prototype.
+    // Batch 9A: tax_code_id is a REAL tax_codes.id sourced from
+    // GET /lookups/tax-codes. The backend validates it against the company's
+    // tax_codes table and resolves the rate server-side. (Previously omitted
+    // only because the old options were mock IDs.)
+    tax_code_id?: string;
     gl_account_id?: string;
     cost_center?: string;
     line_remarks?: string;
@@ -75,25 +77,20 @@ export function useTaxCodes() {
   const api = useApi();
 
   return useQuery({
-    queryKey: ["config", "tax-codes"],
-    queryFn: async () => {
-      // Tax codes are fetched via the Supabase client directly
-      // since there's no dedicated Edge Function for config lookups.
-      // We'll mock this for now with known seed data.
-      const mockTaxCodes: TaxCodeOption[] = [
-        { id: "tc-sr6",  tax_code: "SR-6",  tax_name: "Sales Tax 6%",          rate: 6,  country: "MY" },
-        { id: "tc-st10", tax_code: "ST-10", tax_name: "Service Tax 10%",       rate: 10, country: "MY" },
-        { id: "tc-sr8",  tax_code: "SR-8",  tax_name: "GST Standard Rate 8%",  rate: 8,  country: "SG" },
-        { id: "tc-sr9",  tax_code: "SR-9",  tax_name: "GST Standard Rate 9%",  rate: 9,  country: "SG" },
-        { id: "tc-zrl",  tax_code: "ZRL",   tax_name: "Zero Rated (Local)",     rate: 0,  country: "MY" },
-        { id: "tc-zre",  tax_code: "ZRE",   tax_name: "Zero Rated (Export)",    rate: 0,  country: "MY" },
-        { id: "tc-es",   tax_code: "ES",    tax_name: "Exempt Supply",          rate: 0,  country: "MY" },
-        { id: "tc-os",   tax_code: "OS",    tax_name: "Out of Scope",           rate: 0,  country: "MY" },
-        { id: "tc-ajs",  tax_code: "AJS",   tax_name: "Adjustment (Special)",   rate: 0,  country: "MY" },
-      ];
-      return mockTaxCodes;
-    },
-    staleTime: Infinity, // Tax codes rarely change
+    queryKey: ["lookups", "tax-codes", "invoice-options"],
+    // Real read-only lookup (GET /lookups/tax-codes) returning the company's
+    // active tax codes with real tax_codes.id values.
+    queryFn: () => api.get<TaxCode[]>("/lookups/tax-codes"),
+    // Map the lookup rows to the shape the invoice calculator/selector expects.
+    select: (rows): TaxCodeOption[] =>
+      rows.map((tc) => ({
+        id: tc.id,
+        tax_code: tc.tax_code,
+        tax_name: tc.tax_name,
+        rate: tc.rate,
+        country: tc.country,
+      })),
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -103,27 +100,18 @@ export function usePaymentTerms() {
   const api = useApi();
 
   return useQuery({
-    queryKey: ["config", "payment-terms"],
-    queryFn: async () => {
-      // Mock with known seed data
-      const mockTerms: PaymentTermOption[] = [
-        { id: "pt-net7",    term_code: "NET7",    term_name: "Net 7 Days",        term_type: "Fixed Days",   days: 7 },
-        { id: "pt-net14",   term_code: "NET14",   term_name: "Net 14 Days",       term_type: "Fixed Days",   days: 14 },
-        { id: "pt-net30",   term_code: "NET30",   term_name: "Net 30 Days",       term_type: "Fixed Days",   days: 30 },
-        { id: "pt-net45",   term_code: "NET45",   term_name: "Net 45 Days",       term_type: "Fixed Days",   days: 45 },
-        { id: "pt-net60",   term_code: "NET60",   term_name: "Net 60 Days",       term_type: "Fixed Days",   days: 60 },
-        { id: "pt-net90",   term_code: "NET90",   term_name: "Net 90 Days",       term_type: "Fixed Days",   days: 90 },
-        { id: "pt-eom",     term_code: "EOM",     term_name: "End of Month",      term_type: "End of Month", days: 0 },
-        { id: "pt-eom15",   term_code: "EOM15",   term_name: "End of Month + 15", term_type: "End of Month", days: 15 },
-        { id: "pt-eom30",   term_code: "EOM30",   term_name: "End of Month + 30", term_type: "End of Month", days: 30 },
-        { id: "pt-eom60",   term_code: "EOM60",   term_name: "End of Month + 60", term_type: "End of Month", days: 60 },
-        { id: "pt-cod",     term_code: "COD",     term_name: "Cash on Delivery",  term_type: "COD",          days: 0 },
-        { id: "pt-prepaid", term_code: "PREPAID", term_name: "Prepaid",           term_type: "Prepaid",      days: null },
-        { id: "pt-cia",     term_code: "CIA",     term_name: "Cash in Advance",   term_type: "Custom",       days: -7 },
-      ];
-      return mockTerms;
-    },
-    staleTime: Infinity,
+    queryKey: ["lookups", "payment-terms", "invoice-options"],
+    // Real read-only lookup (GET /lookups/payment-terms).
+    queryFn: () => api.get<PaymentTerm[]>("/lookups/payment-terms"),
+    select: (rows): PaymentTermOption[] =>
+      rows.map((pt) => ({
+        id: pt.id,
+        term_code: pt.term_code,
+        term_name: pt.term_name,
+        term_type: pt.term_type,
+        days: pt.days,
+      })),
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -153,8 +141,11 @@ export function useCreateInvoice() {
           uom: line.uom || undefined,
           discount_pct: line.discount_pct || undefined,
           discount_amt: line.discount_amt || undefined,
-          // SAFETY: tax_code_id is explicitly excluded.
-          // Mock IDs (tc-sr6 etc.) must never reach the backend.
+          // Batch 9A: forward the selected REAL tax_code_id (from
+          // GET /lookups/tax-codes). Empty string → undefined (No Tax).
+          // The backend validates the id and resolves the rate server-side,
+          // so the persisted invoice tax matches the on-screen calculation.
+          tax_code_id: line.tax_code_id || undefined,
           gl_account_id: line.gl_account_id || undefined,
           cost_center: line.cost_center || undefined,
           line_remarks: line.line_remarks || undefined,

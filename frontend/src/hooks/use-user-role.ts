@@ -1,118 +1,92 @@
 // ============================================================================
-// TSH Synergy AR — useUserRole Hook (Sprint F1 Frontend-Only Fallback)
+// TSH Synergy AR — useUserRole Hook (Batch 9A — Authenticated Context)
 //
-// IMPORTANT: No supported role API or Edge Function exists in Sprint F1.
-// This hook uses a FRONTEND-ONLY role fallback that is:
-//   - READ-ONLY by default (no operational mutation permissions).
-//   - Configurable via NEXT_PUBLIC_DEMO_USER_ROLE environment variable.
+// Role and capability flags are derived from the authenticated backend context
+// (GET /auth/me via useAuthContext). This hook NO LONGER reads any demo/env
+// value (NEXT_PUBLIC_DEMO_USER_ROLE) for real UI behavior.
 //
-// How it works:
-//   1. If NEXT_PUBLIC_DEMO_USER_ROLE is set to a valid operational role
-//      ("AR Clerk", "AR Supervisor", or "Finance Manager"), the user
-//      gets operational mutation permissions (post, cancel, create).
-//   2. If NEXT_PUBLIC_DEMO_USER_ROLE is unset, empty, invalid, "Auditor",
-//      or "System Admin", mutation permissions are FALSE (read-only).
-//   3. No Supabase direct table queries are used.
-//   4. No unsupported API endpoints are called.
-//   5. Backend RLS + Edge Function auth remain the FINAL security authority.
-//      This hook is purely for UX button visibility.
-//
-// To enable operator demo mode, set in .env.local:
-//   NEXT_PUBLIC_DEMO_USER_ROLE=AR Clerk
-//
-// FUTURE: Replace this fallback with a real role API query, e.g.:
-//   const { data } = useQuery({ queryFn: () => api.get("/auth/me") });
+// Honesty rules:
+//   1. While the auth context is loading, the user is treated as READ-ONLY
+//      (no mutation controls shown) until the real role is known.
+//   2. If the auth context fails to load, behavior defaults to conservative /
+//      disabled (read-only, no capabilities) rather than guessing.
+//   3. Backend RLS + Edge Function auth remain the FINAL security authority.
+//      This hook only governs UX button visibility.
 // ============================================================================
 
 "use client";
 
-import { useAuth } from "@/providers/auth-provider";
-import type { UserRole } from "@/types";
+import { useAuthContext } from "@/hooks/use-auth-context";
+import type { AuthCapabilities, UserRole } from "@/types";
 
-// All valid UserRole values
-const VALID_ROLES: UserRole[] = [
-  "AR Clerk",
-  "AR Supervisor",
-  "Finance Manager",
-  "System Admin",
-  "Auditor",
-];
-
-// Only these roles grant operational (mutation) permissions
-const OPERATIONAL_ROLES: UserRole[] = [
-  "AR Clerk",
-  "AR Supervisor",
-  "Finance Manager",
-];
-
-/**
- * Resolve the demo role from NEXT_PUBLIC_DEMO_USER_ROLE.
- * Returns the role if it is a valid UserRole, otherwise null.
- */
-function resolveDemoRole(): UserRole | null {
-  const envValue = process.env.NEXT_PUBLIC_DEMO_USER_ROLE?.trim();
-  if (!envValue) return null;
-  if (VALID_ROLES.includes(envValue as UserRole)) {
-    return envValue as UserRole;
-  }
-  // Invalid value — log a warning in development
-  if (process.env.NODE_ENV === "development") {
-    console.warn(
-      `[useUserRole] NEXT_PUBLIC_DEMO_USER_ROLE="${envValue}" is not a valid role. ` +
-      `Valid values: ${VALID_ROLES.join(", ")}. Defaulting to read-only.`
-    );
-  }
-  return null;
-}
+/** Conservative, fully read-only capability set used while loading or on error. */
+const READ_ONLY_CAPABILITIES: AuthCapabilities = {
+  can_read_operational_data: false,
+  can_create_customer: false,
+  can_update_customer: false,
+  can_create_invoice: false,
+  can_update_draft_invoice: false,
+  can_post_invoice: false,
+  can_cancel_invoice: false,
+  can_create_receipt: false,
+  can_post_receipt: false,
+  can_cancel_receipt: false,
+  can_allocate_receipt: false,
+  can_reverse_allocation: false,
+  can_handle_bounced_cheque: false,
+  can_read_reports: false,
+  can_execute_imports: false,
+  can_review_import_rows: false,
+  can_read_config: false,
+  can_write_config: false,
+  is_read_only: true,
+  is_system_admin_only: false,
+};
 
 /**
- * useUserRole — Sprint F1 frontend-only role fallback.
+ * useUserRole — authenticated role/capability source for UX gating.
  *
- * Default behavior (no env var set):
- *   - All users are READ-ONLY — no mutation buttons shown.
- *   - Auditor and System Admin never see operational actions.
- *
- * Demo/operator mode (NEXT_PUBLIC_DEMO_USER_ROLE set):
- *   - If set to "AR Clerk", "AR Supervisor", or "Finance Manager",
- *     mutation buttons (Post, Cancel, New Invoice/Receipt) are visible.
- *   - If set to "Auditor" or "System Admin", user remains read-only.
- *
- * Backend RLS + Edge Function auth remain the real enforcement layer.
+ * Derives the highest role, role list, and granular permission flags from the
+ * server's view of the current user (GET /auth/me). Returns conservative
+ * read-only defaults until the context resolves, and on error.
  */
 export function useUserRole() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { data, isLoading, isError } = useAuthContext();
 
-  const isAuthenticated = !!user;
-  const demoRole = resolveDemoRole();
+  const resolved = !isLoading && !isError && !!data;
+  const capabilities: AuthCapabilities = resolved ? data!.capabilities : READ_ONLY_CAPABILITIES;
+  const roles: UserRole[] = resolved ? data!.roles : [];
+  const highestRole: UserRole | null = resolved ? data!.highest_role : null;
 
-  // Build role list: use demo role if set and user is authenticated
-  const roles: UserRole[] = isAuthenticated && demoRole ? [demoRole] : [];
-  const highestRole: UserRole | null = roles.length > 0 ? roles[0] : null;
-
-  // Derived permissions — only operational roles grant mutation access
-  const isOperational = roles.some((r) => OPERATIONAL_ROLES.includes(r));
-  const isReadOnly = !isOperational;
-  const isAuditor = roles.includes("Auditor");
-  const isSystemAdmin = roles.includes("System Admin") && !isOperational;
+  const isOperational = !capabilities.is_read_only;
 
   return {
     role: highestRole,
     roles,
-    isLoading: authLoading,
+    isLoading,
+    // True only once the authenticated context has resolved successfully.
+    isResolved: resolved,
+    isError,
 
-    // Permission flags
+    // Permission flags (server-derived)
     isOperational,
-    isReadOnly,
-    isAuditor,
-    isSystemAdmin,
+    isReadOnly: capabilities.is_read_only,
+    isAuditor: roles.includes("Auditor"),
+    isSystemAdmin: capabilities.is_system_admin_only,
 
-    // Granular action permissions — only true for authenticated operational users
-    canCreateInvoice: isOperational,
-    canPostInvoice: isOperational,
-    canCancelInvoice: isOperational,
-    canCreateReceipt: isOperational,
-    canPostReceipt: isOperational,
-    canCancelReceipt: isOperational,
-    canAllocate: isOperational,
+    // Granular action permissions — mirror backend capabilities exactly
+    canCreateInvoice: capabilities.can_create_invoice,
+    canPostInvoice: capabilities.can_post_invoice,
+    canCancelInvoice: capabilities.can_cancel_invoice,
+    canCreateReceipt: capabilities.can_create_receipt,
+    canPostReceipt: capabilities.can_post_receipt,
+    canCancelReceipt: capabilities.can_cancel_receipt,
+    canAllocate: capabilities.can_allocate_receipt,
+
+    // Full capability object + context for richer surfaces (e.g. profile page)
+    capabilities,
+    company: resolved ? data!.company : null,
+    email: resolved ? data!.user.email : null,
+    userId: resolved ? data!.user.id : null,
   };
 }

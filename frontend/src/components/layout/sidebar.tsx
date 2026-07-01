@@ -15,7 +15,7 @@ import {
   CreditCard,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
+  LifeBuoy,
   Settings,
   Zap,
   ShieldCheck,
@@ -52,10 +52,10 @@ const navItems = [
 ];
 
 interface SidebarProps {
-  onToggleAI?: () => void;
+  onToggleHelp?: () => void;
 }
 
-export function Sidebar({ onToggleAI }: SidebarProps) {
+export function Sidebar({ onToggleHelp }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
 
@@ -128,22 +128,22 @@ export function Sidebar({ onToggleAI }: SidebarProps) {
         ))}
       </nav>
 
-      {/* AI Assistant Button */}
-      {onToggleAI && (
+      {/* AR Help / Workflow Guide Button (local help — no external AI) */}
+      {onToggleHelp && (
         <div className="px-2 pb-2">
           <button
-            onClick={onToggleAI}
+            onClick={onToggleHelp}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
-              "bg-gradient-to-r from-purple-600/20 to-brand-600/20 text-purple-300",
-              "hover:from-purple-600/30 hover:to-brand-600/30 hover:text-purple-200",
-              "border border-purple-500/20",
+              "bg-sidebar-hover/40 text-slate-300",
+              "hover:bg-sidebar-hover hover:text-sidebar-text-active",
+              "border border-sidebar-border",
               collapsed && "justify-center px-0"
             )}
-            title={collapsed ? "AI Assistant" : undefined}
+            title={collapsed ? "AR Help" : undefined}
           >
-            <Sparkles className="h-[18px] w-[18px] shrink-0" />
-            {!collapsed && <span>AI Assistant</span>}
+            <LifeBuoy className="h-[18px] w-[18px] shrink-0" />
+            {!collapsed && <span>AR Help</span>}
           </button>
         </div>
       )}
