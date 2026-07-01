@@ -90,7 +90,7 @@ export function Header() {
   };
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 px-6 backdrop-blur-xl">
+    <header className="relative z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 px-6 backdrop-blur-xl">
       {/* Left: Global Search */}
       <div className="flex items-center gap-3">
         <div className="relative" ref={searchRef}>

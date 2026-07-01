@@ -64,7 +64,7 @@ function formatAsOf(date: string): string {
 // ─── Dashboard Page ─────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { metrics, isLoading, isRefreshing, isError, error, refetch } = useDashboardMetrics(6);
+  const { metrics, isLoading, isError, error, refetch } = useDashboardMetrics(6);
 
   const meta = metrics?.meta;
   const currency = meta?.base_currency ?? "MYR";
@@ -77,7 +77,7 @@ export default function DashboardPage() {
   if (isError && !metrics) {
     return (
       <div className="space-y-6">
-        <DashboardHeader meta={meta} isRefreshing={isRefreshing} onRefresh={() => refetch()} />
+        <DashboardHeader meta={meta} />
         <div className="glass-card flex flex-col items-center justify-center gap-3 p-12 text-center">
           {isForbidden ? (
             <>
@@ -144,7 +144,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <DashboardHeader meta={meta} isRefreshing={isRefreshing} onRefresh={() => refetch()} />
+      <DashboardHeader meta={meta} />
 
       {/* ─── Primary KPI Cards (base currency) ─────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -230,12 +230,8 @@ export default function DashboardPage() {
 
 function DashboardHeader({
   meta,
-  isRefreshing,
-  onRefresh,
 }: {
   meta?: { scope: string; as_of_date: string; calculated_at: string } | undefined;
-  isRefreshing: boolean;
-  onRefresh: () => void;
 }) {
   const scopeLabel = meta ? SCOPE_LABELS[meta.scope] ?? meta.scope : null;
   const ScopeIcon = meta?.scope === "assigned_customers" ? UserCheck : Building2;
@@ -254,21 +250,13 @@ function DashboardHeader({
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        {meta && (
-          <span className="text-xs text-slate-400">
-            Updated {formatTimestamp(meta.calculated_at)}
-          </span>
-        )}
-        <button
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-60"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-          {isRefreshing ? "Refreshing…" : "Refresh"}
-        </button>
-      </div>
+      {/* Auto-refreshes in the foreground (see useDashboardMetrics: 60s refetch
+          interval, background-off). No manual refresh control is exposed. */}
+      {meta && (
+        <span className="text-xs text-slate-400">
+          Updated {formatTimestamp(meta.calculated_at)}
+        </span>
+      )}
     </div>
   );
 }
