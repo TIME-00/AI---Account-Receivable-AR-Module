@@ -5,13 +5,12 @@ Baseline commit: `800cbf8b8e7d1c1a49165ca64c02107abd8d1352`
 Production frontend URL: `https://account-receivable-module.vercel.app/`  
 Production Supabase project ref: `kusseuycqgdilychphpq`
 
-Final verdict: **PASS WITH CONDITIONS**
+Final verdict: **PASS**
 
 The production frontend is reachable and the Batch 9A production Edge Functions remain active.
 Authenticated production API verification was completed with a valid production operational token.
-Authenticated browser/UI verification could not be completed in this session because no production
-login credentials/browser session or local browser automation tool was available. No production data
-was modified.
+Post-Fix1 manual production browser verification has now closed the remaining UI condition. No
+production data was modified.
 
 Condition-closure update: 2026-07-01 21:20:11 +08:00
 
@@ -20,9 +19,7 @@ Result: **PARTIALLY CLOSED**
 - Closed: valid production authenticated API checks.
 - Still open: browser-level authenticated UI walkthrough.
 
-The updated verdict remains **PASS WITH CONDITIONS** because the API contract behind the production
-frontend was verified, but actual authenticated browser UI interaction still needs a valid safe browser
-login session.
+The later Post-Fix1 manual production browser verification closed the remaining browser/UI condition.
 
 ## Baseline
 
@@ -206,10 +203,10 @@ No screenshots were captured. This avoids accidental exposure of production busi
 - No external AI/LLM/OCR call was made.
 - No commit or push was performed during verification.
 
-## Remaining condition
+## Previously remaining condition
 
-To fully close browser/UI verification, provide a valid safe production browser login session or
-approved browser automation setup and rerun authenticated read-only frontend checks only:
+This condition is now closed by the Post-Fix1 manual production browser verification section below.
+The earlier requested browser checks were:
 
 - `/auth/me`
 - `/profile`
@@ -339,3 +336,38 @@ Codex validation rerun:
 | Generated artifact tracked-file scan | PASS |
 
 No deployment, data access, smoke rerun, commit, or push was performed during Codex post-fix review.
+
+## Post-Fix1 manual production browser verification closure
+
+Date/time recorded: 2026-07-02 01:38:46 +08:00
+Fix1 commit verified by user: `b3b38468b7540f7c8a7ef2530b532744c73833a1`
+Production frontend: `https://account-receivable-module.vercel.app/`
+
+Result: **PASS**
+
+The user manually re-tested the production frontend after Batch 9A-Fix1 and confirmed the remaining
+browser/UI condition is closed:
+
+- global search dropdown is no longer covered by dashboard cards;
+- notifications dropdown is no longer covered by dashboard cards;
+- avatar/user dropdown is no longer covered by dashboard cards;
+- dashboard top-area manual Refresh button is removed;
+- `Updated <timestamp>` remains visible;
+- production frontend remains usable.
+
+No production data was created, updated, deleted, imported, posted, cancelled, reversed, approved,
+rejected, or allocated during manual verification.
+
+Evidence update safety confirmations:
+
+- documentation-only update;
+- no frontend/backend code changed in this evidence update step;
+- no Supabase Edge Function changed;
+- no SQL, migration, package, or config file changed;
+- no deployment performed;
+- no staging or production data touched;
+- no fixtures/imports/create-record flows run;
+- no production financial mutation smoke run;
+- no token values, raw JWTs, passwords, or secrets written.
+
+Batch 9A final production frontend verification is now **closed with PASS**.
