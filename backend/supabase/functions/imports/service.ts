@@ -39,6 +39,8 @@ import {
   normalizeIdentifier,
   topFuzzyCandidates,
 } from '../_shared/fuzzy.ts';
+import { validateOcrIntakeFile } from './file_validation.ts';
+import { getOcrProvider } from './ocr_provider.ts';
 
 const BUCKET = 'ar-imports';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
@@ -62,9 +64,28 @@ type ImportBatchStatus =
   | 'Executing'
   | 'Completed'
   | 'Failed'
-  | 'Cancelled';
+  | 'Cancelled'
+  | 'PendingScan'
+  | 'Rejected'
+  | 'Quarantined'
+  | 'PendingOCR'
+  | 'OCRFailed'
+  | 'OCRCompleted'
+  | 'NeedsReview'
+  | 'ApprovedDraft';
 
-type ImportRowStatus = 'Pending' | 'Valid' | 'Error' | 'Skipped' | 'Created' | 'Posted' | 'Allocated' | 'Unmatched';
+type ImportRowStatus =
+  | 'Pending'
+  | 'Valid'
+  | 'Error'
+  | 'Skipped'
+  | 'Created'
+  | 'Posted'
+  | 'Allocated'
+  | 'Unmatched'
+  | 'NeedsReview'
+  | 'ApprovedDraft'
+  | 'Rejected';
 
 interface ImportBatch {
   id: string;
@@ -97,6 +118,31 @@ interface UploadInput {
   fileType: ImportFileType;
   importType: ImportType;
   batchName?: string;
+}
+
+interface OcrUploadInput {
+  file: File;
+  fileType: string;
+  importType: string;
+  batchName?: string;
+}
+
+interface ImportFileRecord {
+  id: string;
+  batch_id: string;
+  file_name: string;
+  file_path: string;
+  file_type: 'csv' | 'xlsx' | 'pdf' | 'image';
+  file_size_bytes: number | null;
+  content_mime_type: string | null;
+  detected_mime_type: string | null;
+  file_sha256: string | null;
+  page_count: number | null;
+  scan_status: string | null;
+  scan_result: Record<string, unknown> | null;
+  ocr_status: string | null;
+  ocr_provider: string | null;
+  ocr_result: Record<string, unknown> | null;
 }
 
 interface RowValidationResult {
@@ -169,6 +215,16 @@ const REVIEW_AUDIT_FIELDS = [
   'rejected_at',
   'review_note',
 ] as const;
+
+function requireSupervisorOrFinanceManager(auth: AuthContext): void {
+  if (!hasAnyRole(auth, ['AR Supervisor', 'Finance Manager'])) {
+    throw new AuthorizationError('High-risk or low-confidence OCR intake requires AR Supervisor or Finance Manager approval.');
+  }
+}
+
+function safeStorageFileName(fileName: string): string {
+  return fileName.trim().replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160);
+}
 
 function hasAnyRole(auth: AuthContext, allowed: string[]): boolean {
   return auth.roles.some((role) => allowed.includes(role));
@@ -370,6 +426,350 @@ export class ImportService {
     });
 
     return updated as ImportBatch;
+  }
+
+  async uploadOcrIntakeFile(
+    auth: AuthContext,
+    input: OcrUploadInput,
+  ): Promise<{ batch: ImportBatch; file: ImportFileRecord; row: ImportRow; manual_fallback: boolean }> {
+    requireImportWrite(auth);
+
+    if (input.importType !== 'invoice') {
+      throw new ValidationError('Batch 9B-I1 OCR intake supports import_type=invoice only.', {
+        import_type: input.importType,
+      });
+    }
+
+    const validation = await validateOcrIntakeFile(input.file, input.fileType);
+    const batchName = input.batchName?.trim() || input.file.name.replace(/\.(pdf|png|jpe?g|webp)$/i, '');
+    const safeName = safeStorageFileName(input.file.name);
+
+    const { data: batch, error: batchError } = await this.client
+      .from('import_batches')
+      .insert({
+        company_id: auth.companyId,
+        batch_name: batchName,
+        import_type: 'invoice',
+        file_type: validation.fileType,
+        file_name: input.file.name,
+        file_size_bytes: input.file.size,
+        status: 'NeedsReview',
+        total_rows: 1,
+        valid_rows: 0,
+        error_rows: 0,
+        created_count: 0,
+        posted_count: 0,
+        allocated_count: 0,
+        auto_post: false,
+        auto_allocate: false,
+        created_by: auth.userId,
+        error_summary: null,
+      })
+      .select()
+      .single();
+
+    if (batchError || !batch) {
+      throw new Error(`Failed to create OCR import batch: ${batchError?.message ?? 'No row returned'}`);
+    }
+
+    const typedBatch = batch as ImportBatch;
+    const filePath = `${auth.companyId}/${typedBatch.id}/${crypto.randomUUID()}-${safeName}`;
+    const { error: uploadError } = await this.client.storage
+      .from(BUCKET)
+      .upload(filePath, input.file, {
+        contentType: validation.detectedMime,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      await this.markBatchFailed(typedBatch.id, [{ stage: 'ocr_upload', message: uploadError.message }]);
+      throw new Error(`Failed to upload OCR intake file: ${uploadError.message}`);
+    }
+
+    await this.updateBatch(typedBatch.id, { file_path: filePath });
+
+    const ocrResult = {
+      provider: 'disabled_manual_fallback',
+      status: 'disabled',
+      raw_text: null,
+      fields: [],
+      confidence: null,
+      manual_fallback: true,
+      validation: {
+        detected_mime_type: validation.detectedMime,
+        page_count: validation.pageCount,
+        file_sha256: validation.sha256,
+      },
+    };
+
+    const { data: fileRecord, error: fileError } = await this.client
+      .from('import_files')
+      .insert({
+        batch_id: typedBatch.id,
+        file_name: input.file.name,
+        file_path: filePath,
+        file_type: validation.fileType,
+        file_size_bytes: input.file.size,
+        content_mime_type: validation.contentMime,
+        detected_mime_type: validation.detectedMime,
+        file_sha256: validation.sha256,
+        page_count: validation.pageCount,
+        scan_status: validation.scanStatus,
+        scan_result: validation.scanResult,
+        ocr_status: 'disabled',
+        ocr_provider: 'disabled_manual_fallback',
+        ocr_result: ocrResult,
+        retention_expires_at: validation.retentionExpiresAt,
+      })
+      .select()
+      .single();
+
+    if (fileError || !fileRecord) {
+      await this.markBatchFailed(typedBatch.id, [{ stage: 'ocr_file_metadata', message: fileError?.message ?? 'No file row returned' }]);
+      throw new Error(`Failed to create OCR import file metadata: ${fileError?.message ?? 'No row returned'}`);
+    }
+
+    const { data: row, error: rowError } = await this.client
+      .from('import_rows')
+      .insert({
+        batch_id: typedBatch.id,
+        row_number: 1,
+        raw_data: {
+          source: 'ocr_manual_fallback',
+          import_type: 'invoice',
+          file_id: fileRecord.id,
+          file_name: input.file.name,
+          file_sha256: validation.sha256,
+          ocr_status: 'disabled',
+          ocr_fields: {},
+        },
+        mapped_data: {
+          source: 'ocr_manual_fallback',
+          review_required: true,
+          review_kind: 'ocr_invoice_manual_entry',
+          low_confidence: true,
+          approval_required_role: 'AR Supervisor or Finance Manager',
+          reviewed_fields: {},
+          message: 'OCR is disabled. Enter and review invoice fields manually before creating a draft import.',
+        },
+        status: 'NeedsReview',
+        validation_errors: [{
+          field: 'ocr',
+          message: 'OCR provider disabled; manual review is required.',
+        }],
+      })
+      .select()
+      .single();
+
+    if (rowError || !row) {
+      await this.markBatchFailed(typedBatch.id, [{ stage: 'ocr_review_row', message: rowError?.message ?? 'No row returned' }]);
+      throw new Error(`Failed to create OCR review row: ${rowError?.message ?? 'No row returned'}`);
+    }
+
+    const updatedBatch = await this.getBatch(auth, typedBatch.id);
+    return {
+      batch: updatedBatch,
+      file: fileRecord as ImportFileRecord,
+      row: row as ImportRow,
+      manual_fallback: true,
+    };
+  }
+
+  async createOcrPreviewUrl(
+    auth: AuthContext,
+    batchId: string,
+    fileId: string,
+  ): Promise<{ signed_url: string; expires_in_seconds: number }> {
+    requireImportRead(auth);
+    const batch = await this.getBatch(auth, batchId);
+    const file = await this.getImportFile(batch.id, fileId);
+    const expiresIn = 120;
+
+    const { data, error } = await this.client.storage
+      .from(BUCKET)
+      .createSignedUrl(file.file_path, expiresIn);
+
+    if (error || !data?.signedUrl) {
+      throw new Error(`Failed to create OCR preview URL: ${error?.message ?? 'No signed URL returned'}`);
+    }
+
+    return { signed_url: data.signedUrl, expires_in_seconds: expiresIn };
+  }
+
+  async startOcr(
+    auth: AuthContext,
+    batchId: string,
+    fileId: string,
+  ): Promise<Record<string, unknown>> {
+    requireImportWrite(auth);
+    const batch = await this.getWritableBatch(auth, batchId);
+    const file = await this.getImportFile(batch.id, fileId);
+
+    if (file.scan_status === 'rejected' || file.scan_status === 'quarantined') {
+      throw new ValidationError('OCR cannot run on rejected or quarantined files.', {
+        file_id: fileId,
+        scan_status: file.scan_status,
+      });
+    }
+
+    const provider = getOcrProvider();
+    if (!provider.isEnabled()) {
+      const result = await provider.extract();
+      await this.client
+        .from('import_files')
+        .update({
+          ocr_status: 'disabled',
+          ocr_provider: provider.name,
+          ocr_completed_at: new Date().toISOString(),
+          ocr_result: {
+            provider: result.provider,
+            status: result.status,
+            raw_text: result.rawText,
+            fields: result.fields,
+            confidence: result.confidence,
+            metadata: result.metadata,
+          },
+        })
+        .eq('id', file.id)
+        .eq('batch_id', batch.id);
+
+      return {
+        status: 'disabled',
+        provider: provider.name,
+        manual_fallback: true,
+        message: 'OCR provider is disabled. Continue with manual review/draft intake.',
+      };
+    }
+
+    throw new BusinessError(
+      'OCR_PROVIDER_NOT_CONFIGURED',
+      'OCR provider activation requires a separately approved provider implementation.',
+      503,
+    );
+  }
+
+  async listOcrReviewItems(
+    auth: AuthContext,
+    batchId: string,
+  ): Promise<{ batch: ImportBatch; files: ImportFileRecord[]; rows: ImportRow[] }> {
+    const batch = await this.getBatch(auth, batchId);
+    const { data: files, error: filesError } = await this.client
+      .from('import_files')
+      .select('*')
+      .eq('batch_id', batch.id)
+      .order('created_at');
+
+    if (filesError) {
+      throw new Error(`Failed to list OCR import files: ${filesError.message}`);
+    }
+
+    const rows = await this.listRowsInternal(batch.id);
+    return {
+      batch,
+      files: (files ?? []) as ImportFileRecord[],
+      rows: rows.filter((row) => ['NeedsReview', 'ApprovedDraft', 'Rejected', 'Error'].includes(row.status)),
+    };
+  }
+
+  async saveOcrReview(
+    auth: AuthContext,
+    batchId: string,
+    rowId: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ row: ImportRow; decisions_recorded: number }> {
+    const batch = await this.getWritableBatch(auth, batchId);
+    const row = await this.fetchReviewableRow(batch.id, rowId);
+    if (row.status !== 'NeedsReview' && row.status !== 'Error') {
+      throw new ValidationError('Only OCR rows needing review can be updated.', {
+        row_id: rowId,
+        status: row.status,
+      });
+    }
+
+    const reviewedFields = this.reviewedFields(payload.reviewed_fields);
+    const note = this.reviewNote(payload.review_note);
+    const previousMapped = row.mapped_data ?? {};
+    const previousRaw = row.raw_data ?? {};
+    const now = new Date().toISOString();
+
+    const nextMappedData = {
+      ...previousMapped,
+      reviewed_fields: reviewedFields,
+      review_result: 'reviewed',
+      reviewed_by: auth.userId,
+      reviewed_at: now,
+      review_note: note,
+      review_required: true,
+      source: 'ocr_manual_fallback',
+    };
+
+    const updated = await this.updateReviewRow(row.id, {
+      mapped_data: nextMappedData,
+      validation_errors: null,
+    });
+
+    const fileId = typeof previousRaw.file_id === 'string' ? previousRaw.file_id : null;
+    await this.insertOcrReviewDecisions(auth, batch, row, fileId, reviewedFields, 'reviewed', note);
+
+    return { row: updated, decisions_recorded: Object.keys(reviewedFields).length };
+  }
+
+  async approveOcrDraft(
+    auth: AuthContext,
+    batchId: string,
+    rowId: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ batch: ImportBatch; row: ImportRow; message: string }> {
+    const batch = await this.getWritableBatch(auth, batchId);
+    const row = await this.fetchReviewableRow(batch.id, rowId);
+    const mappedData = row.mapped_data ?? {};
+    const reviewedFields = this.reviewedFields(mappedData.reviewed_fields);
+    if (Object.keys(reviewedFields).length === 0) {
+      throw new ValidationError('approve-draft requires reviewed OCR/manual fields first.', {
+        row_id: rowId,
+      });
+    }
+
+    if (mappedData.low_confidence !== false) {
+      requireSupervisorOrFinanceManager(auth);
+    }
+
+    const note = this.reviewNote(payload.review_note);
+    const approvedAt = new Date().toISOString();
+    const nextMappedData = {
+      ...mappedData,
+      review_result: 'approved_draft',
+      approved_by: auth.userId,
+      approved_at: approvedAt,
+      review_note: note ?? mappedData.review_note,
+      financial_mutation: false,
+      posting_status: 'not_posted',
+      allocation_status: 'not_allocated',
+    };
+
+    const updated = await this.updateReviewRow(row.id, {
+      status: 'ApprovedDraft',
+      mapped_data: nextMappedData,
+      validation_errors: null,
+    });
+
+    await this.updateBatch(batch.id, {
+      status: 'ApprovedDraft',
+      valid_rows: 0,
+      error_rows: 0,
+      created_count: 0,
+      posted_count: 0,
+      allocated_count: 0,
+    });
+
+    const fileId = typeof row.raw_data.file_id === 'string' ? row.raw_data.file_id : null;
+    await this.insertOcrReviewDecisions(auth, batch, row, fileId, reviewedFields, 'approved_draft', note);
+
+    return {
+      batch: await this.getBatch(auth, batch.id),
+      row: updated,
+      message: 'OCR/manual intake approved as draft-only review data. No invoice was posted and no allocation was performed.',
+    };
   }
 
   async parseBatch(auth: AuthContext, batchId: string): Promise<{ batch: ImportBatch; rows: ImportRow[] }> {
@@ -816,6 +1216,20 @@ export class ImportService {
     return { rows, total: count ?? rows.length };
   }
 
+  private async getImportFile(batchId: string, fileId: string): Promise<ImportFileRecord> {
+    validateUUID(fileId, 'file_id');
+    const { data, error } = await this.client
+      .from('import_files')
+      .select('*')
+      .eq('id', fileId)
+      .eq('batch_id', batchId)
+      .maybeSingle();
+
+    if (error) throw new Error(`Failed to fetch import file: ${error.message}`);
+    if (!data) throw new NotFoundError('ImportFile', fileId);
+    return data as ImportFileRecord;
+  }
+
   async reviewRow(
     auth: AuthContext,
     batchId: string,
@@ -897,6 +1311,86 @@ export class ImportService {
       throw new ValidationError('review_note must be 500 characters or fewer.', { field: 'review_note' });
     }
     return note || undefined;
+  }
+
+  private reviewedFields(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new ValidationError('reviewed_fields must be an object of reviewed OCR/manual values.', {
+        field: 'reviewed_fields',
+      });
+    }
+
+    const fields = value as Record<string, unknown>;
+    if (Object.keys(fields).length === 0) {
+      throw new ValidationError('reviewed_fields must include at least one field.', {
+        field: 'reviewed_fields',
+      });
+    }
+    if (Object.keys(fields).length > 50) {
+      throw new ValidationError('reviewed_fields cannot include more than 50 fields.', {
+        field: 'reviewed_fields',
+      });
+    }
+
+    for (const key of Object.keys(fields)) {
+      if (!/^[a-zA-Z0-9_.-]{1,80}$/.test(key)) {
+        throw new ValidationError('reviewed_fields contains an unsupported field key.', {
+          field: 'reviewed_fields',
+          field_key: key,
+        });
+      }
+      const valueForKey = fields[key];
+      if (
+        valueForKey !== null
+        && typeof valueForKey !== 'string'
+        && typeof valueForKey !== 'number'
+        && typeof valueForKey !== 'boolean'
+      ) {
+        throw new ValidationError('reviewed_fields values must be scalar JSON values.', {
+          field: 'reviewed_fields',
+          field_key: key,
+        });
+      }
+    }
+
+    return fields;
+  }
+
+  private async insertOcrReviewDecisions(
+    auth: AuthContext,
+    batch: ImportBatch,
+    row: ImportRow,
+    fileId: string | null,
+    reviewedFields: Record<string, unknown>,
+    decision: 'reviewed' | 'approved_draft' | 'rejected',
+    note?: string,
+  ): Promise<void> {
+    const rawFields = row.raw_data?.ocr_fields;
+    const rawValues = rawFields && typeof rawFields === 'object' && !Array.isArray(rawFields)
+      ? rawFields as Record<string, unknown>
+      : row.raw_data;
+
+    const rows = Object.entries(reviewedFields).map(([fieldKey, reviewedValue]) => ({
+      company_id: auth.companyId,
+      batch_id: batch.id,
+      file_id: fileId,
+      row_id: row.id,
+      field_key: fieldKey,
+      raw_value: rawValues[fieldKey] === undefined ? null : rawValues[fieldKey],
+      reviewed_value: reviewedValue === undefined ? null : reviewedValue,
+      confidence: null,
+      decision,
+      decided_by: auth.userId,
+      note: note ?? null,
+    }));
+
+    const { error } = await this.client
+      .from('ocr_review_decisions')
+      .insert(rows);
+
+    if (error) {
+      throw new Error(`Failed to record OCR review decisions: ${error.message}`);
+    }
   }
 
   private async applyApproveSuggestion(

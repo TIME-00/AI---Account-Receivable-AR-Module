@@ -15,6 +15,12 @@ const ALLOWED_FILE_TYPES = ['csv', 'xlsx'];
 const ALLOWED_IMPORT_TYPES = ['invoice', 'receipt'];
 
 const ROUTES: Record<string, RegExp> = {
+  ocrUpload:  /^\/ocr\/upload\/?$/i,
+  ocrReview: new RegExp(`^\\/${UUID}\\/ocr-review\\/?$`, 'i'),
+  previewUrl: new RegExp(`^\\/${UUID}\\/files\\/${UUID}\\/preview-url\\/?$`, 'i'),
+  ocrStart: new RegExp(`^\\/${UUID}\\/files\\/${UUID}\\/ocr\\/start\\/?$`, 'i'),
+  ocrRowReview: new RegExp(`^\\/${UUID}\\/rows\\/${UUID}\\/ocr-review\\/?$`, 'i'),
+  approveDraft: new RegExp(`^\\/${UUID}\\/rows\\/${UUID}\\/approve-draft\\/?$`, 'i'),
   upload:     /^\/upload\/?$/i,
   parse:      new RegExp(`^\\/${UUID}\\/parse\\/?$`, 'i'),
   validate:   new RegExp(`^\\/${UUID}\\/validate\\/?$`, 'i'),
@@ -41,6 +47,12 @@ function matchRoute(url: URL): { route: string; params: Record<string, string> }
       if (name === 'review') {
         return { route: name, params: { id: match[1], batchId: match[1], rowId: match[2] } };
       }
+      if (name === 'previewUrl' || name === 'ocrStart') {
+        return { route: name, params: { id: match[1], batchId: match[1], fileId: match[2] } };
+      }
+      if (name === 'ocrRowReview' || name === 'approveDraft') {
+        return { route: name, params: { id: match[1], batchId: match[1], rowId: match[2] } };
+      }
       return { route: name, params: match[1] ? { id: match[1] } : {} };
     }
   }
@@ -56,6 +68,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const companyId = extractCompanyId(req);
     const auth = await getAuthContext(req, companyId);
     const service = new ImportService();
+
+    if (route === 'ocrUpload' && req.method === 'POST') {
+      const form = await req.formData();
+      const file = form.get('file');
+      if (!(file instanceof File)) {
+        throw new ValidationError('Multipart field "file" is required.');
+      }
+
+      const importType = String(form.get('import_type') ?? 'invoice');
+      const fileType = String(form.get('file_type') ?? '');
+      const batchNameRaw = form.get('batch_name');
+      const result = await service.uploadOcrIntakeFile(auth, {
+        file,
+        fileType,
+        importType,
+        batchName: typeof batchNameRaw === 'string' ? batchNameRaw : undefined,
+      });
+      return jsonResponse(successResponse(result), 201);
+    }
 
     if (route === 'upload' && req.method === 'POST') {
       const form = await req.formData();
@@ -88,6 +119,59 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { id } = params;
       validateUUID(id, 'batch_id');
       const result = await service.parseBatch(auth, id);
+      return jsonResponse(successResponse(result));
+    }
+
+    if (route === 'previewUrl' && req.method === 'GET') {
+      const { batchId, fileId } = params;
+      validateUUID(batchId, 'batch_id');
+      validateUUID(fileId, 'file_id');
+      const result = await service.createOcrPreviewUrl(auth, batchId, fileId);
+      return jsonResponse(successResponse(result));
+    }
+
+    if (route === 'ocrStart' && req.method === 'POST') {
+      const { batchId, fileId } = params;
+      validateUUID(batchId, 'batch_id');
+      validateUUID(fileId, 'file_id');
+      const result = await service.startOcr(auth, batchId, fileId);
+      return jsonResponse(successResponse(result));
+    }
+
+    if (route === 'ocrReview' && req.method === 'GET') {
+      const { id } = params;
+      validateUUID(id, 'batch_id');
+      const result = await service.listOcrReviewItems(auth, id);
+      return jsonResponse(successResponse(result));
+    }
+
+    if (route === 'ocrRowReview' && req.method === 'PATCH') {
+      const { batchId, rowId } = params;
+      validateUUID(batchId, 'batch_id');
+      validateUUID(rowId, 'row_id');
+      let body: Record<string, unknown> = {};
+      if (req.headers.get('Content-Type')?.includes('application/json')) {
+        const parsed = await req.json();
+        if (parsed && typeof parsed === 'object') {
+          body = parsed as Record<string, unknown>;
+        }
+      }
+      const result = await service.saveOcrReview(auth, batchId, rowId, body);
+      return jsonResponse(successResponse(result));
+    }
+
+    if (route === 'approveDraft' && req.method === 'POST') {
+      const { batchId, rowId } = params;
+      validateUUID(batchId, 'batch_id');
+      validateUUID(rowId, 'row_id');
+      let body: Record<string, unknown> = {};
+      if (req.headers.get('Content-Type')?.includes('application/json')) {
+        const parsed = await req.json();
+        if (parsed && typeof parsed === 'object') {
+          body = parsed as Record<string, unknown>;
+        }
+      }
+      const result = await service.approveOcrDraft(auth, batchId, rowId, body);
       return jsonResponse(successResponse(result));
     }
 
