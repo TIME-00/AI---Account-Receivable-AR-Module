@@ -196,7 +196,7 @@ export default function SettingsPage() {
                 { feature: "Audit Trail", status: "Capability Reference", color: "bg-blue-50 text-blue-700" },
                 { feature: "Settings & Roles", status: "Read-Only (Authenticated)", color: "bg-blue-50 text-blue-700" },
                 { feature: "Auto-Allocation", status: "Disabled", color: "bg-slate-50 text-slate-500" },
-                { feature: "PDF/Image/OCR Import", status: "Planned (Batch 9B)", color: "bg-slate-50 text-slate-500" },
+                { feature: "PDF/Image Import", status: "Planned (Batch 9B)", color: "bg-slate-50 text-slate-500" },
                 { feature: "Daily FX Sync", status: "Planned (Batch 9C)", color: "bg-slate-50 text-slate-500" },
                 { feature: "Report Export (PDF/Excel)", status: "Planned", color: "bg-slate-50 text-slate-500" },
               ].map((row) => (

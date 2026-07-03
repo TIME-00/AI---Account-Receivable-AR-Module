@@ -263,22 +263,21 @@ export function OcrImportFlow() {
               </div>
             </div>
 
-            {/* Manual-fallback notice */}
+            {/* Manual review notice */}
             <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3 flex items-start gap-2">
               <FileSearch className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
               <div className="text-xs text-amber-700">
                 <p className="font-medium text-amber-800">Manual review required</p>
                 <p className="mt-0.5">
-                  The production OCR provider is disabled, so no fields were auto-extracted. Enter and
-                  review the invoice values below. You can re-check OCR status at any time — it will stay
-                  in manual fallback until a provider is separately approved and enabled.
+                  Fields are not auto-filled. Open the document preview, then enter and review each
+                  invoice value below before approving a draft.
                 </p>
                 <button
                   type="button"
                   onClick={() => startOcr()}
                   className="mt-1.5 inline-flex items-center gap-1 text-amber-800 font-medium underline decoration-dotted hover:text-amber-900"
                 >
-                  <FileSearch className="h-3.5 w-3.5" /> Re-check OCR status
+                  <FileSearch className="h-3.5 w-3.5" /> Re-check status
                 </button>
               </div>
             </div>
@@ -414,7 +413,7 @@ function ReviewEditor({
       <div className="overflow-hidden rounded-xl border border-slate-200">
         <div className="hidden sm:grid grid-cols-[1fr_1fr_1.4fr] bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           <div className="px-3 py-2">Field</div>
-          <div className="px-3 py-2">Raw (OCR) value</div>
+          <div className="px-3 py-2">Imported value</div>
           <div className="px-3 py-2">Reviewed value</div>
         </div>
         <div className="divide-y divide-slate-100">
@@ -427,7 +426,7 @@ function ReviewEditor({
                   {f.hint && <span className="block text-[11px] font-normal text-slate-400">{f.hint}</span>}
                 </div>
                 <div className="text-sm text-slate-500">
-                  {raw ?? <span className="text-slate-400 italic">No OCR value</span>}
+                  {raw ?? <span className="text-slate-400 italic">No value</span>}
                 </div>
                 <div>
                   <input
@@ -526,12 +525,12 @@ function SafetyBanner() {
       <div className="flex items-start gap-3">
         <ShieldCheck className="h-5 w-5 text-indigo-500 mt-0.5 flex-shrink-0" />
         <div className="text-sm">
-          <p className="font-semibold text-indigo-800">Extraction &amp; review only — nothing is posted</p>
+          <p className="font-semibold text-indigo-800">PDF/Image import — review &amp; draft only</p>
           <ul className="mt-1 space-y-0.5 text-indigo-700">
-            <li>• PDF/Image intake is for <strong>extraction and review only</strong>.</li>
-            <li>• OCR/manual intake <strong>does not post invoices</strong> and <strong>does not allocate receipts</strong>.</li>
-            <li>• Please review and approve extracted values before creating draft import data.</li>
-            <li>• The production OCR provider is disabled unless separately approved. SVG files are not supported.</li>
+            <li>• PDF/Image import creates <strong>reviewable draft data only</strong>.</li>
+            <li>• It <strong>does not post invoices</strong>, <strong>allocate receipts</strong>, or create final financial records.</li>
+            <li>• Please review and approve the imported fields before creating draft data.</li>
+            <li>• Supported formats: PDF, PNG, JPG/JPEG, WebP. SVG is not supported.</li>
           </ul>
         </div>
       </div>
@@ -569,9 +568,9 @@ function ScanPill({ scanStatus }: { scanStatus: string | null }) {
 
 function OcrPill({ ocrStatus }: { ocrStatus: string | null }) {
   const s = (ocrStatus ?? "").toLowerCase();
-  if (s === "failed") return <StatusPill tone="red"><XCircle className="h-3.5 w-3.5" /> OCR failed</StatusPill>;
-  if (s === "completed") return <StatusPill tone="emerald"><CheckCircle2 className="h-3.5 w-3.5" /> OCR complete</StatusPill>;
-  return <StatusPill tone="slate"><FileSearch className="h-3.5 w-3.5" /> OCR disabled · manual</StatusPill>;
+  if (s === "failed") return <StatusPill tone="red"><XCircle className="h-3.5 w-3.5" /> Processing failed</StatusPill>;
+  if (s === "completed") return <StatusPill tone="emerald"><CheckCircle2 className="h-3.5 w-3.5" /> Fields imported</StatusPill>;
+  return <StatusPill tone="slate"><FileSearch className="h-3.5 w-3.5" /> Manual entry</StatusPill>;
 }
 
 function ReviewPill({ status, lowConfidence }: { status: string; lowConfidence: boolean }) {

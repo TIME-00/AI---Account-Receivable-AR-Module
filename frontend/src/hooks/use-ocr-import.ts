@@ -254,7 +254,7 @@ export function useOcrImport() {
         formData.append("file", rawFile);
         formData.append("import_type", "invoice");
         formData.append("file_type", check.fileType);
-        formData.append("batch_name", `OCR Invoice Intake — ${rawFile.name}`);
+        formData.append("batch_name", `PDF/Image Invoice Import — ${rawFile.name}`);
 
         const res = await api.rawFetch("/imports/ocr/upload", {
           method: "POST",
@@ -280,9 +280,7 @@ export function useOcrImport() {
         setRow(payload.row);
         setStep("review");
         toast.success("File Uploaded", {
-          description: payload.manual_fallback
-            ? "OCR is disabled — review the invoice fields manually before approving a draft."
-            : "File uploaded. Review the extracted fields before approving a draft.",
+          description: "Review the imported invoice fields manually before approving a draft.",
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Upload failed";
@@ -306,13 +304,12 @@ export function useOcrImport() {
       const result = await api.post<OcrStartResult>(
         `/imports/${batch.id}/files/${file.id}/ocr/start`,
       );
-      toast.info(
-        result.manual_fallback ? "Manual Review Required" : "OCR Started",
-        { description: result.message },
-      );
+      toast.info("Manual Review", {
+        description: "Fields are not auto-filled — enter each value from the document, then save.",
+      });
       return result;
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Could not start OCR";
+      const msg = err instanceof ApiError ? err.message : "Could not refresh status";
       setError(msg);
     }
   }, [api, batch, file]);

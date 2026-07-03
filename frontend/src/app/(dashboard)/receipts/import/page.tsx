@@ -163,7 +163,7 @@ export default function ReceiptImportPage() {
             <ul className="mt-1 space-y-0.5 text-amber-700">
               <li><strong>Auto-Post &amp; Allocate is enabled by default.</strong> On execution, valid receipts are posted and exact invoice references are allocated using verified financial RPCs — this is not a draft-only import.</li>
               <li>To create <strong>Draft</strong> receipts only, turn off <strong>Auto-Post &amp; Allocate</strong> on the Validate step before executing.</li>
-              <li>CSV and Excel (.xlsx) files are supported. PDF/Image/OCR are not part of this phase.</li>
+              <li>CSV and Excel (.xlsx) files are supported. PDF/Image import is not available for receipts.</li>
             </ul>
           </div>
         </div>

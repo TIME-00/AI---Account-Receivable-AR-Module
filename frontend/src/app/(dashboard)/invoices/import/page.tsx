@@ -176,7 +176,7 @@ export default function InvoiceImportPage() {
           <p className="mt-1 text-sm text-slate-500">
             {mode === "csv"
               ? "CSV/Excel Invoice Import — Draft Only"
-              : "PDF/Image OCR Invoice Intake — Review & Draft Only"}
+              : "PDF/Image Invoice Import — Review & Draft Only"}
           </p>
         </div>
         {mode === "csv" && step !== "upload" && step !== "result" && (
@@ -209,7 +209,7 @@ export default function InvoiceImportPage() {
           )}
         >
           <ScanLine className="h-4 w-4" />
-          PDF / Image (OCR)
+          PDF/Image Import
         </button>
       </div>
 
@@ -231,7 +231,7 @@ export default function InvoiceImportPage() {
               <li>• Every imported row creates a <strong>Draft</strong> invoice — nothing is posted by this import.</li>
               <li>• Post each invoice later from the invoice list or detail page when you are ready.</li>
               <li>• Receipts and payment allocation are handled separately (Receipts → Import or New Receipt).</li>
-              <li>• CSV and Excel (.xlsx) files create draft invoice rows here. For PDF or image invoices, switch to the <strong>PDF / Image (OCR)</strong> channel above — that path is review/draft only and never posts invoices or allocates receipts.</li>
+              <li>• CSV and Excel (.xlsx) files create draft invoice rows here. For PDF or image invoices, switch to the <strong>PDF/Image Import</strong> channel above — that path is review/draft only and never posts invoices or allocates receipts.</li>
             </ul>
           </div>
         </div>
