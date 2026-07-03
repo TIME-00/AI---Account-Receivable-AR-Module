@@ -9,6 +9,7 @@ import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
 import { errorResponse, successResponse, ValidationError } from '../_shared/errors.ts';
 import { parsePagination, validateUUID } from '../_shared/validators.ts';
 import { ImportService } from './service.ts';
+import { validateOcrIntakeImportType } from './intake_validation.ts';
 
 const UUID = '([0-9a-f\\-]{36})';
 const ALLOWED_FILE_TYPES = ['csv', 'xlsx'];
@@ -76,7 +77,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         throw new ValidationError('Multipart field "file" is required.');
       }
 
-      const importType = String(form.get('import_type') ?? 'invoice');
+      const importType = validateOcrIntakeImportType(String(form.get('import_type') ?? 'invoice'));
       const fileType = String(form.get('file_type') ?? '');
       const batchNameRaw = form.get('batch_name');
       const result = await service.uploadOcrIntakeFile(auth, {

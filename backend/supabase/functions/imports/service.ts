@@ -41,6 +41,7 @@ import {
 } from '../_shared/fuzzy.ts';
 import { validateOcrIntakeFile } from './file_validation.ts';
 import { getOcrProvider } from './ocr_provider.ts';
+import { validateOcrIntakeImportType } from './intake_validation.ts';
 
 const BUCKET = 'ar-imports';
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
@@ -434,22 +435,20 @@ export class ImportService {
   ): Promise<{ batch: ImportBatch; file: ImportFileRecord; row: ImportRow; manual_fallback: boolean }> {
     requireImportWrite(auth);
 
-    if (input.importType !== 'invoice') {
-      throw new ValidationError('Batch 9B-I1 OCR intake supports import_type=invoice only.', {
-        import_type: input.importType,
-      });
-    }
-
+    const importType = validateOcrIntakeImportType(input.importType);
     const validation = await validateOcrIntakeFile(input.file, input.fileType);
-    const batchName = input.batchName?.trim() || input.file.name.replace(/\.(pdf|png|jpe?g|webp)$/i, '');
+    const importLabel = importType === 'receipt' ? 'Receipt' : 'Invoice';
+    const baseFileName = input.file.name.replace(/\.(pdf|png|jpe?g|webp)$/i, '');
+    const batchName = input.batchName?.trim() || `PDF/Image ${importLabel} Import - ${baseFileName}`;
     const safeName = safeStorageFileName(input.file.name);
+    const reviewKind = importType === 'receipt' ? 'ocr_receipt_manual_entry' : 'ocr_invoice_manual_entry';
 
     const { data: batch, error: batchError } = await this.client
       .from('import_batches')
       .insert({
         company_id: auth.companyId,
         batch_name: batchName,
-        import_type: 'invoice',
+        import_type: importType,
         file_type: validation.fileType,
         file_name: input.file.name,
         file_size_bytes: input.file.size,
@@ -536,7 +535,7 @@ export class ImportService {
         row_number: 1,
         raw_data: {
           source: 'ocr_manual_fallback',
-          import_type: 'invoice',
+          import_type: importType,
           file_id: fileRecord.id,
           file_name: input.file.name,
           file_sha256: validation.sha256,
@@ -546,11 +545,11 @@ export class ImportService {
         mapped_data: {
           source: 'ocr_manual_fallback',
           review_required: true,
-          review_kind: 'ocr_invoice_manual_entry',
+          review_kind: reviewKind,
           low_confidence: true,
           approval_required_role: 'AR Supervisor or Finance Manager',
           reviewed_fields: {},
-          message: 'OCR is disabled. Enter and review invoice fields manually before creating a draft import.',
+          message: 'OCR is disabled. Enter and review the fields manually before creating a draft import.',
         },
         status: 'NeedsReview',
         validation_errors: [{
@@ -768,7 +767,7 @@ export class ImportService {
     return {
       batch: await this.getBatch(auth, batch.id),
       row: updated,
-      message: 'OCR/manual intake approved as draft-only review data. No invoice was posted and no allocation was performed.',
+      message: 'OCR/manual intake approved as draft-only review data. No financial records were created; nothing was posted and no allocation was performed.',
     };
   }
 
