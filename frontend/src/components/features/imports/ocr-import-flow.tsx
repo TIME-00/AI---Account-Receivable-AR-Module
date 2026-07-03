@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import {
   Upload, FileText, Image as ImageIcon, ShieldCheck, Eye, Loader2,
   AlertTriangle, CheckCircle2, XCircle, Lock, Save, Info, RotateCcw,
-  FileSearch, Ban,
+  FileSearch, Ban, RefreshCw,
 } from "lucide-react";
 
 // ─── Status pill helper ─────────────────────────────────────────────────────
@@ -53,9 +53,9 @@ function StatusPill({ tone, children }: { tone: PillTone; children: React.ReactN
 
 export function OcrImportFlow() {
   const {
-    step, batch, file, row, lowConfidence, isApprovedDraft,
-    isUploading, isSaving, isApproving, isPreviewLoading, error,
-    uploadFile, startOcr, openPreview, saveReview, approveDraft, reset,
+    step, batch, file, row, lowConfidence,
+    isUploading, isSaving, isApproving, isPreviewLoading, isRefreshing, error,
+    uploadFile, startOcr, openPreview, refreshReview, saveReview, approveDraft, reset,
   } = useOcrImport();
 
   const {
@@ -246,6 +246,16 @@ export function OcrImportFlow() {
                   onClick={() => openPreview()}
                 >
                   <Eye className="h-4 w-4" /> Preview document
+                </LoadingButton>
+                <LoadingButton
+                  variant="secondary"
+                  size="sm"
+                  isLoading={isRefreshing}
+                  loadingText="Refreshing…"
+                  onClick={() => refreshReview()}
+                  title="Reload the review queue for this batch"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Refresh
                 </LoadingButton>
                 <LoadingButton variant="ghost" size="sm" onClick={reset}>
                   <RotateCcw className="h-3.5 w-3.5" /> Start over

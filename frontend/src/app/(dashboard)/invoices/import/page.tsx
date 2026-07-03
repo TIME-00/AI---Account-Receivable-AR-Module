@@ -213,9 +213,14 @@ export default function InvoiceImportPage() {
         </button>
       </div>
 
-      {/* PDF/Image OCR intake (Batch 9B) — review/draft only, never posts */}
+      {/* PDF/Image OCR intake (Batch 9B) — review/draft only, never posts.
+          Mutually exclusive with the CSV/XLSX wizard below. */}
       {mode === "ocr" && <OcrImportFlow />}
 
+      {/* CSV/Excel wizard — rendered only in CSV mode so the two import channels
+          are never shown at the same time. */}
+      {mode === "csv" && (
+        <>
       {/* Draft-Only Warning Banner */}
       <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4">
         <div className="flex items-start gap-3">
@@ -226,7 +231,7 @@ export default function InvoiceImportPage() {
               <li>• Every imported row creates a <strong>Draft</strong> invoice — nothing is posted by this import.</li>
               <li>• Post each invoice later from the invoice list or detail page when you are ready.</li>
               <li>• Receipts and payment allocation are handled separately (Receipts → Import or New Receipt).</li>
-              <li>• CSV and Excel (.xlsx) files are supported. PDF/Image import is not part of this phase.</li>
+              <li>• CSV and Excel (.xlsx) files create draft invoice rows here. For PDF or image invoices, switch to the <strong>PDF / Image (OCR)</strong> channel above — that path is review/draft only and never posts invoices or allocates receipts.</li>
             </ul>
           </div>
         </div>
@@ -584,6 +589,8 @@ export default function InvoiceImportPage() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

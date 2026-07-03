@@ -222,6 +222,7 @@ export function useOcrImport() {
   const [isSaving, setIsSaving] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   /** Low-confidence / manual-fallback flag drives the "needs review" messaging. */
@@ -342,6 +343,35 @@ export function useOcrImport() {
   }, [api, batch, file]);
 
   /**
+   * Reload the review queue for the current batch from the backend
+   * (`GET /imports/:batchId/ocr-review`) and re-sync the batch/file/row state.
+   * Read-only and tenant-safe through the shared authenticated API client.
+   */
+  const refreshReview = useCallback(async () => {
+    if (!batch) return;
+    setIsRefreshing(true);
+    setError(null);
+    try {
+      const result = await api.get<OcrReviewList>(`/imports/${batch.id}/ocr-review`);
+      if (result?.batch) setBatch(result.batch);
+      if (Array.isArray(result?.files) && result.files.length > 0) {
+        setFile((prev) => result.files.find((f) => f.id === prev?.id) ?? result.files[0]);
+      }
+      if (Array.isArray(result?.rows) && result.rows.length > 0) {
+        setRow((prev) => result.rows.find((r) => r.id === prev?.id) ?? result.rows[0]);
+        const active = result.rows.find((r) => r.id === row?.id) ?? result.rows[0];
+        if (active?.status === "ApprovedDraft") setStep("approved");
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Could not refresh the review queue";
+      setError(msg);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [api, batch, row]);
+
+  /**
    * Save reviewed invoice field values. Persists to review metadata only — no
    * invoice is created or posted here.
    */
@@ -428,11 +458,13 @@ export function useOcrImport() {
     isSaving,
     isApproving,
     isPreviewLoading,
+    isRefreshing,
     error,
     // actions
     uploadFile,
     startOcr,
     openPreview,
+    refreshReview,
     saveReview,
     approveDraft,
     reset,

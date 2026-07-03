@@ -97,6 +97,11 @@ client (`useApi`, which injects the Supabase JWT + `X-Company-Id`):
 
 - Upload sends `import_type=invoice`, `file_type=pdf|image`, and the file via
   `FormData`. Client-side validation is UX-only; the backend remains authoritative.
+- The **upload response** seeds the immediate review state (batch/file/row).
+- `GET /imports/:batchId/ocr-review` is integrated as a **Refresh** action on the
+  review step (`refreshReview` in `useOcrImport`), which reloads the tenant-scoped
+  review queue and re-syncs batch/file/row. (Added in Batch 9B-FE-Fix1 — see the
+  addendum below.)
 - Preview uses the backend-issued signed URL only; no public storage URL is
   constructed.
 - OCR start expects `manual_fallback=true` by default and never assumes real
@@ -207,3 +212,76 @@ Screenshots: omitted to avoid committing any potentially sensitive rendered data
 Frontend implementation result: PASS (tsc + build green, all safety scans clean).
 
 Batch 9B-FE is ready for Codex final review before any further promotion work.
+
+---
+
+# Batch 9B-FE-Fix1 — OCR / CSV Mode Isolation + Review Refresh
+
+Addresses the Codex final-review verdict `CHANGES REQUIRED` on Batch 9B-FE.
+
+## Issues fixed
+
+1. **OCR mode rendered the CSV/XLSX wizard as well.** `OcrImportFlow` was gated on
+   `mode === "ocr"`, but the CSV draft-only banner, step progress, error banner, and
+   wizard content were not gated, so the OCR channel showed both flows together.
+   - **Fix:** wrapped the entire CSV/XLSX section (draft-only banner → step progress
+     → error banner → step content) in a single `{mode === "csv" && (<> … </>)}`
+     guard. The two channels are now mutually exclusive: OCR mode shows only the OCR
+     flow + OCR safety copy; CSV mode shows only the CSV/XLSX wizard.
+2. **Stale CSV warning text.** The CSV banner said "PDF/Image import is not part of
+   this phase," which now contradicts Batch 9B-FE.
+   - **Fix:** rewrote that line to "CSV and Excel (.xlsx) files create draft invoice
+     rows here. For PDF or image invoices, switch to the **PDF / Image (OCR)**
+     channel above — that path is review/draft only and never posts invoices or
+     allocates receipts." CSV mode still states it creates draft rows only; OCR mode
+     (persistent safety banner) states it is review/draft only with no posting/
+     allocation.
+3. **Evidence over-claimed route integration.** `GET /imports/:batchId/ocr-review`
+   was listed as integrated but was not actually called.
+   - **Fix chosen: Option A (integrate the route).** Added `refreshReview` to
+     `useOcrImport`, which calls `GET /imports/:batchId/ocr-review` through the shared
+     authenticated (tenant-scoped) API client and re-syncs batch/file/row. Exposed a
+     **Refresh** button on the review step. No backend change. All six routes are now
+     genuinely integrated.
+
+## Files changed (Fix1)
+
+- `frontend/src/app/(dashboard)/invoices/import/page.tsx` — CSV/XLSX section wrapped
+  in `mode === "csv"`; stale PDF/Image line rewritten.
+- `frontend/src/hooks/use-ocr-import.ts` — added `refreshReview` (GET ocr-review) and
+  `isRefreshing` state.
+- `frontend/src/components/features/imports/ocr-import-flow.tsx` — added the
+  **Refresh** button on the review step; removed an unused destructured value.
+- `docs/evidence/SPRINT_BATCH_9B_FE_OCR_IMPORT_FRONTEND_EVIDENCE.md` — this addendum
+  and the corrected route-integration statement.
+
+## Checks (Fix1)
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | PASS (exit 0) |
+| `npm run build` | PASS (exit 0, 25 routes; `/invoices/import` 13.7 kB) |
+| `git diff --check` | PASS (only benign LF→CRLF notices) |
+| `/allocations/auto` frontend call | NONE added |
+| `NEXT_PUBLIC_* OCR/provider` key | NONE |
+| Dashboard mock/static data | NONE |
+| Unsafe wording (auto-allocate / auto-post / invoice posted after OCR / receipt allocated after OCR) | NONE |
+| Real PDF/image files tracked | NONE |
+| Secrets / JWTs | NONE |
+| Mojibake / encoding | clean |
+
+## Safety confirmations (Fix1)
+
+- No backend financial logic changed; no migration; no deploy; no data action.
+- No `/allocations/auto` call added; it remains backend-disabled (403
+  `AUTO_ALLOCATION_DISABLED`).
+- No auto-allocation / auto-posting / receipt-allocation wording or logic.
+- No direct financial-mutation UI; approving still creates draft data only, and the
+  approved screen still shows "Invoice posted: No / Receipt allocated: No".
+- No production OCR provider key added.
+- No dashboard mock data.
+- CSV/XLSX import remains accessible (CSV/Excel channel, unchanged wizard).
+- OCR mode no longer renders the CSV/XLSX wizard.
+- Receipt import flow unchanged.
+
+Batch 9B-FE-Fix1 result: PASS.
