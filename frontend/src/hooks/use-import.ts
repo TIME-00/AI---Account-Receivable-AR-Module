@@ -47,7 +47,11 @@ export type ImportBatchStatus =
   | "Executing"
   | "Completed"
   | "Failed"
-  | "Cancelled";
+  | "Cancelled"
+  // Batch 9B OCR/PDF-image intake lifecycle (review/draft only — never posts)
+  | "NeedsReview"
+  | "ApprovedDraft"
+  | "Rejected";
 
 export interface ImportRow {
   id: string;
@@ -99,7 +103,11 @@ export type ImportRowStatus =
   | "Created"
   | "Posted"
   | "Allocated"
-  | "Unmatched";
+  | "Unmatched"
+  // Batch 9B OCR/PDF-image intake row lifecycle (review/draft only)
+  | "NeedsReview"
+  | "ApprovedDraft"
+  | "Rejected";
 
 export interface ImportRowError {
   field?: string;

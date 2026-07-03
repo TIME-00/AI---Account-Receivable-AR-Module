@@ -22,12 +22,17 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { ReviewActions } from "@/components/features/imports/review-actions";
+import { OcrImportFlow } from "@/components/features/imports/ocr-import-flow";
 import { cn, formatDate } from "@/lib/utils";
 import {
   Upload, FileText, ChevronRight, CheckCircle2,
   XCircle, AlertTriangle, Loader2, ArrowLeft, RotateCcw,
   FileSpreadsheet, Info, Copy, Eye, Check, Table2, Zap,
+  ScanLine,
 } from "lucide-react";
+
+// Import channel: existing CSV/Excel wizard vs. Batch 9B PDF/Image OCR intake.
+type ImportMode = "csv" | "ocr";
 
 // ─── CSV Template ───────────────────────────────────────────────────────────
 
@@ -91,6 +96,7 @@ export default function InvoiceImportPage() {
   const [dragActive, setDragActive] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [mode, setMode] = useState<ImportMode>("csv");
 
   // ── File handling ────────────────────────────────────────────────────
 
@@ -168,16 +174,47 @@ export default function InvoiceImportPage() {
             Invoice Import
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            CSV/Excel Invoice Import — Draft Only
+            {mode === "csv"
+              ? "CSV/Excel Invoice Import — Draft Only"
+              : "PDF/Image OCR Invoice Intake — Review & Draft Only"}
           </p>
         </div>
-        {step !== "upload" && step !== "result" && (
+        {mode === "csv" && step !== "upload" && step !== "result" && (
           <LoadingButton variant="ghost" size="sm" onClick={reset}>
             <RotateCcw className="h-3.5 w-3.5" />
             Start Over
           </LoadingButton>
         )}
       </div>
+
+      {/* Import channel toggle: existing CSV/Excel wizard vs. PDF/Image OCR intake */}
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+        <button
+          type="button"
+          onClick={() => setMode("csv")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            mode === "csv" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          <FileSpreadsheet className="h-4 w-4" />
+          CSV / Excel
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("ocr")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            mode === "ocr" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          <ScanLine className="h-4 w-4" />
+          PDF / Image (OCR)
+        </button>
+      </div>
+
+      {/* PDF/Image OCR intake (Batch 9B) — review/draft only, never posts */}
+      {mode === "ocr" && <OcrImportFlow />}
 
       {/* Draft-Only Warning Banner */}
       <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4">
