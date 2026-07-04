@@ -85,6 +85,9 @@ export type OcrImportStep = "select" | "review" | "approved";
 /** File classification for the multipart `file_type` field. */
 export type OcrFileType = "pdf" | "image";
 
+/** Import channel for PDF/Image intake. Both are review/draft only. */
+export type OcrImportType = "invoice" | "receipt";
+
 // ─── Client-side pre-validation (UX only — backend is authoritative) ────────
 
 const PDF_MAX_BYTES = 10 * 1024 * 1024; // mirrors backend PDF cap
@@ -189,6 +192,27 @@ export const OCR_INVOICE_FIELDS: OcrReviewFieldDef[] = [
   { key: "tax_rate", label: "Tax Rate (%)", type: "number", hint: "0–100; 0 for non-taxable" },
 ];
 
+// Receipt intake review field set (Batch 9C). Mirrors the CSV receipt columns
+// but is deliberately INTAKE-ONLY: it excludes allocation fields
+// (invoice_reference, allocation_amount) so this channel carries no allocation
+// intent. Reviewed values are stored as freeform review metadata only — nothing
+// is posted, allocated, or turned into a final financial record here.
+export const OCR_RECEIPT_FIELDS: OcrReviewFieldDef[] = [
+  { key: "customer_name", label: "Customer Name", type: "text", hint: "Existing visible customer or new customer name" },
+  { key: "receipt_date", label: "Receipt Date", type: "date", hint: "YYYY-MM-DD" },
+  { key: "currency", label: "Currency", type: "text", hint: "3-letter ISO code (e.g. SGD, MYR)" },
+  { key: "receipt_reference", label: "Receipt Reference", type: "text", hint: "Bank transfer / cheque reference" },
+  { key: "payment_method", label: "Payment Method", type: "text", hint: "CHQ, TT, CASH, CC, GIRO, OFST, ONLN" },
+  { key: "amount", label: "Amount", type: "number", hint: "Positive receipt amount" },
+  { key: "bank_account_code", label: "Bank Account No.", type: "text", hint: "From bank_accounts.account_no" },
+  { key: "remarks", label: "Remarks", type: "text", hint: "Optional internal note" },
+];
+
+/** Return the review field set for the given intake type. */
+export function ocrFieldsFor(importType: OcrImportType): OcrReviewFieldDef[] {
+  return importType === "receipt" ? OCR_RECEIPT_FIELDS : OCR_INVOICE_FIELDS;
+}
+
 /** Extract the raw (OCR-suggested) value for a field, if any was captured. */
 export function rawOcrValue(row: ImportRow | null, key: string): string | null {
   const ocrFields = row?.raw_data?.ocr_fields;
@@ -211,8 +235,12 @@ export function reviewedOcrValue(row: ImportRow | null, key: string): string {
 
 // ─── Hook ────────────────────────────────────────────────────────────────
 
-export function useOcrImport() {
+export function useOcrImport(importType: OcrImportType = "invoice") {
   const api = useApi();
+
+  // Human-facing noun for type-aware copy. No user-facing "OCR" wording.
+  const entityLabel = importType === "receipt" ? "receipt" : "invoice";
+  const EntityLabel = importType === "receipt" ? "Receipt" : "Invoice";
 
   const [step, setStep] = useState<OcrImportStep>("select");
   const [batch, setBatch] = useState<ImportBatch | null>(null);
@@ -252,9 +280,9 @@ export function useOcrImport() {
       try {
         const formData = new FormData();
         formData.append("file", rawFile);
-        formData.append("import_type", "invoice");
+        formData.append("import_type", importType);
         formData.append("file_type", check.fileType);
-        formData.append("batch_name", `PDF/Image Invoice Import — ${rawFile.name}`);
+        formData.append("batch_name", `PDF/Image ${EntityLabel} Import — ${rawFile.name}`);
 
         const res = await api.rawFetch("/imports/ocr/upload", {
           method: "POST",
@@ -280,7 +308,7 @@ export function useOcrImport() {
         setRow(payload.row);
         setStep("review");
         toast.success("File Uploaded", {
-          description: "Review the imported invoice fields manually before approving a draft.",
+          description: `Review the imported ${entityLabel} fields manually before approving a draft.`,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Upload failed";
@@ -290,7 +318,7 @@ export function useOcrImport() {
         setIsUploading(false);
       }
     },
-    [api],
+    [api, importType, entityLabel, EntityLabel],
   );
 
   /**
@@ -417,7 +445,7 @@ export function useOcrImport() {
         if (result?.row) setRow(result.row);
         setStep("approved");
         toast.success("Approved as Draft", {
-          description: "Draft import data was created. No invoice was posted and no receipt was allocated.",
+          description: `Draft import data was created. No ${entityLabel} was posted and no allocation was made.`,
         });
         return result;
       } catch (err) {
@@ -428,7 +456,7 @@ export function useOcrImport() {
         setIsApproving(false);
       }
     },
-    [api, batch, row],
+    [api, batch, row, entityLabel],
   );
 
   const reset = useCallback(() => {

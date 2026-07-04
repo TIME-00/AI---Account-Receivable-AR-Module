@@ -18,6 +18,7 @@ import {
   Info,
   Loader2,
   RotateCcw,
+  ScanLine,
   Table2,
   Upload,
   Wallet,
@@ -36,7 +37,11 @@ import {
 import { LoadingButton } from "@/components/ui/loading-button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ReviewActions } from "@/components/features/imports/review-actions";
+import { OcrImportFlow } from "@/components/features/imports/ocr-import-flow";
 import { cn, formatDate } from "@/lib/utils";
+
+// Import channel: existing CSV/Excel wizard vs. Batch 9C PDF/Image intake.
+type ImportMode = "csv" | "ocr";
 
 const RECEIPT_COLUMNS = [
   { name: "customer_code", required: false, description: "Optional existing visible customer code. Unknown codes are rejected." },
@@ -99,6 +104,7 @@ export default function ReceiptImportPage() {
   const [dragActive, setDragActive] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [mode, setMode] = useState<ImportMode>("csv");
   // Batch 6C UX Fix: Auto-Post & Allocate defaults ON for receipts (frontend
   // default only; execution still runs through verified backend RPCs).
   const [autoPost, setAutoPost] = useState(true);
@@ -145,9 +151,13 @@ export default function ReceiptImportPage() {
             <FileSpreadsheet className="h-6 w-6 text-emerald-500" />
             Receipt Import
           </h1>
-          <p className="mt-1 text-sm text-slate-500">CSV/Excel Receipt Import — Auto-Post &amp; Allocate is ON by default (turn it off on the Validate step for draft-only)</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {mode === "csv"
+              ? "CSV/Excel Receipt Import — Auto-Post & Allocate is ON by default (turn it off on the Validate step for draft-only)"
+              : "PDF/Image Receipt Import — Review & Draft Only (no posting, no allocation, no final financial records)"}
+          </p>
         </div>
-        {step !== "upload" && step !== "result" && (
+        {mode === "csv" && step !== "upload" && step !== "result" && (
           <LoadingButton variant="ghost" size="sm" onClick={reset}>
             <RotateCcw className="h-3.5 w-3.5" />
             Start Over
@@ -155,6 +165,56 @@ export default function ReceiptImportPage() {
         )}
       </div>
 
+      {/* Import channel toggle: existing CSV/Excel wizard vs. PDF/Image intake */}
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+        <button
+          type="button"
+          onClick={() => setMode("csv")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            mode === "csv" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
+          )}
+        >
+          <FileSpreadsheet className="h-4 w-4" />
+          CSV / Excel
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("ocr")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            mode === "ocr" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
+          )}
+        >
+          <ScanLine className="h-4 w-4" />
+          PDF/Image Import
+        </button>
+      </div>
+
+      {/* PDF/Image receipt intake (Batch 9C) — review/draft only, never posts or
+          allocates. Mutually exclusive with the CSV/XLSX wizard below. */}
+      {mode === "ocr" && (
+        <>
+          <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-blue-50 p-4">
+            <div className="flex items-start gap-3">
+              <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-indigo-500" />
+              <div className="text-sm">
+                <p className="font-semibold text-indigo-800">Receipt PDF/Image Import is intake / review-draft only</p>
+                <ul className="mt-1 space-y-0.5 text-indigo-700">
+                  <li>• It <strong>does not post receipts</strong>.</li>
+                  <li>• It <strong>does not allocate to invoices</strong>.</li>
+                  <li>• It <strong>creates no final financial records</strong>.</li>
+                  <li>• To post and allocate receipts, use the <strong>CSV / Excel</strong> channel.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <OcrImportFlow importType="receipt" />
+        </>
+      )}
+
+      {mode === "csv" && (
+        <>
       <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4">
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-500" />
@@ -163,7 +223,7 @@ export default function ReceiptImportPage() {
             <ul className="mt-1 space-y-0.5 text-amber-700">
               <li><strong>Auto-Post &amp; Allocate is enabled by default.</strong> On execution, valid receipts are posted and exact invoice references are allocated using verified financial RPCs — this is not a draft-only import.</li>
               <li>To create <strong>Draft</strong> receipts only, turn off <strong>Auto-Post &amp; Allocate</strong> on the Validate step before executing.</li>
-              <li>CSV and Excel (.xlsx) files are supported. PDF/Image import is not available for receipts.</li>
+              <li>CSV and Excel (.xlsx) files are supported here. For a receipt <strong>PDF or image</strong>, switch to the <strong>PDF/Image Import</strong> channel above — that path is review/draft only and never posts receipts or allocates to invoices.</li>
             </ul>
           </div>
         </div>
@@ -410,6 +470,8 @@ export default function ReceiptImportPage() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

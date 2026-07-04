@@ -16,9 +16,11 @@ import { toast } from "sonner";
 import {
   useOcrImport,
   checkOcrFile,
-  OCR_INVOICE_FIELDS,
+  ocrFieldsFor,
   rawOcrValue,
   reviewedOcrValue,
+  type OcrImportType,
+  type OcrReviewFieldDef,
 } from "@/hooks/use-ocr-import";
 import { useUserRole } from "@/hooks/use-user-role";
 import { LoadingButton } from "@/components/ui/loading-button";
@@ -51,12 +53,18 @@ function StatusPill({ tone, children }: { tone: PillTone; children: React.ReactN
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function OcrImportFlow() {
+export function OcrImportFlow({ importType = "invoice" }: { importType?: OcrImportType }) {
   const {
     step, batch, file, row, lowConfidence,
     isUploading, isSaving, isApproving, isPreviewLoading, isRefreshing, error,
     uploadFile, startOcr, openPreview, refreshReview, saveReview, approveDraft, reset,
-  } = useOcrImport();
+  } = useOcrImport(importType);
+
+  // Type-aware copy. No user-facing "OCR" wording anywhere below.
+  const isReceipt = importType === "receipt";
+  const entityLabel = isReceipt ? "receipt" : "invoice";
+  const EntityLabel = isReceipt ? "Receipt" : "Invoice";
+  const fields = ocrFieldsFor(importType);
 
   const {
     isResolved, isLoading: roleLoading, isReadOnly, isAuditor, roles, capabilities,
@@ -106,7 +114,7 @@ export function OcrImportFlow() {
   return (
     <div className="space-y-4">
       {/* Persistent safety banner — visible at every step */}
-      <SafetyBanner />
+      <SafetyBanner entityLabel={entityLabel} />
 
       {/* Role notices */}
       {!roleLoading && isAuditor && (
@@ -167,7 +175,7 @@ export function OcrImportFlow() {
               </div>
               <div>
                 <p className="text-lg font-semibold text-slate-700">
-                  {dragActive ? "Drop document here" : "Drag & drop an invoice PDF or image"}
+                  {dragActive ? "Drop document here" : `Drag & drop a ${entityLabel} PDF or image`}
                 </p>
                 <p className="mt-1 text-sm text-slate-500">
                   or <span className="text-brand-600 font-medium">click to browse</span>
@@ -270,7 +278,7 @@ export function OcrImportFlow() {
                 <p className="font-medium text-amber-800">Manual review required</p>
                 <p className="mt-0.5">
                   Fields are not auto-filled. Open the document preview, then enter and review each
-                  invoice value below before approving a draft.
+                  {" "}{entityLabel} value below before approving a draft.
                 </p>
                 <button
                   type="button"
@@ -287,6 +295,8 @@ export function OcrImportFlow() {
           <ReviewEditor
             key={row.id}
             row={row}
+            fields={fields}
+            entityLabel={entityLabel}
             canReview={canReview}
             canApprove={canApprove}
             isSaving={isSaving}
@@ -306,24 +316,24 @@ export function OcrImportFlow() {
           <div>
             <h2 className="text-xl font-bold text-slate-800">Approved as Draft Import</h2>
             <p className="mt-1 text-sm text-slate-500 max-w-lg mx-auto">
-              The reviewed invoice values were saved as draft import data. This did <strong>not</strong> post
-              an invoice and did <strong>not</strong> allocate a receipt. Any posting happens later through the
-              normal invoice workflow.
+              The reviewed {entityLabel} values were saved as draft import data. This did <strong>not</strong> post
+              a {entityLabel}, did <strong>not</strong> allocate anything, and created <strong>no</strong> final
+              financial records. Any posting happens later through the normal {entityLabel} workflow.
             </p>
           </div>
           <div className="mx-auto max-w-md rounded-xl border border-slate-200 divide-y divide-slate-100 text-left">
             <SummaryRow label="Batch" value={batch.id} mono />
             <SummaryRow label="Status" value={batch.status} />
-            <SummaryRow label="Invoice posted" value="No" />
-            <SummaryRow label="Receipt allocated" value="No" />
+            <SummaryRow label={`${EntityLabel} posted`} value="No" />
+            <SummaryRow label="Allocated" value="No" />
           </div>
           <div className="flex items-center justify-center gap-3 pt-1">
             <LoadingButton variant="secondary" size="md" onClick={reset}>
               <RotateCcw className="h-4 w-4" /> Import another document
             </LoadingButton>
-            <Link href="/invoices">
+            <Link href={isReceipt ? "/receipts" : "/invoices"}>
               <LoadingButton variant="primary" size="md">
-                <Eye className="h-4 w-4" /> View invoices
+                <Eye className="h-4 w-4" /> View {isReceipt ? "receipts" : "invoices"}
               </LoadingButton>
             </Link>
           </div>
@@ -337,6 +347,8 @@ export function OcrImportFlow() {
 
 function ReviewEditor({
   row,
+  fields,
+  entityLabel,
   canReview,
   canApprove,
   isSaving,
@@ -345,6 +357,8 @@ function ReviewEditor({
   onApprove,
 }: {
   row: import("@/hooks/use-import").ImportRow;
+  fields: OcrReviewFieldDef[];
+  entityLabel: string;
   canReview: boolean;
   canApprove: boolean;
   isSaving: boolean;
@@ -354,7 +368,7 @@ function ReviewEditor({
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    for (const f of OCR_INVOICE_FIELDS) initial[f.key] = reviewedOcrValue(row, f.key);
+    for (const f of fields) initial[f.key] = reviewedOcrValue(row, f.key);
     return initial;
   });
   const [note, setNote] = useState<string>("");
@@ -362,7 +376,7 @@ function ReviewEditor({
   // Re-seed values when the backend returns an updated row (e.g. after save).
   useEffect(() => {
     const next: Record<string, string> = {};
-    for (const f of OCR_INVOICE_FIELDS) next[f.key] = reviewedOcrValue(row, f.key);
+    for (const f of fields) next[f.key] = reviewedOcrValue(row, f.key);
     setValues(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row.id]);
@@ -395,7 +409,7 @@ function ReviewEditor({
     <div className="glass-card p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-base font-semibold text-slate-800">Review invoice fields</h3>
+          <h3 className="text-base font-semibold text-slate-800">Review {entityLabel} fields</h3>
           <p className="text-xs text-slate-500">
             Compare any raw extracted value with your reviewed value. Saving records draft review data only.
           </p>
@@ -417,7 +431,7 @@ function ReviewEditor({
           <div className="px-3 py-2">Reviewed value</div>
         </div>
         <div className="divide-y divide-slate-100">
-          {OCR_INVOICE_FIELDS.map((f) => {
+          {fields.map((f) => {
             const raw = rawOcrValue(row, f.key);
             return (
               <div key={f.key} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1.4fr] items-center gap-1 px-3 py-2.5">
@@ -519,7 +533,7 @@ function ReviewEditor({
 
 // ─── Small presentational helpers ───────────────────────────────────────────
 
-function SafetyBanner() {
+function SafetyBanner({ entityLabel }: { entityLabel: string }) {
   return (
     <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-blue-50 p-4">
       <div className="flex items-start gap-3">
@@ -527,8 +541,8 @@ function SafetyBanner() {
         <div className="text-sm">
           <p className="font-semibold text-indigo-800">PDF/Image import — review &amp; draft only</p>
           <ul className="mt-1 space-y-0.5 text-indigo-700">
-            <li>• PDF/Image import creates <strong>reviewable draft data only</strong>.</li>
-            <li>• It <strong>does not post invoices</strong>, <strong>allocate receipts</strong>, or create final financial records.</li>
+            <li>• PDF/Image {entityLabel} import creates <strong>reviewable draft data only</strong>.</li>
+            <li>• It <strong>does not post {entityLabel}s</strong>, <strong>does not allocate</strong>, and does <strong>not</strong> create final financial records.</li>
             <li>• Please review and approve the imported fields before creating draft data.</li>
             <li>• Supported formats: PDF, PNG, JPG/JPEG, WebP. SVG is not supported.</li>
           </ul>
