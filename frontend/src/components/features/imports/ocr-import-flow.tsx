@@ -1,11 +1,12 @@
 // ============================================================================
-// TSH Synergy AR — OCR / PDF-Image Invoice Import Flow (Batch 9B-FE)
+// TSH Synergy AR — OCR / PDF-Image Import Flow (Batch 9B-FE invoice, Batch 9C receipt)
 //
-// Review/draft-only intake UI for invoice PDFs and images. This component makes
-// the safety posture explicit at every step: OCR/manual intake extracts and
-// reviews values only — it does NOT post invoices and does NOT allocate
-// receipts. Role-aware controls come from the real backend /auth/me capability
-// response (via useUserRole), never from demo/env assumptions.
+// Shared review/draft-only intake UI for PDF/image documents, parametrized by
+// `importType` ("invoice" | "receipt"). This component makes the safety posture
+// explicit at every step: manual intake extracts and reviews values only — it
+// does NOT post invoices/receipts, does NOT allocate, and creates no final
+// financial records. Role-aware controls come from the real backend /auth/me
+// capability response (via useUserRole), never from demo/env assumptions.
 // ============================================================================
 
 "use client";
@@ -483,8 +484,8 @@ function ReviewEditor({
       {!isApprovedDraft && (
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <p className="text-xs text-slate-500 max-w-md">
-            Approving creates <strong>draft import data only</strong> — it does not post the invoice or
-            allocate a receipt.
+            Approving creates <strong>draft import data only</strong> — it does not post the {entityLabel},
+            does not allocate, and does not create final financial records.
           </p>
           <div className="flex items-center gap-2">
             <LoadingButton

@@ -134,7 +134,40 @@ Diffstat: `4 files changed, 136 insertions(+), 32 deletions(-)` (frontend source
 
 ---
 
-## 9. Next step
+## 9. Post-review copy fix (Codex verdict: PASS WITH MINOR NOTES)
 
-Codex post-implementation review (Gate 2 for the frontend), then user approval (Gate 3) before any
-staging/production activity. No deployment or smoke has been performed.
+Codex post-implementation review returned **PASS WITH MINOR NOTES** (no blocking issues) and flagged
+one visible approval-warning string in `ocr-import-flow.tsx` that still used invoice-specific wording
+("does not post the invoice or allocate a receipt"), which would leak into receipt mode.
+
+**Fix (copy-only, type-aware):**
+
+- `ocr-import-flow.tsx` (ReviewEditor approval warning): now renders
+  "Approving creates **draft import data only** — it does not post the *{entityLabel}*, does not
+  allocate, and does not create final financial records." This reads correctly for both invoice mode
+  ("does not post the invoice…") and receipt mode ("does not post the receipt…").
+- `ocr-import-flow.tsx` header comment generalized to note the component is a shared invoice/receipt
+  flow parametrized by `importType` (internal comment only — no symbol/route/table rename).
+
+No functional, backend, API, or financial behavior changed.
+
+**Re-verification after the fix:**
+
+| Check / scan | Result |
+| --- | --- |
+| `npx tsc --noEmit` | **PASS** (`TSC_EXIT=0`) |
+| `npm run build` | **PASS** (`BUILD_EXIT=0`, 25 routes) |
+| `git diff --check` | **PASS** (benign LF→CRLF only) |
+| Receipt-leak copy (`does not post the invoice` / `invoice posted`) in flow | **NONE FOUND** |
+| Stale "not available for receipts" | **NONE FOUND** |
+| `Planned (Batch 9C)` in active UI | **NONE FOUND** |
+| Auto-Allocation status | **Disabled** |
+| New `/allocations/auto` reference | **NONE** |
+| User-facing OCR wording in flow | **NONE FOUND** |
+
+---
+
+## 10. Next step
+
+User approval (Gate 3) before any staging/production activity. No deployment or smoke has been
+performed.
