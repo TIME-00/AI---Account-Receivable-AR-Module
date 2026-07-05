@@ -7,7 +7,7 @@ import {
   reconcileReferenceRate,
   sanitizeErrorSummary,
 } from './validation.ts';
-import { defaultMockPairs } from './service.ts';
+import { defaultMockPairs, isLeaseLostError } from './service.ts';
 import { FxRatesReadService } from '../fx-rates/service.ts';
 import { ValidationError } from '../_shared/errors.ts';
 
@@ -233,4 +233,47 @@ Deno.test('migration contains RLS, active-version uniqueness, and no exchange_ra
   assert(!/INSERT\s+INTO\s+(public\.)?exchange_rates/i.test(migration));
   assert(!/UPDATE\s+(public\.)?exchange_rates/i.test(migration));
   assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
+});
+
+Deno.test('Fix1 migration defines persistent lifecycle lease and owner-checked RPCs', async () => {
+  const migrationUrl = new URL('../../../../database/018_fx_reference_concurrency_hardening.sql', import.meta.url);
+  const migration = await Deno.readTextFile(migrationUrl);
+
+  assert(migration.includes('CREATE TABLE IF NOT EXISTS public.fx_sync_leases'));
+  assert(migration.includes('CONSTRAINT pk_fx_sync_leases PRIMARY KEY (company_id, provider)'));
+  assert(migration.includes('owner_run_id UUID NULL REFERENCES public.fx_sync_runs(id)'));
+  assert(migration.includes('lease_token UUID NOT NULL'));
+  assert(migration.includes('lease_expires_at TIMESTAMPTZ NOT NULL'));
+  assert(migration.includes('CREATE OR REPLACE FUNCTION public.fx_acquire_sync_lease'));
+  assert(migration.includes('ON CONFLICT (company_id, provider) DO UPDATE'));
+  assert(migration.includes('WHERE public.fx_sync_leases.lease_expires_at <= v_now'));
+  assert(migration.includes('FX_SYNC_LEASE_EXPIRED'));
+  assert(migration.includes('CREATE OR REPLACE FUNCTION public.fx_renew_sync_lease'));
+  assert(migration.includes('CREATE OR REPLACE FUNCTION public.fx_complete_sync_run'));
+  assert(migration.includes('AND owner_run_id = p_owner_run_id'));
+  assert(migration.includes('AND lease_token = p_lease_token'));
+  assert(migration.includes('AND lease_expires_at > v_now'));
+  assert(migration.includes('DELETE FROM public.fx_sync_leases'));
+});
+
+Deno.test('Fix1 migration hardens reference upsert with owner fencing and in-RPC serialization', async () => {
+  const migrationUrl = new URL('../../../../database/018_fx_reference_concurrency_hardening.sql', import.meta.url);
+  const migration = await Deno.readTextFile(migrationUrl);
+
+  assert(migration.includes('DROP FUNCTION IF EXISTS public.fx_try_sync_lock'));
+  assert(migration.includes('DROP FUNCTION IF EXISTS public.fx_upsert_reference_rate'));
+  assert(migration.includes('p_lease_token UUID'));
+  assert(migration.includes('FX_SYNC_LEASE_LOST'));
+  assert(migration.includes('pg_advisory_xact_lock'));
+  assert(migration.includes('FOR UPDATE'));
+  assert(migration.includes("status = 'Superseded'"));
+  assert(migration.includes('supersedes_rate_id'));
+  assert(!/INSERT\s+INTO\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/UPDATE\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
+});
+
+Deno.test('lease-lost errors are detected and fail closed', () => {
+  assert(isLeaseLostError(new Error('FX_SYNC_LEASE_LOST: current sync run lost ownership')));
+  assert(!isLeaseLostError(new Error('ordinary pair validation failure')));
 });

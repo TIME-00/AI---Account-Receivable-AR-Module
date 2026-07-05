@@ -63,6 +63,17 @@ export interface FxSyncRunRow {
   status: FxSyncStatus;
 }
 
+export interface FxSyncLeaseRun {
+  id: string;
+  company_id: string;
+  provider: string;
+  source_host: string;
+  effective_date: string;
+  lease_token: string;
+  lease_expires_at: string;
+  recovered_run_id: string | null;
+}
+
 export interface FxReferenceRateRow {
   id: string;
   company_id: string;
