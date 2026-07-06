@@ -67,7 +67,7 @@ to proceed **in parallel and ahead of** the provider decision (DG-1) and real pr
 9D-A → 9D-C (governance, parallel/early) → DG-1 → 9D-B → 9D-D → 9D-E
 ```
 
-This original ordering is **retained for history** and is **superseded** by §0.3 below.
+This original ordering is **retained for history** and is **superseded by the revised canonical order below** (§0.2).
 
 **Revised canonical order (Rev 2 — CURRENT).**
 
@@ -758,8 +758,10 @@ report totals.
 > implemented, and no provider API is called.** The evaluation criteria below still apply to that
 > decision.
 
-**DG-1 remains a dedicated gate before 9D-B.** No provider is selected in this amendment, and **no
-provider API is called.**
+**DG-1 remains a dedicated gate before 9D-B.** No provider decision is formally locked in this
+amendment, and **no provider API is called.** (A **proposed** DG-1 decision — Frankfurter v2 / initial
+provider `MAS` — exists in §0.3, pending Codex review and user approval; it is not yet locked, not
+implemented, and no provider API has been called.)
 
 - **Blocking for:** real provider integration, external host, real external calls, credentials,
   real-provider adapter, provider-specific retry, cron/scheduled real sync, production provider setup and
