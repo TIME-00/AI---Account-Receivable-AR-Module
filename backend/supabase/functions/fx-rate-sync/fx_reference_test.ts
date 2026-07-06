@@ -301,6 +301,57 @@ Deno.test('Fix2 migration transactionally fences upserts with a locked live leas
   assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
 });
 
+Deno.test('Fix3 migration explicitly revokes anon helper RPC execution', async () => {
+  const migrationUrl = new URL('../../../../database/020_fx_helper_rpc_privilege_hardening.sql', import.meta.url);
+  const migration = await Deno.readTextFile(migrationUrl);
+
+  const helperSignatures = [
+    {
+      name: 'fx_acquire_sync_lease',
+      signature: 'UUID, TEXT, TEXT, DATE, INTEGER, UUID, INTEGER',
+    },
+    {
+      name: 'fx_renew_sync_lease',
+      signature: 'UUID, TEXT, UUID, UUID, INTEGER',
+    },
+    {
+      name: 'fx_complete_sync_run',
+      signature: 'UUID, TEXT, UUID, UUID, TEXT, INTEGER, INTEGER, TEXT, TEXT',
+    },
+    {
+      name: 'fx_upsert_reference_rate',
+      signature: 'UUID, CHAR(3), CHAR(3), NUMERIC, DATE, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, UUID, UUID',
+    },
+  ];
+
+  for (const helper of helperSignatures) {
+    assert(
+      migration.includes(`REVOKE EXECUTE ON FUNCTION public.${helper.name}(\n  ${helper.signature}\n) FROM PUBLIC;`),
+      `${helper.name} must revoke EXECUTE from PUBLIC`,
+    );
+    assert(
+      migration.includes(`REVOKE EXECUTE ON FUNCTION public.${helper.name}(\n  ${helper.signature}\n) FROM anon;`),
+      `${helper.name} must revoke EXECUTE from anon`,
+    );
+    assert(
+      migration.includes(`REVOKE EXECUTE ON FUNCTION public.${helper.name}(\n  ${helper.signature}\n) FROM authenticated;`),
+      `${helper.name} must revoke EXECUTE from authenticated`,
+    );
+    assert(
+      migration.includes(`GRANT EXECUTE ON FUNCTION public.${helper.name}(\n  ${helper.signature}\n) TO service_role;`),
+      `${helper.name} must grant EXECUTE to service_role`,
+    );
+  }
+
+  assert(!migration.includes('fx_try_sync_lock'));
+  assert(!/CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.fx_upsert_reference_rate/i.test(migration));
+  assert(!/INSERT\s+INTO\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/UPDATE\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/allocation_details|journal_entries|journal_entry_lines|allocated_amount|unallocated_amount|allocations\/auto/i.test(migration));
+  assert(!/https?:\/\/|fetch\(|cron|scheduler|frankfurter/i.test(migration));
+});
+
 Deno.test('lease-lost errors are detected and fail closed', () => {
   assert(isLeaseLostError(new Error('FX_SYNC_LEASE_LOST: current sync run lost ownership')));
   assert(!isLeaseLostError(new Error('ordinary pair validation failure')));
