@@ -54,6 +54,12 @@ export class FxRateSyncService {
       attemptedPairCount: pairs.length,
     });
 
+    let succeeded = 0;
+    let failed = 0;
+    let inserted = 0;
+    let unchanged = 0;
+    let corrected = 0;
+
     try {
       await this.renewLeaseOrFail(run);
       const fetchResult = await provider.fetchRates({
@@ -63,11 +69,7 @@ export class FxRateSyncService {
       });
       await this.renewLeaseOrFail(run);
 
-      let succeeded = 0;
-      let failed = fetchResult.failures.length;
-      let inserted = 0;
-      let unchanged = 0;
-      let corrected = 0;
+      failed = fetchResult.failures.length;
       const errors: string[] = fetchResult.failures.map((failure) =>
         `${failure.pair.fromCurrency}/${failure.pair.toCurrency}: ${failure.category}`);
 
@@ -112,10 +114,11 @@ export class FxRateSyncService {
       };
     } catch (error) {
       try {
+        const failureCounts = calculateTerminalFailureCounts(pairs.length, succeeded, failed);
         await this.completeRun(run, {
           status: 'Failed',
-          succeededPairCount: 0,
-          failedPairCount: pairs.length,
+          succeededPairCount: failureCounts.succeededPairCount,
+          failedPairCount: failureCounts.failedPairCount,
           errorCategory: error instanceof BusinessError ? error.code : isLeaseLostError(error) ? 'FX_SYNC_LEASE_LOST' : 'SYNC_ERROR',
           errorSummary: sanitizeErrorSummary(error instanceof Error ? error.message : error),
         });
@@ -286,4 +289,20 @@ export function isLeaseLostError(error: unknown): boolean {
   if (error instanceof BusinessError && error.code === 'FX_SYNC_LEASE_LOST') return true;
   const message = error instanceof Error ? error.message : String(error ?? '');
   return message.includes('FX_SYNC_LEASE_LOST');
+}
+
+export function calculateTerminalFailureCounts(
+  attemptedPairCount: number,
+  succeededPairCount: number,
+  failedPairCountSoFar: number,
+): { succeededPairCount: number; failedPairCount: number } {
+  const attempted = Math.max(0, attemptedPairCount);
+  const succeeded = Math.min(Math.max(0, succeededPairCount), attempted);
+  const failedSoFar = Math.min(Math.max(0, failedPairCountSoFar), attempted - succeeded);
+  const unprocessed = Math.max(0, attempted - succeeded - failedSoFar);
+
+  return {
+    succeededPairCount: succeeded,
+    failedPairCount: failedSoFar + unprocessed,
+  };
 }

@@ -7,7 +7,7 @@ import {
   reconcileReferenceRate,
   sanitizeErrorSummary,
 } from './validation.ts';
-import { defaultMockPairs, isLeaseLostError } from './service.ts';
+import { calculateTerminalFailureCounts, defaultMockPairs, isLeaseLostError } from './service.ts';
 import { FxRatesReadService } from '../fx-rates/service.ts';
 import { ValidationError } from '../_shared/errors.ts';
 
@@ -273,7 +273,50 @@ Deno.test('Fix1 migration hardens reference upsert with owner fencing and in-RPC
   assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
 });
 
+Deno.test('Fix2 migration transactionally fences upserts with a locked live lease row', async () => {
+  const migrationUrl = new URL('../../../../database/019_fx_reference_transactional_fencing.sql', import.meta.url);
+  const migration = await Deno.readTextFile(migrationUrl);
+
+  assert(migration.includes('CREATE OR REPLACE FUNCTION public.fx_upsert_reference_rate'));
+  assert(migration.includes('p_lease_token UUID'));
+  assert(migration.includes('FROM public.fx_sync_leases'));
+  assert(migration.includes('owner_run_id = p_sync_run_id'));
+  assert(migration.includes('lease_token = p_lease_token'));
+  assert(migration.includes('lease_expires_at > v_now'));
+  assert(migration.includes('FOR UPDATE'));
+  assert(
+    migration.indexOf('FROM public.fx_sync_leases') < migration.indexOf('pg_advisory_xact_lock'),
+    'lease row must be locked before the rate-key advisory lock',
+  );
+  assert(
+    migration.indexOf('pg_advisory_xact_lock') < migration.indexOf('FROM public.fx_reference_rates'),
+    'rate-key advisory lock must be acquired before active rate row access',
+  );
+  assert(migration.includes('FX_SYNC_LEASE_LOST'));
+  assert(migration.includes("SET search_path = public"));
+  assert(migration.includes('REVOKE EXECUTE ON FUNCTION public.fx_upsert_reference_rate'));
+  assert(migration.includes('GRANT EXECUTE ON FUNCTION public.fx_upsert_reference_rate'));
+  assert(!/INSERT\s+INTO\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/UPDATE\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
+});
+
 Deno.test('lease-lost errors are detected and fail closed', () => {
   assert(isLeaseLostError(new Error('FX_SYNC_LEASE_LOST: current sync run lost ownership')));
   assert(!isLeaseLostError(new Error('ordinary pair validation failure')));
+});
+
+Deno.test('terminal failed runs preserve persisted successes and classify remaining pairs', () => {
+  assertEquals(calculateTerminalFailureCounts(5, 2, 1), {
+    succeededPairCount: 2,
+    failedPairCount: 3,
+  });
+  assertEquals(calculateTerminalFailureCounts(5, 0, 0), {
+    succeededPairCount: 0,
+    failedPairCount: 5,
+  });
+  assertEquals(calculateTerminalFailureCounts(5, 5, 0), {
+    succeededPairCount: 5,
+    failedPairCount: 0,
+  });
 });
