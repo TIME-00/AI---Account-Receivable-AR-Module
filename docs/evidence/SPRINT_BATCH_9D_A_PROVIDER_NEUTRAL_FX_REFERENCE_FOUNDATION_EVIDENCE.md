@@ -2,38 +2,56 @@
 
 ## Document status
 
-> This document records **three** remediation stages and preserves the full history of all of them:
+> This document records the **full remediation chain** and preserves the complete history of every
+> stage:
 >
-> 1. the **original Batch 9D-A implementation** (`48e93fdcccbc588ef8f235ba63fe117ecf7b8043`,
+> ```text
+> Original implementation → Post-Implementation Review
+>   → Fix1 → Post-Fix1 Review
+>   → Fix2 → Post-Fix2 Review → Staging Readiness
+>   → First Staging Runtime Attempt (FAIL)
+>   → Fix3
+> ```
+>
+> 1. **Original Batch 9D-A implementation** (`48e93fdcccbc588ef8f235ba63fe117ecf7b8043`,
 >    `feat(fx): add provider-neutral FX reference foundation`);
-> 2. **Batch 9D-A Fix1** (`a562aaff767568ebe8dabe16bba386b4434e686c`,
->    `fix(fx): harden sync lease and rate concurrency`), which remediates a defect found in the
->    Post-Implementation Review; and
-> 3. **Batch 9D-A Fix2** (`b551a694ee40ffc737214ed81be6385f1ce8e669`,
->    `fix(fx): fence reference writes by lease ownership`), which remediates a **remaining zombie-worker
->    / TOCTOU defect** found in the Post-Fix1 Review.
+> 2. **Fix1** (`a562aaff767568ebe8dabe16bba386b4434e686c`,
+>    `fix(fx): harden sync lease and rate concurrency`) — remediates a defect found in the
+>    Post-Implementation Review;
+> 3. **Fix2** (`b551a694ee40ffc737214ed81be6385f1ce8e669`,
+>    `fix(fx): fence reference writes by lease ownership`) — remediates a **zombie-worker / TOCTOU
+>    defect** found in the Post-Fix1 Review; and
+> 4. **Fix3** (`c516d8fdd86349c327bdd234dd4f0d15802ab9ba`,
+>    `fix(fx): revoke anon helper rpc execution`) — remediates a **runtime privilege-boundary defect**
+>    discovered during the **first staging runtime attempt, which returned `FAIL`**.
 >
-> Both the original implementation *and* Fix1 had real, distinct defects. This document does **not**
-> rewrite either as though it had been fully correct. Original and Fix1 sections are retained as
-> historical record; claims that a later stage supersedes are marked inline with a
-> **`⚠ SUPERSEDED BY FIX1`** or **`⚠ SUPERSEDED BY FIX2`** note that points to the superseding
-> section. In particular, Fix1's zombie-worker protection was **not** complete — see
-> [§ Post-Fix1 Review finding](#post-fix1-review-finding-remaining-zombie-worker--toctou-defect).
+> The original implementation, Fix1, *and* the first staging runtime attempt each surfaced a real,
+> distinct problem. This document does **not** rewrite any of them as though it had been correct, and
+> it does **not** hide the staging failure. Original / Fix1 / Fix2 sections are retained as historical
+> record; claims that a later stage supersedes are marked inline with a **`⚠ SUPERSEDED BY FIX1`**,
+> **`⚠ SUPERSEDED BY FIX2`**, or **`⚠ SUPERSEDED BY FIX3`** note that points to the superseding
+> section. See
+> [§ First staging runtime attempt](#first-staging-runtime-attempt-fail) and
+> [§ Fix3 root cause](#fix3-root-cause-anon-retained-direct-execute).
 >
 > The final current architecture is:
 >
 > - **Fix1** — persistent lifecycle lease + acquire/renew/complete ownership model + same-key upsert
->   serialization; and
+>   serialization;
 > - **Fix2** — transactional lease-row `FOR UPDATE` fencing inside the protected write + explicit lock
->   ordering + terminal-failure sync-count accuracy correction.
+>   ordering + terminal-failure sync-count accuracy correction; and
+> - **Fix3** — explicit `REVOKE EXECUTE ... FROM anon` on the exact final helper RPC signatures
+>   (migration `020`), because `REVOKE ... FROM PUBLIC` alone did not remove a pre-existing direct
+>   `anon` grant.
 >
-> **Current status:** *Batch 9D-A Fix2 implementation has completed local verification and is ready for
-> Post-Fix2 Review. Runtime DB, RLS, grant, lease-recovery, and concurrency verification remain
-> pending staging authorization and execution.*
+> **Current status:** *Batch 9D-A Fix3 implementation has completed local verification and is ready for
+> Post-Fix3 Review. Migration `020` application and runtime privilege re-verification remain pending
+> before the Batch 9D-A staging runtime suite may resume.*
 >
 > Batch 9D-A remains **reference-only**. No real provider, no Frankfurter integration, no scheduler, no
 > `public.exchange_rates` write, and no financial mutation were introduced by the original
-> implementation, Fix1, or Fix2.
+> implementation, Fix1, Fix2, or Fix3. Production project `kusseuycqgdilychphpq` was not touched at any
+> point.
 
 ---
 
@@ -947,6 +965,17 @@ None of the above is claimed as passing yet.
 
 ## Fix2 security and privilege record (source-level)
 
+> **`⚠ SUPERSEDED BY FIX3`.** The last bullet below — "no anonymous mutation path added" — was a
+> *source-level* inference from the migration text, and it turned out to be **false at runtime**. The
+> `019` (and `017`/`018`) migrations revoked `EXECUTE` from `PUBLIC` and `authenticated` but never
+> explicitly revoked it from **`anon`**. The first staging runtime attempt proved that `anon` retained
+> a direct `EXECUTE` grant and could invoke the helper RPCs. Fix3 (migration `020`) adds the explicit
+> `REVOKE EXECUTE ... FROM anon`. Read this section as the *pre-Fix3* source-level claim only — the
+> corrected privilege model is in
+> [§ First staging runtime attempt](#first-staging-runtime-attempt-fail),
+> [§ Fix3 root cause](#fix3-root-cause-anon-retained-direct-execute), and
+> [§ Fix3 migration 020 privilege architecture](#fix3-migration-020-privilege-architecture).
+
 Source-level migration design for `fx_upsert_reference_rate` in `019`:
 
 - public schema only;
@@ -957,7 +986,8 @@ Source-level migration design for `fx_upsert_reference_rate` in `019`:
 - `EXECUTE` revoked from `authenticated`;
 - `EXECUTE` granted to `service_role`;
 - no authenticated mutation path added;
-- no anonymous mutation path added.
+- no anonymous mutation path added *(source-level inference — **disproven at runtime**, see the
+  `⚠ SUPERSEDED BY FIX3` note above)*.
 
 This is **source-level verification only**. Runtime grants and RLS remain pending staging
 verification.
@@ -991,6 +1021,12 @@ Fix2 introduces **none** of the following:
 
 ## Fix2 next gate recommendation
 
+> **`⚠ SUPERSEDED BY FIX3`.** This section recommended proceeding to Post-Fix2 Review and then a
+> staging readiness / deployment gate. Post-Fix2 Review passed and staging readiness was granted, but
+> the **first staging runtime attempt then returned `FAIL`** on a privilege-boundary defect (`anon`
+> retained direct `EXECUTE`). This recommendation is retained as history; the current gate status is
+> in [§ Fix3 next gate recommendation](#fix3-next-gate-recommendation).
+
 Original 9D-A → Post-Implementation Review `PASS WITH REQUIRED FIXES` → **Fix1**.
 Fix1 → Post-Fix1 Review **`FAIL — FIX2 REQUIRED`** (`BATCH 9D-A FIX2 REQUIRED BEFORE STAGING
 READINESS`) → **Fix2**, now implemented and verified locally.
@@ -1005,3 +1041,345 @@ deploying the `fx-rate-sync` / `fx-rates` Edge Functions to staging, and the
 `BATCH_9D_A_FIX2_STAGING_CONCURRENCY_TESTS` runbook must then be runtime-executed on staging. Real
 provider / Frankfurter integration and scheduler activation remain blocked by DG-1 and are out of
 scope for Batch 9D-A. Batch 9D-B has not started.
+
+---
+
+# Batch 9D-A Fix3 — Explicit Anonymous RPC Privilege Revocation
+
+- **Fix3 commit:** `c516d8fdd86349c327bdd234dd4f0d15802ab9ba`
+- **Fix3 message:** `fix(fx): revoke anon helper rpc execution`
+- **Predecessor (Fix2) commit:** `b551a694ee40ffc737214ed81be6385f1ce8e669`
+- **Fix2 evidence amendment commit:** `44a9ebb765bffa2910dfde85d2924f1db7706d5e`
+- **Fix3 files changed:**
+  - `database/020_fx_helper_rpc_privilege_hardening.sql` (new migration)
+  - `backend/supabase/functions/fx-rate-sync/fx_reference_test.ts`
+
+This stage records the outcome of the **first Batch 9D-A staging runtime attempt** (which **failed**),
+the privilege defect it exposed, the scoped cleanup of the diagnostic artifact, and Fix3 — the
+source-level remediation that is **not yet runtime-proven**.
+
+## First staging runtime attempt (FAIL)
+
+**Verdict:** `FAIL`.
+**Final recommendation:** `BATCH 9D-A STAGING RUNTIME VERIFICATION FAILED — REMEDIATION REQUIRED`.
+
+- Staging project: `gcdsdyegwjdcskpukqlq`.
+- Production project: `kusseuycqgdilychphpq` — **not touched** at any point in this attempt.
+
+The runtime gate stopped at the first material failure (the helper-RPC privilege blocker, below) and
+did not proceed to the remaining test classes.
+
+## Staging preflight and migration state
+
+Staging preflight classified the Batch 9D-A database state as **clean** before deployment. The
+following migrations were then successfully applied to staging, in order:
+
+```text
+017_fx_reference_foundation.sql
+→ 018_fx_reference_concurrency_hardening.sql
+→ 019_fx_reference_transactional_fencing.sql
+```
+
+Final staging DB inventory after `017`–`019`:
+
+**Tables**
+
+- `public.fx_sync_runs`
+- `public.fx_reference_rates`
+- `public.fx_sync_leases`
+
+**Final helper RPCs**
+
+- `fx_acquire_sync_lease(...)`
+- `fx_renew_sync_lease(...)`
+- `fx_complete_sync_run(...)`
+- the final **11-argument** `fx_upsert_reference_rate(...)`
+
+Also confirmed in the inventory:
+
+- `fx_try_sync_lock` was **absent** (correctly dropped by `018`);
+- the old **10-argument** `fx_upsert_reference_rate` was **absent**;
+- the final helper functions were present;
+- the `fx-rate-sync` / `fx-rates` Edge Functions were **not deployed**, because the staging gate
+  stopped at the privilege blocker.
+
+This was **not** a complete staging deployment.
+
+## Runtime privilege failure
+
+After `017`–`019`, staging privilege inspection showed that the final privileged helper RPCs still had
+direct `EXECUTE` access for the **`anon`** role. Affected RPCs:
+
+1. `public.fx_acquire_sync_lease(...)`
+2. `public.fx_renew_sync_lease(...)`
+3. `public.fx_complete_sync_run(...)`
+4. `public.fx_upsert_reference_rate(...)`
+
+A real runtime anonymous test invoked `fx_acquire_sync_lease` through the Supabase REST RPC path. The
+actual result was **`HTTP 200`**: the `anon` caller successfully created one synthetic
+`fx_sync_runs` row and one synthetic `fx_sync_leases` row. This was classified as a **material
+privilege-boundary failure** — an unauthenticated caller must never be able to invoke these helpers or
+create lease/run rows.
+
+*(No access token, JWT, authorization header, service-role key, personal access token, or other secret
+value is recorded in this evidence.)*
+
+## Diagnostic cleanup
+
+The anonymous runtime diagnostic artifact was cleaned up in a scoped manner, removing the synthetic:
+
+- lease row;
+- sync-run row.
+
+Post-cleanup verification:
+
+```text
+remaining diagnostic lease rows = 0
+remaining diagnostic run rows   = 0
+```
+
+The specific synthetic UUIDs are intentionally omitted; the scoped cleanup succeeded with zero
+remaining diagnostic rows. No credentials or secret values are recorded.
+
+## Staging test classes not completed
+
+Because the runtime gate stopped after the helper-privilege failure, the following were **not
+completed** and must **not** be read as passing:
+
+- authenticated RPC denial checks;
+- service-role RPC allowed checks;
+- RLS runtime matrix;
+- Edge Function deployment;
+- role authorization matrix;
+- mock sync functional smoke;
+- lease lifecycle runtime tests;
+- the seven true concurrency scenarios;
+- read API smoke;
+- complete financial zero-mutation before/after comparison.
+
+## Fix3 root cause (anon retained direct EXECUTE)
+
+The migration chain for the final privileged helper RPCs revoked `EXECUTE` from:
+
+- `PUBLIC`
+- `authenticated`
+
+and granted `EXECUTE` to:
+
+- `service_role`
+
+but it did **not** explicitly revoke direct `EXECUTE` from **`anon`**. Staging runtime showed that
+`anon` retained a direct function `EXECUTE` grant. Therefore, in this database's grant state,
+`REVOKE EXECUTE ... FROM PUBLIC` **alone was not sufficient** to remove an existing *direct* `anon`
+grant: a direct grant to `anon` is a separate grant from the `PUBLIC` pseudo-role grant and must be
+revoked explicitly.
+
+This root cause is scoped to the Batch 9D-A helper RPCs observed in staging. It is **not** a claim
+about all repository functions (see [§ Broader security follow-up note](#broader-security-follow-up-note-non-blocking)).
+
+## Fix3 implementation
+
+Fix3 (`c516d8fdd86349c327bdd234dd4f0d15802ab9ba`,
+`fix(fx): revoke anon helper rpc execution`) changes exactly two files:
+
+- `database/020_fx_helper_rpc_privilege_hardening.sql` (new migration);
+- `backend/supabase/functions/fx-rate-sync/fx_reference_test.ts` (static assertions for `020`).
+
+## Fix3 migration 020 privilege architecture
+
+`database/020_fx_helper_rpc_privilege_hardening.sql` performs exact **function-signature-level**
+privilege hardening. For each final Batch 9D-A privileged helper RPC it applies:
+
+```text
+PUBLIC        → EXECUTE revoked
+anon          → EXECUTE revoked
+authenticated → EXECUTE revoked
+service_role  → EXECUTE granted
+```
+
+RPCs covered (by exact signature):
+
+- **Acquire** — `public.fx_acquire_sync_lease(UUID, TEXT, TEXT, DATE, INTEGER, UUID, INTEGER)`
+- **Renew** — `public.fx_renew_sync_lease(UUID, TEXT, UUID, UUID, INTEGER)`
+- **Complete** —
+  `public.fx_complete_sync_run(UUID, TEXT, UUID, UUID, TEXT, INTEGER, INTEGER, TEXT, TEXT)`
+- **Final reference upsert** —
+  `public.fx_upsert_reference_rate(UUID, CHAR(3), CHAR(3), NUMERIC, DATE, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, UUID, UUID)`
+
+Fix3 (migration `020`):
+
+- does **not** recreate `fx_try_sync_lock`;
+- does **not** recreate the old 10-argument upsert;
+- does **not** modify any function body;
+- does **not** modify RLS;
+- does **not** modify lease semantics;
+- does **not** modify concurrency semantics;
+- does **not** modify lock ordering;
+- does **not** modify rate-history semantics.
+
+It is privilege hardening only.
+
+## Fix3 local verification
+
+Executed locally against the current worktree (`c516d8f`):
+
+```text
+cd backend/supabase/functions
+deno check fx-rate-sync/index.ts fx-rates/index.ts
+deno test --no-lock --allow-read=../../.. --config fx-rate-sync/deno.json fx-rate-sync/fx_reference_test.ts
+git diff --check
+```
+
+**Executable local checks (actually run):**
+
+- `deno check` (`fx-rate-sync/index.ts`, `fx-rates/index.ts`): **PASS**.
+- Targeted Deno tests: **19 passed / 0 failed**.
+- `git diff --check`: **PASS**.
+
+## Fix3 test classification
+
+**Executable local tests (actually run):**
+
+- `deno check` on `fx-rate-sync/index.ts` and `fx-rates/index.ts`;
+- the 19 Deno unit tests in `fx_reference_test.ts`, including the new assertion that migration `020`
+  explicitly revokes `anon` helper RPC execution.
+
+**Static / source assertions (text checks over migration `020`, not live DB execution).** The static
+tests inspect `020` for all four final helper signatures and assert, for each:
+
+- `REVOKE EXECUTE ... FROM PUBLIC`;
+- `REVOKE EXECUTE ... FROM anon`;
+- `REVOKE EXECUTE ... FROM authenticated`;
+- `GRANT EXECUTE ... TO service_role`.
+
+The static tests also assert that migration `020` does **not**:
+
+- recreate `fx_try_sync_lock`;
+- recreate the FX upsert function body;
+- write `public.exchange_rates`;
+- introduce financial mutation;
+- introduce Frankfurter / provider calls;
+- introduce scheduler / cron work.
+
+> **Static / source assertions are not runtime privilege proof.**
+
+**Not yet runtime-proven (pending staging).** See
+[§ Fix3 runtime retest still pending](#fix3-runtime-retest-still-pending).
+
+## Fix3 runtime retest still pending
+
+- Migration `020` **has not yet been applied to staging**.
+- Runtime privilege retest **remains pending**.
+
+The required staging privilege matrix **after Fix3** is:
+
+| Caller          | Expected |
+| --------------- | -------- |
+| `anon`          | Denied   |
+| `authenticated` | Denied   |
+| `service_role`  | Allowed  |
+
+This matrix must be **proven in staging** before Edge Function deployment resumes. It is **not** claimed
+to have passed.
+
+## Fix3 staging resume state
+
+Staging currently has:
+
+- migration `017` applied;
+- migration `018` applied;
+- migration `019` applied;
+- migration `020` **not yet applied**;
+- `fx-rate-sync` **not deployed**;
+- `fx-rates` **not deployed**;
+- runtime suite **stopped at the privilege failure**;
+- the diagnostic anonymous run/lease **cleaned** (0 remaining).
+
+Correct staging resume sequence:
+
+```text
+read-only preflight
+→ confirm 017/018/019 present
+→ confirm 020 absent
+→ apply 020 only
+→ verify exact final RPC privileges
+→ runtime test anon denied
+→ runtime test authenticated denied
+→ runtime test service_role allowed
+→ only then resume remaining staging tests
+```
+
+Migrations `017`–`019` are already applied and must **not** be reapplied; only `020` is to be applied
+on resume.
+
+## Fix3 remaining staging runtime sequence
+
+After the Fix3 runtime privilege matrix passes, remaining staging verification includes (none of these
+is marked PASS yet):
+
+1. RLS runtime matrix;
+2. Edge Function deployment;
+3. role authorization matrix;
+4. successful mock sync;
+5. duplicate retry;
+6. correction;
+7. partial failure;
+8. top-level failure if safely triggerable;
+9. active overlap rejection;
+10. expired lease recovery;
+11. old-owner fail-closed behavior;
+12. all seven true concurrency scenarios;
+13. read API smoke;
+14. financial zero-mutation comparison;
+15. cleanup.
+
+## Fix3 security boundary
+
+Fix3 introduces **none** of the following:
+
+- production action;
+- production migration;
+- production deployment;
+- Frankfurter integration;
+- real provider call;
+- provider credential;
+- API key;
+- scheduler;
+- cron;
+- automatic promotion to `public.exchange_rates`;
+- booked snapshot mutation;
+- invoice mutation;
+- receipt mutation;
+- allocation mutation;
+- journal mutation;
+- balance mutation;
+- financial RPC invocation;
+- `/allocations/auto` change;
+- frontend change.
+
+Batch 9D-A remains **reference-only**.
+
+## Broader security follow-up note (non-blocking)
+
+As a **non-blocking follow-up** only: the runtime discovery that a direct `anon` `EXECUTE` grant
+survived `REVOKE ... FROM PUBLIC` suggests that a later, separately-scoped, repository-wide audit of
+function `EXECUTE` privileges and default function privileges may be advisable. This is **not** a claim
+that any unrelated repository function is currently vulnerable, and **no** global default-privilege
+change is made in this documentation task or in Fix3.
+
+## Fix3 next gate recommendation
+
+Original 9D-A → Post-Implementation Review `PASS WITH REQUIRED FIXES` → **Fix1**
+→ Post-Fix1 Review `FAIL — FIX2 REQUIRED` → **Fix2**
+→ Post-Fix2 Review passed → staging readiness granted
+→ **first staging runtime attempt `FAIL`** (anon retained direct `EXECUTE`)
+→ **Fix3**, now implemented and verified locally.
+
+**Current status:** *Batch 9D-A Fix3 implementation has completed local verification and is ready for
+Post-Fix3 Review. Migration `020` application and runtime privilege re-verification remain pending
+before the Batch 9D-A staging runtime suite may resume.*
+
+Proceed to **Codex Post-Fix3 Review** for Batch 9D-A. After that review passes, the staging resume
+sequence above applies (apply `020` only, prove the anon/authenticated/service_role privilege matrix,
+then resume the remaining runtime suite). Real provider / Frankfurter integration and scheduler
+activation remain blocked by DG-1 and out of scope for Batch 9D-A. Batch 9D-B has not started.
