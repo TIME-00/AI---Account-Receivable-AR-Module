@@ -2,25 +2,38 @@
 
 ## Document status
 
-> This document records **two** stages and preserves the full history of both:
+> This document records **three** remediation stages and preserves the full history of all of them:
 >
 > 1. the **original Batch 9D-A implementation** (`48e93fdcccbc588ef8f235ba63fe117ecf7b8043`,
->    `feat(fx): add provider-neutral FX reference foundation`); and
+>    `feat(fx): add provider-neutral FX reference foundation`);
 > 2. **Batch 9D-A Fix1** (`a562aaff767568ebe8dabe16bba386b4434e686c`,
->    `fix(fx): harden sync lease and rate concurrency`), which remediates a defect found in
->    Post-Implementation Review.
+>    `fix(fx): harden sync lease and rate concurrency`), which remediates a defect found in the
+>    Post-Implementation Review; and
+> 3. **Batch 9D-A Fix2** (`b551a694ee40ffc737214ed81be6385f1ce8e669`,
+>    `fix(fx): fence reference writes by lease ownership`), which remediates a **remaining zombie-worker
+>    / TOCTOU defect** found in the Post-Fix1 Review.
 >
-> The original implementation had a real defect in its lifecycle overlap guard. This document does
-> **not** rewrite the original evidence as though that defect never existed. Original sections are
-> retained verbatim as historical record; the specific claims that Fix1 supersedes are marked inline
-> with a **`⚠ SUPERSEDED BY FIX1`** note that points to the Fix1 sections
-> ([§ Post-Implementation Review finding](#post-implementation-review-finding) onward).
+> Both the original implementation *and* Fix1 had real, distinct defects. This document does **not**
+> rewrite either as though it had been fully correct. Original and Fix1 sections are retained as
+> historical record; claims that a later stage supersedes are marked inline with a
+> **`⚠ SUPERSEDED BY FIX1`** or **`⚠ SUPERSEDED BY FIX2`** note that points to the superseding
+> section. In particular, Fix1's zombie-worker protection was **not** complete — see
+> [§ Post-Fix1 Review finding](#post-fix1-review-finding-remaining-zombie-worker--toctou-defect).
 >
-> **Current status:** *Batch 9D-A Fix1 implementation completed locally and is ready for Post-Fix1
-> Review. Staging runtime verification remains pending.*
+> The final current architecture is:
 >
-> Batch 9D-A remains **reference-only**. No real provider, no scheduler, no `public.exchange_rates`
-> write, and no financial mutation were introduced by either the original implementation or Fix1.
+> - **Fix1** — persistent lifecycle lease + acquire/renew/complete ownership model + same-key upsert
+>   serialization; and
+> - **Fix2** — transactional lease-row `FOR UPDATE` fencing inside the protected write + explicit lock
+>   ordering + terminal-failure sync-count accuracy correction.
+>
+> **Current status:** *Batch 9D-A Fix2 implementation has completed local verification and is ready for
+> Post-Fix2 Review. Runtime DB, RLS, grant, lease-recovery, and concurrency verification remain
+> pending staging authorization and execution.*
+>
+> Batch 9D-A remains **reference-only**. No real provider, no Frankfurter integration, no scheduler, no
+> `public.exchange_rates` write, and no financial mutation were introduced by the original
+> implementation, Fix1, or Fix2.
 
 ---
 
@@ -504,7 +517,28 @@ misuse — the lock here protects a single database transaction (serialization �
 decision → supersede → new `Active` insert → return). It is not being asked to span multiple separate
 Edge Function round-trips. This is the distinction the original design got wrong and Fix1 gets right.
 
+> **`⚠ SUPERSEDED BY FIX2`** — Fix1's `fx_upsert_reference_rate` only **read** lease ownership (a
+> `SELECT`/`EXISTS` check) before and after taking the rate-key advisory lock; it did **not** hold a
+> transactional lock on the matching `fx_sync_leases` ownership row for the remainder of the write
+> transaction. That leaves a zombie-worker / TOCTOU window: an old worker could pass both ownership
+> checks, then have its lease expire and be reclaimed by a successor, and still commit its
+> reference-rate mutation after ownership was lost. The rate-key advisory lock serialized same-key FX
+> writes but did **not** protect lifecycle lease ownership. Fix2 replaces this with a transactional
+> `FOR UPDATE` lock on the live owned lease row held through the whole protected write. See
+> [§ Post-Fix1 Review finding](#post-fix1-review-finding-remaining-zombie-worker--toctou-defect) and
+> [§ Fix2 transactional lease fencing](#fix2-transactional-lease-fencing-migration-019).
+
 ## Fix1 stale and zombie worker protection
+
+> **`⚠ SUPERSEDED BY FIX2` (partial).** The mechanisms listed below are real and remain in place, but
+> Fix1's protection against a zombie worker was **not** complete: the "owner-fenced protected upsert"
+> relied on ownership *reads* rather than a transactional lock on the owned lease row, so a stale
+> worker whose lease was reclaimed mid-write could still commit a reference-rate mutation after
+> ownership loss. Do **not** read this section as evidence that Fix1 alone fully prevented
+> post-reclaim stale writes. Complete zombie-worker fencing is delivered only by Fix2 — see
+> [§ Post-Fix1 Review finding](#post-fix1-review-finding-remaining-zombie-worker--toctou-defect),
+> [§ Fix2 transactional lease fencing](#fix2-transactional-lease-fencing-migration-019), and
+> [§ Fix2 zombie-worker scenario semantics](#fix2-zombie-worker-scenario-semantics-intended-design).
 
 Stale / zombie ownership is addressed through:
 
@@ -521,8 +555,9 @@ Stale / zombie ownership is addressed through:
 An expired, abandoned `Running` run is recovered to terminal `Failed` status with error category
 **`FX_SYNC_LEASE_EXPIRED`** when a successor reclaims the scope.
 
-> This stale/zombie protection is established by the implemented design and source-level review.
-> It is **not** yet proven by runtime staging execution.
+> This *Fix1* stale/zombie handling is established by the implemented design and source-level review,
+> **but it is incomplete** — see the `⚠ SUPERSEDED BY FIX2 (partial)` note at the top of this section.
+> Even with Fix2, none of this is yet proven by runtime staging execution.
 
 ## Fix1 concurrent upsert semantics (intended, serialized)
 
@@ -639,7 +674,12 @@ The following remain **pending** and are **not** claimed as proven:
 No staging or production mutation, deployment, cron, or provider call was performed for this Fix1
 evidence update.
 
-## Next gate recommendation
+## Fix1 next gate recommendation
+
+> **`⚠ SUPERSEDED BY FIX2`.** At the time Fix1 was written this section recommended proceeding to
+> Post-Fix1 Review as if Fix1 were the final design. The Post-Fix1 Review then returned
+> **`FAIL — FIX2 REQUIRED`**. This recommendation is retained as history only; the current gate
+> status is in [§ Fix2 next gate recommendation](#fix2-next-gate-recommendation).
 
 Original 9D-A implementation → Post-Implementation Review returned `PASS WITH REQUIRED FIXES`
 (`FIX REQUIRED BEFORE STAGING`). Fix1 has now been implemented and verified locally.
@@ -651,3 +691,317 @@ Proceed to **Codex Post-Fix1 Review** for Batch 9D-A. After that review passes, 
 readiness / deployment gate is still required before applying migrations `017`/`018` or deploying the
 `fx-rate-sync` / `fx-rates` Edge Functions to staging. Real provider integration and scheduler
 activation remain blocked by DG-1 and are out of scope for Batch 9D-A. Batch 9D-B has not started.
+
+---
+
+# Batch 9D-A Fix2 — Transactional Lease Fencing and Sync Count Accuracy
+
+- **Fix2 commit:** `b551a694ee40ffc737214ed81be6385f1ce8e669`
+- **Fix2 message:** `fix(fx): fence reference writes by lease ownership`
+- **Predecessor (Fix1) commit:** `a562aaff767568ebe8dabe16bba386b4434e686c`
+- **Fix1 evidence amendment commit:** `5184e893cc99b964fe263be78f2ce5bef4195e72`
+- **Fix2 files changed:**
+  - `database/019_fx_reference_transactional_fencing.sql` (new migration)
+  - `backend/supabase/functions/fx-rate-sync/service.ts`
+  - `backend/supabase/functions/fx-rate-sync/fx_reference_test.ts`
+  - `docs/runbooks/BATCH_9D_A_FIX2_STAGING_CONCURRENCY_TESTS.md` (new staging-only runbook)
+
+## Post-Fix1 Review finding (remaining zombie-worker / TOCTOU defect)
+
+**Post-Fix1 Review verdict:** `FAIL — FIX2 REQUIRED`.
+**Final recommendation:** `BATCH 9D-A FIX2 REQUIRED BEFORE STAGING READINESS`.
+
+**Remaining blocking defect — zombie-worker / TOCTOU in `public.fx_upsert_reference_rate(...)`.**
+Fix1 checked lease ownership **before** the protected reference-rate write (and again after taking the
+rate-key advisory lock), but those were ownership **reads**. Fix1 did **not** hold a transactional
+lock — or equivalent fencing — on the matching live `public.fx_sync_leases` ownership row for the
+remainder of the write transaction. Between the ownership read and the commit, ownership could change.
+
+Therefore this sequence remained possible:
+
+```text
+old worker passes lease ownership checks
+→ lease expires
+→ successor reclaims lease
+→ successor becomes new owner
+→ old worker continues rate mutation
+→ old worker commits after ownership loss
+```
+
+The rate-key advisory lock (`pg_advisory_xact_lock` on the logical FX key) serialized concurrent
+writes to the **same logical rate key**, but it provided **no** protection over lifecycle lease
+ownership: two different owners writing different keys, or an old owner writing after reclaim, were not
+fenced by it. This is the reason **Fix2 was required before staging readiness**.
+
+## Fix2 transactional lease fencing (migration 019)
+
+Fix2 introduces `database/019_fx_reference_transactional_fencing.sql`, which `CREATE OR REPLACE`s
+`public.fx_upsert_reference_rate(...)` **with the same RPC signature** (still
+`(..., p_sync_run_id UUID, p_lease_token UUID)`), preserving reference-only semantics — it does not
+write `public.exchange_rates` or any financial/protected table.
+
+The protected upsert now:
+
+1. locks the matching **live** `public.fx_sync_leases` ownership row using `FOR UPDATE`;
+2. verifies, in that same locking predicate, all of:
+   - `company_id`;
+   - `provider`;
+   - `owner_run_id` (= `p_sync_run_id`);
+   - `lease_token` (= `p_lease_token`);
+   - live `lease_expires_at > clock_timestamp()`;
+3. **holds that lease-ownership row lock** through the remainder of the protected reference-rate
+   transaction (until commit/rollback);
+4. fails closed with **`FX_SYNC_LEASE_LOST`** if a matching live owned lease row cannot be locked
+   (`IF NOT FOUND THEN RAISE EXCEPTION`), before any rate DML;
+5. retains the same-logical-key advisory transaction serialization (`pg_advisory_xact_lock` on the
+   `company_id` + `from|to|effective_date|provider|rate_type` key);
+6. retains the `Active` `fx_reference_rates` row lock (`SELECT ... FOR UPDATE`);
+7. retains the unique `Active` logical-key index as defense in depth.
+
+The decisive change from Fix1 is step 1–3: the ownership check is no longer a bare read but a held
+`FOR UPDATE` row lock, so a successor reclaim (which must `UPDATE` that same lease row) cannot
+establish new ownership while an in-flight protected write holds the row.
+
+## Fix2 lock ordering
+
+The implemented lock order is:
+
+```text
+1. fx_sync_leases ownership row       — FOR UPDATE
+2. logical FX rate advisory transaction lock  — pg_advisory_xact_lock
+3. Active fx_reference_rates row       — FOR UPDATE
+```
+
+**Why the order matters.** Acquiring the lease-ownership row lock **first** — before the rate-key
+advisory lock — prevents the dangerous conceptual lock cycle:
+
+```text
+Transaction A: holds rate lock → waits for lease row
+Transaction B: holds lease row → waits for same rate lock
+```
+
+Because every protected write takes the lease row before the rate-key advisory lock, no protected
+write ever holds the rate lock while waiting on the lease row, so that cycle cannot form. Per the Fix2
+implementation handoff, the lifecycle acquire/renew/complete RPCs (`fx_acquire_sync_lease`,
+`fx_renew_sync_lease`, `fx_complete_sync_run`) do **not** request the logical FX rate advisory lock,
+so they cannot participate in a rate-lock/lease-row cycle either.
+
+> This lock-ordering reasoning is a source/design property. Runtime deadlock testing has **not**
+> occurred and is not claimed.
+
+## Fix2 zombie-worker scenario semantics (intended design)
+
+The following are the **intended source/design** semantics. True runtime database-concurrency
+verification remains **pending staging**.
+
+**Old worker locks first**
+
+```text
+old worker locks owned lease row
+→ protected reference-rate transaction proceeds
+→ successor reclaim waits on the same lease row
+→ old transaction commits or rolls back
+→ successor reclaim may continue afterward
+```
+
+**Successor reclaim wins first**
+
+```text
+successor establishes new ownership
+→ old owner values (owner_run_id / lease_token / live expiry) no longer match
+→ old worker cannot lock a matching owned live lease row
+→ FX_SYNC_LEASE_LOST
+→ no protected reference-rate write
+```
+
+**Expiry during a protected transaction.** Lease expiry **alone** does not establish successor
+ownership while an existing protected transaction still holds the lease-ownership row lock; the
+successor's reclaiming `UPDATE` must wait for that row lock to be released. The intended invariant is:
+
+> **No protected reference-rate write commits after successor ownership has already been established.**
+
+This is the implemented **source/design model**. True runtime database concurrency verification
+remains pending staging.
+
+## Fix2 same-key FX reference upsert behavior
+
+Fix2 preserves the existing rate-key serialization model unchanged; the following are supported by
+design/static review, with runtime concurrent DB verification **pending staging**:
+
+- **Concurrent first insert** — one insert; a later same-rate attempt rereads the current `Active`
+  row and returns `noop`/equivalent; exactly one `Active` logical row.
+- **Duplicate same-rate retry** — current `Active` row preserved; no unnecessary correction-history
+  row; `noop`/equivalent result.
+- **Concurrent correction** — transactions serialize by logical reference-rate key; valid correction
+  history chain; exactly one `Active` logical row; prior values become `Superseded` correctly with
+  `supersedes_rate_id` linkage retained.
+- **Retry versus correction** — outcome corresponds to a valid serialized ordering; no duplicate
+  `Active` logical row; no broken correction history.
+
+## Fix2 sync count accuracy
+
+The Post-Fix1 Review also raised a **non-blocking observability** finding: before Fix2, a top-level
+failure that occurred **after** some pairs had already been written successfully could record:
+
+```text
+succeeded_pair_count = 0
+failed_pair_count    = all pairs
+```
+
+even though successful reference-rate rows had already been persisted — misrepresenting what actually
+happened.
+
+Fix2 updates `backend/supabase/functions/fx-rate-sync/service.ts`: the accumulators
+(`succeeded` / `failed` / counts) are hoisted so they survive into the top-level `catch`, and a new
+helper `calculateTerminalFailureCounts(attempted, succeeded, failedSoFar)` computes the terminal
+counts so that they:
+
+- preserve the accumulated successful pair count;
+- preserve the already-observed failed pair count;
+- classify the remaining unprocessed pairs as failed for terminal `Failed` runs.
+
+The intended terminal-failure invariant, **for the terminal `Failed` completion path handled by the
+new helper**, is:
+
+```text
+succeeded_pair_count + failed_pair_count = attempted_pair_count
+```
+
+This claim is scoped to that terminal-failure path and is not generalized to every run outcome.
+
+## Fix2 local verification
+
+Executed locally against the current worktree (`b551a69`):
+
+```text
+cd backend/supabase/functions
+deno check fx-rate-sync/index.ts fx-rates/index.ts
+deno test --no-lock --allow-read=../../.. --config fx-rate-sync/deno.json fx-rate-sync/fx_reference_test.ts
+git diff --check
+```
+
+**Executable checks (actually run):**
+
+- `deno check` (`fx-rate-sync/index.ts`, `fx-rates/index.ts`): **PASS**.
+- Targeted Deno tests: **18 passed / 0 failed**.
+- `git diff --check`: **PASS**.
+
+**Executable helper coverage.** The suite now includes executable coverage of terminal-failure count
+handling — preservation of accumulated successful pairs and classification of remaining/unprocessed
+pairs — via `calculateTerminalFailureCounts`, alongside the existing lease-lost fail-closed detection.
+
+## Fix2 test classification
+
+**Executable local tests (actually run):**
+
+- `deno check` on `fx-rate-sync/index.ts` and `fx-rates/index.ts`;
+- the 18 Deno unit tests in `fx_reference_test.ts`, including terminal-failure count handling.
+
+**Static / source assertions (text and construction checks, not live DB execution):**
+
+- migration `019` contains the matching lease-ownership conditions
+  (`company_id` / `provider` / `owner_run_id` / `lease_token`);
+- lease-token check present;
+- live-expiry check (`lease_expires_at > ...`) present;
+- lease row `FOR UPDATE` present;
+- the lease-row lock appears **before** the rate-key advisory lock;
+- the rate-key advisory lock remains **before** `Active` rate-row access;
+- `FX_SYNC_LEASE_LOST` fail-closed path present;
+- fixed `search_path` (`SET search_path = public`);
+- explicit RPC `GRANT`/`REVOKE` structure (revoke `PUBLIC`/`authenticated`, grant `service_role`);
+- no `public.exchange_rates` insert/update/delete.
+
+Static SQL assertions are **not** described as executable DB concurrency proof.
+
+**Not yet runtime-proven (pending staging).** See
+[§ Fix2 runtime DB verification status](#fix2-runtime-db-verification-status).
+
+## Fix2 runtime DB verification status
+
+Runtime database verification status: **`NOT YET RUNTIME-EXECUTED`**.
+
+The staging-only concurrency runbook is
+`docs/runbooks/BATCH_9D_A_FIX2_STAGING_CONCURRENCY_TESTS.md`; its status is
+**`PREPARED BUT NOT YET RUNTIME-EXECUTED`**.
+
+Pending staging runtime verification includes at minimum:
+
+1. stale owner versus successor reclaim;
+2. successor reclaim wins first;
+3. old owner cannot write after successor ownership;
+4. concurrent first insert;
+5. concurrent duplicate retry;
+6. concurrent correction;
+7. retry versus correction.
+
+The following also remain **pending** staging verification and are **not** claimed as PASS:
+
+- migration application (`017` / `018` / `019`);
+- RLS enforcement;
+- helper RPC grants;
+- service-role-only invocation;
+- overlap rejection;
+- expired / stale lease recovery.
+
+None of the above is claimed as passing yet.
+
+## Fix2 security and privilege record (source-level)
+
+Source-level migration design for `fx_upsert_reference_rate` in `019`:
+
+- public schema only;
+- same upsert RPC signature preserved;
+- `SECURITY DEFINER`;
+- `SET search_path = public`;
+- `EXECUTE` revoked from `PUBLIC`;
+- `EXECUTE` revoked from `authenticated`;
+- `EXECUTE` granted to `service_role`;
+- no authenticated mutation path added;
+- no anonymous mutation path added.
+
+This is **source-level verification only**. Runtime grants and RLS remain pending staging
+verification.
+
+## Fix2 financial safety boundary
+
+Fix2 introduces **none** of the following:
+
+- Frankfurter integration;
+- real FX provider;
+- external provider API call;
+- provider credential;
+- API key;
+- scheduler;
+- cron;
+- `public.exchange_rates` write;
+- reference-to-booking automatic promotion;
+- booked transaction rate-snapshot mutation;
+- invoice mutation;
+- receipt mutation;
+- allocation mutation;
+- journal entry creation;
+- balance mutation;
+- financial RPC invocation;
+- frontend work;
+- staging deployment;
+- production deployment.
+
+`POST /allocations/auto` remains outside this scope and remains disabled. Batch 9D-A remains
+**reference-only**.
+
+## Fix2 next gate recommendation
+
+Original 9D-A → Post-Implementation Review `PASS WITH REQUIRED FIXES` → **Fix1**.
+Fix1 → Post-Fix1 Review **`FAIL — FIX2 REQUIRED`** (`BATCH 9D-A FIX2 REQUIRED BEFORE STAGING
+READINESS`) → **Fix2**, now implemented and verified locally.
+
+**Current status:** *Batch 9D-A Fix2 implementation has completed local verification and is ready for
+Post-Fix2 Review. Runtime DB, RLS, grant, lease-recovery, and concurrency verification remain pending
+staging authorization and execution.*
+
+Proceed to **Codex Post-Fix2 Review** for Batch 9D-A. After that review passes, a separate staging
+readiness / deployment gate is still required before applying migrations `017` / `018` / `019` or
+deploying the `fx-rate-sync` / `fx-rates` Edge Functions to staging, and the
+`BATCH_9D_A_FIX2_STAGING_CONCURRENCY_TESTS` runbook must then be runtime-executed on staging. Real
+provider / Frankfurter integration and scheduler activation remain blocked by DG-1 and are out of
+scope for Batch 9D-A. Batch 9D-B has not started.
