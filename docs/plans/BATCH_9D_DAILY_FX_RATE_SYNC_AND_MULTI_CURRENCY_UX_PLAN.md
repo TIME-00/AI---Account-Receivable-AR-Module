@@ -1,22 +1,265 @@
-# Batch 9D — Daily FX Rate Sync and Multi-Currency UX — Implementation Plan (Amended)
+# Batch 9D — Daily FX Rate Sync and Multi-Currency UX — Implementation Plan (Amended — Rev 2, Post-9D-A Closure)
 
 - **Batch:** 9D — Daily FX Rate Sync and Multi-Currency UX.
 - **Type:** Discovery + implementation plan (planning only; no code, migration, deployment, or provider call).
 - **Author:** Claude Code (discovery, plan, frontend UX design).
-- **Date:** 2026-07-05.
-- **Baseline commit:** `60aeecca007897adee12b3caf2b64dd01619b2bf` (initial Batch 9D plan; `HEAD == origin/main`, clean tree at amendment start).
-- **Amendment driver:** Codex Gate 2 review — verdict **PASS WITH REQUIRED PLAN AMENDMENTS**. This
-  revision locks the 9D-A architecture, corrects currency-architecture and report-classification
-  wording, and adds override governance, correction/idempotency, and weekend semantics.
+- **Date:** 2026-07-05 (Rev 1 amendment); **2026-07-06 (Rev 2 — Post-9D-A closure amendment)**.
+- **Baseline commit:** `60aeecca007897adee12b3caf2b64dd01619b2bf` (initial Batch 9D plan).
+- **Rev 2 baseline commit:** `5740ac7bcc08af0251cda102c2a3fd7af07dd10a` (Batch 9D-A staging runtime pass evidence; `HEAD == origin/main`, clean tree at this amendment start).
+- **Amendment drivers:**
+  1. **Rev 1 —** Codex Gate 2 review — verdict **PASS WITH REQUIRED PLAN AMENDMENTS**. Locked the 9D-A
+     architecture, corrected currency-architecture and report-classification wording, and added override
+     governance, correction/idempotency, and weekend semantics.
+  2. **Rev 2 —** **Batch 9D-A is now OFFICIALLY CLOSED.** This revision records the 9D-A closure and
+     re-orders the provider decision and execution sequence to reflect the current approved architecture:
+     the validated reference-only foundation now allows a real provider to be integrated (9D-B) **before**
+     the booking-rate governance batch (9D-C). See **§0** (the authoritative current-state section).
 - **Predecessor:** Batch 9C — Receipt PDF/Image Import Intake (officially closed at `2e5d86e`).
-- **Next gate:** Codex confirmation of this amendment → explicit user implementation approval → 9D-A
-  (provider-neutral) may begin. Real provider integration remains blocked by **DG-1**.
+- **Next gate (Rev 2):** Codex **Batch 9D Plan Amendment Review** → user approval → **DG-1 locked** →
+  **9D-B** implementation. Real provider integration remains blocked until **DG-1** is locked.
 
 > This document is planning and discovery only. No backend/frontend code was changed, no migration was
 > created, no schema was modified, no Edge Function was deployed, no cron/provider credential was
 > configured, no external FX provider was called, and neither staging nor production was mutated while
-> producing it. **Daily FX Sync is NOT live.** Provider reference rates do **NOT** automatically become
-> booking rates. A latest/reference conversion is **NOT** accounting-authoritative.
+> producing it. **Daily FX Sync is NOT live in production.** Provider reference rates do **NOT**
+> automatically become booking rates. A latest/reference conversion is **NOT** accounting-authoritative.
+> Frankfurter/MAS integration is a **proposed DG-1 decision pending review/approval — NOT implemented.**
+> Batch 9D-A (provider-neutral foundation) is officially closed; **§0 supersedes the earlier execution
+> ordering** in §13 and §20 where they differ.
+
+---
+
+## 0. Rev 2 Post-9D-A Closure Amendment (Provider Decision & Execution Order) — AUTHORITATIVE
+
+> This section is the **current authoritative** statement of Batch 9D-A closure, the revised execution
+> order, and the proposed DG-1 provider decision. Where it differs from the earlier ordering in §13 and
+> §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
+> history and is **not** erased.
+
+### 0.1 Batch 9D-A closure status
+
+**Batch 9D-A — Provider-Neutral FX Reference Foundation** — status: **`OFFICIALLY CLOSED`**.
+
+Closure context: closed following the **staging runtime verification PASS** consolidated at commit
+`5740ac7bcc08af0251cda102c2a3fd7af07dd10a` (2026-07-06), after the remediation chain
+Original → Fix1 → Fix2 → (first staging runtime FAIL) → Fix3 → staging runtime resume PASS.
+
+Final evidence state (concise — see the evidence file, do **not** duplicate it here):
+
+- provider-neutral reference architecture implemented;
+- migrations `017`–`020` completed through the approved staging scope;
+- staging runtime verification **PASS**;
+- privilege matrix **PASS**; RLS runtime **PASS**; role authorization **PASS**;
+- mock sync **PASS**; lease lifecycle **PASS**; **seven** true concurrency scenarios **PASS**;
+- read APIs **PASS**; financial zero-mutation **PASS**; synthetic cleanup **PASS**;
+- **production rollout was not part of 9D-A** (deferred to 9D-E).
+
+Authoritative evidence:
+`docs/evidence/SPRINT_BATCH_9D_A_PROVIDER_NEUTRAL_FX_REFERENCE_FOUNDATION_EVIDENCE.md`.
+
+### 0.2 Original execution order (preserved) vs revised canonical order
+
+**Original order (Rev 1 — now superseded where it differs).** Rev 1 §13/§20 sequenced governance (9D-C)
+to proceed **in parallel and ahead of** the provider decision (DG-1) and real provider integration
+(9D-B), i.e. effectively:
+
+```text
+9D-A → 9D-C (governance, parallel/early) → DG-1 → 9D-B → 9D-D → 9D-E
+```
+
+This original ordering is **retained for history** and is **superseded** by §0.3 below.
+
+**Revised canonical order (Rev 2 — CURRENT).**
+
+```text
+1. Batch 9D-A — Provider-Neutral FX Reference Foundation      Status: CLOSED
+2. DG-1        — Formal FX Provider Decision
+3. Batch 9D-B  — Real Provider Integration and Scheduler Staging
+4. Batch 9D-C  — Booking Rate Provenance and Override Governance
+5. Batch 9D-D  — Multi-Currency UX and Monetary Aggregation Correctness
+6. Batch 9D-E  — Production Rollout and Verification
+```
+
+**Why the order changed.** Batch 9D-A now provides a **validated reference-only foundation** (staging
+runtime PASS). A real provider can therefore be integrated into `public.fx_reference_rates` (9D-B)
+**without affecting booking-rate financial behavior**, because the reference layer is provably separated
+from the `public.exchange_rates` booking layer. **9D-C remains the governance gate** for any future
+influence of reference data on the booking-rate path — it is not a prerequisite for merely ingesting a
+real provider's *reference* data. Moving DG-1 + 9D-B ahead of 9D-C reflects that the reference/booking
+separation is now proven, not assumed.
+
+### 0.3 DG-1 — Formal FX Provider Decision (PROPOSED — pending review & user approval)
+
+> **Status: PROPOSED for Codex/user approval. NOT locked, NOT implemented. No provider API is called in
+> this planning task.** Frankfurter/MAS integration is **not** implemented.
+
+- **API / transport:** **Frankfurter v2**.
+- **Provider strategy:** **explicit provider pinning is mandatory**. **Initial provider: `MAS`.**
+- **Authentication:** **no provider API key** is expected for the selected provider transport model. Do
+  **not** add provider-credential infrastructure unless future implementation evidence proves it is
+  required.
+- **Pair semantics:** preserve explicit direction **`from_currency × rate = to_currency`**; **no silent
+  inversion** (consistent with §10.2 and the `exchange_rates` convention).
+- **Initial reference destination:** real provider data may write **only** to `public.fx_reference_rates`,
+  `public.fx_sync_runs`, and the lifecycle lease/observability infrastructure of the approved foundation.
+  It must **not** write `public.exchange_rates`, invoices, receipts, allocations, journals, or balances.
+
+**DG-1 explicitly prohibits:**
+
+1. implicit blended / default provider selection;
+2. silent provider fallback;
+3. silent provider substitution;
+4. silent pair inversion;
+5. unsupported-pair fabrication;
+6. writing provider results directly to `public.exchange_rates`;
+7. automatic promotion from reference rate to booking rate;
+8. retroactive mutation of booked **invoice** FX snapshots;
+9. retroactive mutation of booked **receipt** FX snapshots;
+10. financial posting / allocation mutation from provider sync.
+
+### 0.4 Batch 9D-B — Real Provider Integration and Scheduler Staging
+
+**Provider adapter:** Frankfurter v2 integration; explicit provider parameter/pinning; **initial MAS
+source**; exact pair normalization; explicit unsupported-pair handling; explicit **no-silent-fallback**
+behavior; response validation; safe provider error mapping; sanitized error handling; request timeout;
+bounded retry where appropriate; **no secret/raw-payload leakage**.
+
+**Sync behavior (reuse the closed 9D-A foundation):** scheduled daily reference sync; manual privileged
+trigger retained where appropriate; **reuse** the existing lifecycle lease model, overlap protection,
+stale recovery, transactional fencing, versioned correction, and duplicate/noop behavior.
+
+**Scheduler (belongs to 9D-B staging scope):** staging-first scheduler activation; timezone explicitly
+documented; daily cadence explicitly documented; **no production scheduler activation in 9D-B**;
+production activation deferred to **9D-E**.
+
+**Destination:** only `public.fx_reference_rates` (with `fx_sync_runs`/lease observability) for provider
+reference data. **Do not promote into `public.exchange_rates` during 9D-B.**
+
+### 0.5 Batch 9D-B — Mandatory staging runtime verification
+
+At minimum, 9D-B staging must verify:
+
+1. provider endpoint connectivity;
+2. explicit **MAS** provider pinning;
+3. **no** blended/default provider use;
+4. supported-pair success;
+5. unsupported-pair **explicit failure**;
+6. exact pair direction (no inversion);
+7. effective-date behavior;
+8. provider timestamp / fetched-timestamp handling;
+9. duplicate sync **noop**;
+10. provider correction creates valid **Superseded** history;
+11. provider/network **timeout**;
+12. malformed-response rejection;
+13. provider-error sanitization;
+14. overlap rejection;
+15. stale-lease recovery regression;
+16. transactional fencing regression;
+17. scheduler invocation proof;
+18. scheduler duplicate/overlap safety;
+19. reference-only destination proof;
+20. **zero `public.exchange_rates` mutation**;
+21. **zero invoice/receipt/allocation/journal mutation**;
+22. cleanup of synthetic/manual staging artifacts where applicable.
+
+### 0.6 Batch 9D-C — Booking Rate Provenance and Override Governance (scope clarification)
+
+9D-C is the **first** batch permitted to *design* controlled governance between `fx_reference_rates` and
+`exchange_rates`. Even in 9D-C: **no automatic promotion is assumed**; promotion design requires
+**explicit approval**; provenance must be traceable; booking source must be auditable; manual override
+governance must be explicit; override reason/audit requirements must be explicit; booked transaction
+snapshots remain **immutable after booking** unless a separately approved correction model exists;
+realized-FX behavior must remain compatible with existing allocation logic.
+
+Current approved architecture remains:
+
+```text
+fx_reference_rates = external / reference rate layer
+exchange_rates     = booking-rate source
+```
+
+Any bridge between them requires **9D-C governance and explicit approval**. (See §6 for the detailed
+override-governance requirements, which remain in force.)
+
+### 0.7 Batch 9D-D — Multi-Currency UX and Monetary Aggregation Correctness (scope)
+
+Clear transaction-currency display; clear company base-currency display; reference-rate vs booking-rate
+labeling; rate source/provenance display **where approved**; effective-date display; conversion
+explanation; mixed-currency aggregation prevention; base-currency aggregation rules; dashboard/report
+correctness; **no summing incompatible currencies without conversion**; safe fallback/empty states;
+clear stale-rate indicators where relevant; user-facing override workflow **only if approved by 9D-C**.
+(Detailed surface-by-surface design remains in §14–§15; the A–E value distinction still applies.) **No UI
+is implemented in this plan-amendment task.**
+
+### 0.8 Batch 9D-E — Production Rollout and Verification (scope)
+
+Production readiness review; migration readiness; provider **production** connectivity; scheduler
+**production** activation; production observability; production role/RLS verification; production
+reference-sync smoke; production booking-governance verification where applicable; multi-currency UX
+production smoke; **zero financial regression** verification; rollback/containment plan; final production
+evidence. **No production deployment occurs in this task.**
+
+### 0.9 Architecture invariants (mandatory — reaffirmed)
+
+1. `public` schema only.
+2. Explicit `from_currency → to_currency` semantics.
+3. No silent inversion.
+4. No silent provider fallback.
+5. No blended default provider behavior.
+6. Reference FX layer is separate from booking FX layer.
+7. No automatic write to `public.exchange_rates`.
+8. No retroactive mutation of booked **invoice** rate snapshot.
+9. No retroactive mutation of booked **receipt** rate snapshot.
+10. Allocation realized-FX behavior must remain compatible.
+11. `/allocations/auto` remains **disabled** (HTTP 403 `AUTO_ALLOCATION_DISABLED`) and outside FX sync scope.
+12. Frontend cannot bypass approved backend financial boundaries.
+13. No provider sync may directly mutate invoices, receipts, allocations, journals, or balances.
+14. Company/tenant isolation remains mandatory.
+15. Privileged sync helper RPCs remain **service-role-only**.
+16. Scheduler deployment must be **staging-first and production-gated**.
+
+### 0.10 Non-blocking follow-ups (separate from the provider-integration critical path)
+
+These are **non-blocking** and must **not** be silently folded into 9D-B mandatory scope unless a review
+explicitly assigns them:
+
+- `/fx-rates/latest` global `.limit(500)` occurs before application-side grouping (observed in the 9D-A
+  staging read-API check) — an efficiency/correctness-at-scale follow-up, **not** a provider-integration
+  blocker;
+- future helper `CREATE OR REPLACE FUNCTION` migrations must **repeat explicit privilege hardening**
+  (revoke `PUBLIC`/`anon`/`authenticated`, grant `service_role`) — lesson from Fix3;
+- a broader **repository-wide function `EXECUTE` / default-privilege audit** may be advisable as a
+  separately-scoped task (non-blocking; not a claim that other functions are currently vulnerable).
+
+### 0.11 Gate discipline
+
+**Before 9D-B implementation:**
+
+```text
+Claude Plan Amendment → Codex Amendment Review → User Approval → DG-1 Locked → 9D-B Implementation
+```
+
+**9D-B lifecycle:**
+
+```text
+Implementation → Technical Review → Staging Readiness → Explicit Staging Approval
+→ Staging Deployment → Runtime Verification → Evidence → Closure Review
+```
+
+**Production:** no production provider/scheduler rollout before **9D-E** approval.
+
+### 0.12 Historical accuracy statement
+
+- **Original order (Rev 1):** `9D-A → 9D-C (parallel/early) → DG-1 → 9D-B → 9D-D → 9D-E` (retained in
+  §13/§20, now marked superseded).
+- **Reason for amendment:** 9D-A closed with a validated reference-only foundation, so real-provider
+  ingestion (9D-B) can safely precede booking-rate governance (9D-C); the reference/booking separation is
+  proven, not assumed.
+- **New canonical order (Rev 2):** `9D-A (CLOSED) → DG-1 → 9D-B → 9D-C → 9D-D → 9D-E` (§0.2).
+- **9D-A closure context:** evidence consolidated at `5740ac7bcc08af0251cda102c2a3fd7af07dd10a`
+  (2026-07-06), staging runtime PASS.
+- **DG-1:** **proposed** decision (Frankfurter v2, MAS pinning) **pending Codex review and user
+  approval** — **not** locked and **not** implemented. Frankfurter/MAS integration does **not** exist yet.
 
 ---
 
@@ -407,6 +650,11 @@ transaction mutation**. Out of scope for 9D-A.
 
 ## 13. Sub-Batch Structure (replaces the prior 2-part split)
 
+> **`⚠ ORDERING SUPERSEDED BY §0 (Rev 2).`** The sub-batch *definitions* below remain valid, but the
+> **dependency/execution ordering** stated at the end of this section (9D-C parallel/early, before DG-1
+> and 9D-B) is **superseded** by the revised canonical order in **§0.2**:
+> `9D-A (CLOSED) → DG-1 → 9D-B → 9D-C → 9D-D → 9D-E`. Also note **9D-A is now OFFICIALLY CLOSED** (§0.1).
+
 - **9D-A — Provider-Neutral FX Reference Foundation.** Architecture lock; schema/RLS; provider adapter
   **interface**; deterministic **mock** provider; sync observability; reference-rate **read API**;
   validation/idempotency; **no real provider**; **no production schedule**; **no `exchange_rates` write**.
@@ -426,7 +674,8 @@ transaction mutation**. Out of scope for 9D-A.
   accidental financial mutation.
 
 Dependency order: 9D-A → (9D-C can proceed in parallel, governance-only) → 9D-B (needs DG-1) → 9D-D
-(needs 9D-A read API) → 9D-E (needs all prior + approvals).
+(needs 9D-A read API) → 9D-E (needs all prior + approvals). **[SUPERSEDED — see §0.2. Current canonical
+order: `9D-A (CLOSED) → DG-1 → 9D-B → 9D-C → 9D-D → 9D-E`.]**
 
 ---
 
@@ -503,6 +752,12 @@ report totals.
 
 ## 18. Provider Decision Gate (before 9D-B)
 
+> **Rev 2 update:** a **proposed** DG-1 decision now exists in **§0.3** — **Frankfurter v2** transport
+> with mandatory explicit provider pinning, **initial provider `MAS`**, no API key expected,
+> reference-only destination. It is **PROPOSED pending Codex review and user approval — not locked, not
+> implemented, and no provider API is called.** The evaluation criteria below still apply to that
+> decision.
+
 **DG-1 remains a dedicated gate before 9D-B.** No provider is selected in this amendment, and **no
 provider API is called.**
 
@@ -538,6 +793,11 @@ seed/constants). Provider must cover the confirmed base plus all currencies actu
 | R6 | Scheduler is operational (not in-repo). | Capture scheduler config as evidence at 9D-B/9D-E. |
 
 ## 20. Implementation Sequence
+
+> **`⚠ SUPERSEDED BY §0.2 / §0.11 (Rev 2).`** The gate flow below reflects the Rev 1 ordering (9D-C
+> before DG-1/9D-B) and is retained for history. **9D-A is now CLOSED.** The current canonical order and
+> gate discipline are in **§0.2** and **§0.11**:
+> `9D-A (CLOSED) → DG-1 → 9D-B → 9D-C → 9D-D → 9D-E`.
 
 Gate flow: **Codex confirms this amendment → user implementation approval →** 9D-A (provider-neutral) →
 9D-C (governance, parallelizable) → **DG-1 →** 9D-B (real provider + staging scheduler) → 9D-D (UX +
