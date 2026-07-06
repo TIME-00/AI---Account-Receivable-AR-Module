@@ -15,15 +15,20 @@
      the validated reference-only foundation now allows a real provider to be integrated (9D-B) **before**
      the booking-rate governance batch (9D-C). See **§0** (the authoritative current-state section).
 - **Predecessor:** Batch 9C — Receipt PDF/Image Import Intake (officially closed at `2e5d86e`).
-- **Next gate (Rev 2):** Codex **Batch 9D Plan Amendment Review** → user approval → **DG-1 locked** →
-  **9D-B** implementation. Real provider integration remains blocked until **DG-1** is locked.
+- **Next gate (Rev 2, updated 2026-07-07):** DG-1 is now **FORMALLY APPROVED AND LOCKED** (user approval
+  2026-07-07; see §0.3). The remaining flow is: Codex **DG-1 Lock Confirmation Review** → **9D-B detailed
+  implementation planning** → 9D-B implementation approval → 9D-B implementation. Real provider
+  integration remains blocked until 9D-B is separately approved for implementation.
+  - *(Historical: the Rev 2 gate was originally "Codex Batch 9D Plan Amendment Review → user approval →
+    DG-1 locked → 9D-B implementation"; the amendment review and DG-1 lock are now complete.)*
 
 > This document is planning and discovery only. No backend/frontend code was changed, no migration was
 > created, no schema was modified, no Edge Function was deployed, no cron/provider credential was
 > configured, no external FX provider was called, and neither staging nor production was mutated while
 > producing it. **Daily FX Sync is NOT live in production.** Provider reference rates do **NOT**
 > automatically become booking rates. A latest/reference conversion is **NOT** accounting-authoritative.
-> Frankfurter/MAS integration is a **proposed DG-1 decision pending review/approval — NOT implemented.**
+> Frankfurter/MAS is now a **formally approved and LOCKED DG-1 decision (see §0.3) — but still NOT
+> implemented** (no code, migration, Edge Function, scheduler, or provider call).
 > Batch 9D-A (provider-neutral foundation) is officially closed; **§0 supersedes the earlier execution
 > ordering** in §13 and §20 where they differ.
 
@@ -88,10 +93,22 @@ influence of reference data on the booking-rate path — it is not a prerequisit
 real provider's *reference* data. Moving DG-1 + 9D-B ahead of 9D-C reflects that the reference/booking
 separation is now proven, not assumed.
 
-### 0.3 DG-1 — Formal FX Provider Decision (PROPOSED — pending review & user approval)
+### 0.3 DG-1 — Formal FX Provider Decision (FORMALLY APPROVED AND LOCKED)
 
-> **Status: PROPOSED for Codex/user approval. NOT locked, NOT implemented. No provider API is called in
-> this planning task.** Frankfurter/MAS integration is **not** implemented.
+> **Status: FORMALLY APPROVED BY THE USER AND LOCKED (2026-07-07).** The provider decision below is now
+> the authoritative, locked DG-1 outcome. It remains **NOT implemented**: no backend code, migration, or
+> Edge Function has been written for it, no scheduler/cron is configured, and **no provider API has been
+> called.** The lock authorizes **detailed 9D-B implementation planning only** — not 9D-B implementation,
+> deployment, or any real provider call.
+>
+> **History (preserved):** DG-1 was previously recorded here as **PROPOSED — pending Codex review and
+> user approval** (Rev 2 amendment). The Codex Batch 9D Plan Amendment Review returned **PASS WITH
+> REQUIRED DOCUMENTATION CORRECTIONS**, the corrections were applied (commit `ee976a2`), and the user then
+> gave **explicit formal approval** of the decision below. This section is now upgraded from PROPOSED to
+> LOCKED; the earlier proposed/pending status is retained above for historical accuracy.
+>
+> **Authoritative current state:** Batch 9D-A — **OFFICIALLY CLOSED**; DG-1 — **FORMALLY APPROVED AND
+> LOCKED**; Batch 9D-B — **READY FOR DETAILED IMPLEMENTATION PLANNING, NOT YET IMPLEMENTED**.
 
 - **API / transport:** **Frankfurter v2**.
 - **Provider strategy:** **explicit provider pinning is mandatory**. **Initial provider: `MAS`.**
@@ -752,16 +769,23 @@ report totals.
 
 ## 18. Provider Decision Gate (before 9D-B)
 
-> **Rev 2 update:** a **proposed** DG-1 decision now exists in **§0.3** — **Frankfurter v2** transport
-> with mandatory explicit provider pinning, **initial provider `MAS`**, no API key expected,
-> reference-only destination. It is **PROPOSED pending Codex review and user approval — not locked, not
-> implemented, and no provider API is called.** The evaluation criteria below still apply to that
-> decision.
+> **Lock update (2026-07-07):** DG-1 is now **FORMALLY APPROVED BY THE USER AND LOCKED** — **Frankfurter
+> v2** transport, mandatory explicit provider pinning, **initial provider `MAS`**, no API key expected,
+> reference-only destination (see the authoritative record in **§0.3**). It remains **NOT implemented**
+> and **no provider API has been called**; the lock authorizes 9D-B **detailed implementation planning
+> only**. The historical Rev 2 note below is retained for accuracy.
+>
+> **Rev 2 update (historical — now superseded by the lock above):** a **proposed** DG-1 decision existed
+> in **§0.3** — **Frankfurter v2** transport with mandatory explicit provider pinning, **initial provider
+> `MAS`**, no API key expected, reference-only destination. It was **PROPOSED pending Codex review and
+> user approval — not locked, not implemented, and no provider API called.** The evaluation criteria below
+> still document how that decision was reached.
 
-**DG-1 remains a dedicated gate before 9D-B.** No provider decision is formally locked in this
-amendment, and **no provider API is called.** (A **proposed** DG-1 decision — Frankfurter v2 / initial
-provider `MAS` — exists in §0.3, pending Codex review and user approval; it is not yet locked, not
-implemented, and no provider API has been called.)
+**DG-1 remains a dedicated gate before 9D-B.** As of 2026-07-07 the DG-1 provider decision is now
+**formally approved and LOCKED** (Frankfurter v2 / initial provider `MAS`; authoritative record in §0.3).
+The decision is locked but **not implemented** and **no provider API has been called**; 9D-B
+implementation is still separately gated. *(Historical: at the Rev 2 amendment this decision was still
+proposed and pending approval, and no provider decision was formally locked in that amendment.)*
 
 - **Blocking for:** real provider integration, external host, real external calls, credentials,
   real-provider adapter, provider-specific retry, cron/scheduled real sync, production provider setup and
