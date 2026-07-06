@@ -3,14 +3,15 @@
 ## Document status
 
 > This document records the **full remediation chain** and preserves the complete history of every
-> stage:
+> stage, including the failures:
 >
 > ```text
 > Original implementation → Post-Implementation Review
->   → Fix1 → Post-Fix1 Review
->   → Fix2 → Post-Fix2 Review → Staging Readiness
+>   → Fix1 → Post-Fix1 Review (FAIL)
+>   → Fix2 → Post-Fix2 Review (PASS) → Staging Readiness (PASS)
 >   → First Staging Runtime Attempt (FAIL)
->   → Fix3
+>   → Fix3 → Post-Fix3 Review (PASS)
+>   → Staging Runtime Resume (PASS)
 > ```
 >
 > 1. **Original Batch 9D-A implementation** (`48e93fdcccbc588ef8f235ba63fe117ecf7b8043`,
@@ -20,19 +21,23 @@
 >    Post-Implementation Review;
 > 3. **Fix2** (`b551a694ee40ffc737214ed81be6385f1ce8e669`,
 >    `fix(fx): fence reference writes by lease ownership`) — remediates a **zombie-worker / TOCTOU
->    defect** found in the Post-Fix1 Review; and
+>    defect** found in the Post-Fix1 Review;
 > 4. **Fix3** (`c516d8fdd86349c327bdd234dd4f0d15802ab9ba`,
 >    `fix(fx): revoke anon helper rpc execution`) — remediates a **runtime privilege-boundary defect**
->    discovered during the **first staging runtime attempt, which returned `FAIL`**.
+>    discovered during the **first staging runtime attempt, which returned `FAIL`**; and
+> 5. **Staging runtime resume — `PASS`** — after Fix3, the staging runtime suite resumed (apply `020`
+>    only) and **all** required checks passed. See
+>    [§ Staging runtime verification — resume](#staging-runtime-verification--resume-pass).
 >
 > The original implementation, Fix1, *and* the first staging runtime attempt each surfaced a real,
 > distinct problem. This document does **not** rewrite any of them as though it had been correct, and
-> it does **not** hide the staging failure. Original / Fix1 / Fix2 sections are retained as historical
-> record; claims that a later stage supersedes are marked inline with a **`⚠ SUPERSEDED BY FIX1`**,
-> **`⚠ SUPERSEDED BY FIX2`**, or **`⚠ SUPERSEDED BY FIX3`** note that points to the superseding
-> section. See
-> [§ First staging runtime attempt](#first-staging-runtime-attempt-fail) and
-> [§ Fix3 root cause](#fix3-root-cause-anon-retained-direct-execute).
+> it does **not** hide the staging failure. Original / Fix1 / Fix2 / early-Fix3 sections are retained as
+> historical record; claims that a later stage supersedes are marked inline with a
+> **`⚠ SUPERSEDED BY FIX1`**, **`⚠ SUPERSEDED BY FIX2`**, **`⚠ SUPERSEDED BY FIX3`**, or
+> **`✓ COMPLETED IN STAGING RESUME`** note that points to the superseding/completing section. See
+> [§ First staging runtime attempt](#first-staging-runtime-attempt-fail),
+> [§ Fix3 root cause](#fix3-root-cause-anon-retained-direct-execute), and
+> [§ Staging runtime verification — resume](#staging-runtime-verification--resume-pass).
 >
 > The final current architecture is:
 >
@@ -44,14 +49,16 @@
 >   (migration `020`), because `REVOKE ... FROM PUBLIC` alone did not remove a pre-existing direct
 >   `anon` grant.
 >
-> **Current status:** *Batch 9D-A Fix3 implementation has completed local verification and is ready for
-> Post-Fix3 Review. Migration `020` application and runtime privilege re-verification remain pending
-> before the Batch 9D-A staging runtime suite may resume.*
+> **Current status:** *Batch 9D-A staging runtime verification has **passed**. All required privilege,
+> RLS, authorization, mock sync, lease lifecycle, true concurrency, read API, financial zero-mutation,
+> and cleanup checks completed successfully in staging. Batch 9D-A is **ready for Closure Review** but
+> is **not yet officially closed** — Closure Review has not yet been performed.*
 >
 > Batch 9D-A remains **reference-only**. No real provider, no Frankfurter integration, no scheduler, no
 > `public.exchange_rates` write, and no financial mutation were introduced by the original
-> implementation, Fix1, Fix2, or Fix3. Production project `kusseuycqgdilychphpq` was not touched at any
-> point.
+> implementation, Fix1, Fix2, Fix3, or the staging runtime verification. Production project
+> `kusseuycqgdilychphpq` was **not touched** at any point; staging project `gcdsdyegwjdcskpukqlq` was
+> the only target.
 
 ---
 
@@ -1268,6 +1275,12 @@ The static tests also assert that migration `020` does **not**:
 
 ## Fix3 runtime retest still pending
 
+> **`✓ COMPLETED IN STAGING RESUME`.** This section captured the *pre-resume* pending state. Migration
+> `020` has since been applied to staging (only `020`), and the runtime privilege matrix was proven:
+> `anon` HTTP 401 denied, `authenticated` HTTP 403 denied, `service_role` allowed (rollback-only). See
+> [§ Staging runtime verification — resume](#staging-runtime-verification--resume-pass). The pending
+> wording below is retained as history.
+
 - Migration `020` **has not yet been applied to staging**.
 - Runtime privilege retest **remains pending**.
 
@@ -1283,6 +1296,12 @@ This matrix must be **proven in staging** before Edge Function deployment resume
 to have passed.
 
 ## Fix3 staging resume state
+
+> **`✓ COMPLETED IN STAGING RESUME`.** The resume sequence below was executed and passed: `020` was
+> applied (only `020`, no `017`–`019` reapplication), privileges were verified, and the remaining
+> runtime suite ran to completion. The snapshot below is the *pre-resume* state, retained as history.
+> Current outcome is in
+> [§ Staging runtime verification — resume](#staging-runtime-verification--resume-pass).
 
 Staging currently has:
 
@@ -1313,6 +1332,10 @@ Migrations `017`–`019` are already applied and must **not** be reapplied; only
 on resume.
 
 ## Fix3 remaining staging runtime sequence
+
+> **`✓ COMPLETED IN STAGING RESUME`.** Every item below was executed in the staging runtime resume and
+> passed; see [§ Staging runtime verification — resume](#staging-runtime-verification--resume-pass) for
+> the per-item results. The list is retained here as the plan that was followed.
 
 After the Fix3 runtime privilege matrix passes, remaining staging verification includes (none of these
 is marked PASS yet):
@@ -1369,6 +1392,10 @@ change is made in this documentation task or in Fix3.
 
 ## Fix3 next gate recommendation
 
+> **`✓ COMPLETED`.** Post-Fix3 Review passed and the staging runtime suite then resumed and passed.
+> The current gate status is in
+> [§ Staging runtime — next gate recommendation](#staging-runtime--next-gate-recommendation).
+
 Original 9D-A → Post-Implementation Review `PASS WITH REQUIRED FIXES` → **Fix1**
 → Post-Fix1 Review `FAIL — FIX2 REQUIRED` → **Fix2**
 → Post-Fix2 Review passed → staging readiness granted
@@ -1383,3 +1410,280 @@ Proceed to **Codex Post-Fix3 Review** for Batch 9D-A. After that review passes, 
 sequence above applies (apply `020` only, prove the anon/authenticated/service_role privilege matrix,
 then resume the remaining runtime suite). Real provider / Frankfurter integration and scheduler
 activation remain blocked by DG-1 and out of scope for Batch 9D-A. Batch 9D-B has not started.
+
+---
+
+# Batch 9D-A — Staging Runtime Verification — Resume (PASS)
+
+This section consolidates the completed Batch 9D-A **staging runtime** verification, which resumed
+after Fix3 and **passed**.
+
+- **Post-Fix3 Review:** `PASS`.
+- **Staging runtime verification verdict:** **`PASS`**.
+- **Final Codex recommendation:**
+  `BATCH 9D-A STAGING RUNTIME VERIFICATION PASSED — READY FOR STAGING EVIDENCE CONSOLIDATION AND CLOSURE REVIEW`.
+
+> This is a **staging runtime PASS**. Batch 9D-A still requires **Closure Review** and is **not** yet
+> officially closed. This document does **not** declare `BATCH 9D-A OFFICIALLY CLOSED`.
+
+## Staging target and production boundary
+
+- Authorized staging project: `gcdsdyegwjdcskpukqlq` — the **only** target used.
+- Production project: `kusseuycqgdilychphpq` — **not targeted**; no production migration; no production
+  deployment.
+
+Operational context recorded:
+
+- The root Supabase context was used for staging operations.
+- A stale `backend/supabase/.temp/project-ref` still pointed at production.
+- Codex deliberately **avoided** using that backend-linked context for staging DB operations, so no
+  production DB operation occurred.
+
+*(No credentials are recorded in this evidence.)*
+
+## Resume preflight state
+
+Staging resume preflight confirmed:
+
+- `public.fx_sync_runs` present;
+- `public.fx_reference_rates` present;
+- `public.fx_sync_leases` present;
+- final helper RPCs present;
+- `fx_try_sync_lock` **absent**;
+- old 10-argument upsert **absent**;
+- migrations `017` / `018` / `019` already applied;
+- migration `020` **not yet applied** before resume;
+- direct `anon` privilege **still existed** before `020`, consistent with the first staging failure.
+
+## Migration 020 runtime application
+
+Staging applied **only** `database/020_fx_helper_rpc_privilege_hardening.sql`.
+
+Result: **PASS**, with:
+
+- no `017` / `018` / `019` reapplication;
+- no function body replacement;
+- no RLS change;
+- no concurrency change;
+- no lease behavior change;
+- no financial-table change.
+
+## Final helper RPC privilege catalog
+
+After `020`, the exact helper-function privilege catalog showed **application-level `EXECUTE` only for
+`service_role`**, plus administrative execution for `postgres`. Removed: `PUBLIC`, `anon`,
+`authenticated`.
+
+Covered final helper RPCs:
+
+- `fx_acquire_sync_lease(...)`;
+- `fx_renew_sync_lease(...)`;
+- `fx_complete_sync_run(...)`;
+- the final 11-argument `fx_upsert_reference_rate(...)`.
+
+## Runtime helper RPC privilege matrix
+
+**`Runtime privilege matrix PASS.`**
+
+| Caller          | Result | Detail |
+| --------------- | ------ | ------ |
+| `anon`          | HTTP 401 — denied | created 0 artifacts |
+| `authenticated` (valid AR Clerk staging JWT) | HTTP 403 — denied | created 0 artifacts |
+| `service_role`  | Allowed | via controlled **rollback-only** transaction; synthetic acquire returned `acquired=true`; **no persisted artifact** |
+
+*(No JWT, token, key, password, or `Authorization` header is recorded.)*
+
+## RLS runtime results
+
+Runtime RLS **PASS** for `public.fx_sync_runs`, `public.fx_reference_rates`, and
+`public.fx_sync_leases`:
+
+- same-company authenticated `SELECT`: allowed;
+- cross-company authenticated `SELECT`: HTTP 200, **0 rows**;
+- anonymous `SELECT`: HTTP 200, **0 rows**;
+- authenticated `INSERT`: denied;
+- authenticated `UPDATE`: denied;
+- authenticated `DELETE`: HTTP 200 with **0 affected rows**, followed by verification that the target
+  rows **remained** — i.e. this is **not** a successful deletion, it is a no-op under RLS.
+
+Also recorded: a **PostgREST schema-cache reload** was required after migration application before the
+REST table tests could see the new schema.
+
+## Edge Function deployment
+
+Staging deployment **PASS**:
+
+- `fx-rate-sync`: **ACTIVE v1**;
+- `fx-rates`: **ACTIVE v1**.
+
+Only the approved Batch 9D-A functions were deployed — no unrelated functions, and **no** production
+deployment.
+
+## Role authorization runtime matrix
+
+**`POST /fx-rate-sync/mock-sync`**
+
+| Role | Result |
+| ---- | ------ |
+| Finance Manager | allowed |
+| System Admin | allowed |
+| AR Clerk | HTTP 403 — denied |
+| AR Supervisor | HTTP 403 — denied |
+| Auditor | HTTP 403 — denied |
+| unauthenticated | HTTP 401 — denied |
+
+**`GET /fx-rates/*`** (`/latest`, `/lookup`, `/history`, `/health`)
+
+| Role | Result |
+| ---- | ------ |
+| AR Clerk | allowed |
+| AR Supervisor | allowed |
+| Finance Manager | allowed |
+| Auditor | allowed |
+| System Admin | HTTP 403 — denied |
+| unauthenticated | HTTP 401 — denied |
+
+Deviation recorded: the provided Finance Manager token was expired/invalid, so a **temporary
+staging-only** Finance Manager role was added to an existing test identity and **removed during
+cleanup**. *(No token values recorded.)*
+
+## Mock sync functional results
+
+| Scenario | Terminal status | Counts |
+| -------- | --------------- | ------ |
+| Success | `Succeeded` | attempted 1, succeeded 1, failed 0 |
+| Duplicate retry | `Succeeded` | unchanged 1; no duplicate Active row |
+| Correction | `Succeeded` | previous Active → Superseded; new Active inserted; correction valid |
+| Partial failure | `PartialFailure` | attempted 2, succeeded 1, failed 1 |
+| Failed | `Failed` | attempted 1, succeeded 0, failed 1 |
+
+The Failed scenario is recorded only as executed (attempted 1 / succeeded 0 / failed 1) and is not
+overstated.
+
+## Lease lifecycle runtime results
+
+All **PASS**:
+
+- **Overlap** — competing same-scope acquisition returned `FX_SYNC_ALREADY_RUNNING`; no orphan
+  `Running` row.
+- **Expired reclaim** — successor acquired after expiry; old run terminalized as `Failed` with
+  `completed_at` populated.
+- **Old-owner behavior** — old renew returned false/non-owner; old completion returned false/non-owner;
+  old protected upsert failed closed; **0** reference rows created by the old owner.
+- **Normal release** — completion removed the lease; remaining lease count **0**.
+
+## True concurrency runtime results
+
+Genuine concurrency was executed using **independent parallel Supabase CLI DB query jobs / independent
+DB sessions** (local `psql` was unavailable). These were true parallel sessions, **not** sequential
+calls.
+
+**`All seven required runtime concurrency scenarios passed in staging.`**
+
+1. **Stale owner vs successor reclaim** — successor acquire blocked until the lease-row lock was
+   released; elapsed ≈ 6.9 s; old run recovered.
+2. **Successor wins first** — old-owner upsert failed closed; **0** old-owner rows.
+3. **Old owner after successor** — old renew failed; old upsert failed; old completion failed.
+4. **Concurrent first insert** — 1 Active; 0 Superseded; 1 total history row.
+5. **Concurrent duplicate retry** — 1 Active; no extra history.
+6. **Concurrent correction** — 1 Active; 2 Superseded; 3 total history rows; valid correction chain.
+7. **Retry vs correction** — 1 Active; 1 Superseded; valid serialized outcome.
+
+## Read API runtime results
+
+- **`/fx-rates/latest`** — HTTP 200; `reference_only=true`; Active-only behavior verified. *Known
+  non-blocking limitation:* a global `.limit(500)` occurs before application-side grouping (recorded as
+  a limitation only; not redesigned here).
+- **`/fx-rates/lookup`** — HTTP 200; `reference_only=true`; found result returned with the actual
+  effective date.
+- **Missing lookup** — HTTP 200; `found=false`; safe response.
+- **`/fx-rates/history`** — HTTP 200; Active and Superseded history returned.
+- **`/fx-rates/health`** — HTTP 200; recent sync observability returned; no raw provider payload; no
+  secret exposure.
+
+## Financial zero-mutation runtime verification
+
+Exact before/after counts (unchanged):
+
+```text
+exchange_rates          10 → 10
+invoices                35 → 35
+invoice_lines           33 → 33
+receipts                13 → 13
+allocation_details       5 → 5
+cn_allocations           1 → 1
+import_row_allocations   0 → 0
+journal_entries         42 → 42
+journal_entry_lines     84 → 84
+```
+
+Recorded: no posting; no allocation; no journal mutation; no booking-rate mutation; no financial RPC
+invocation; no `/allocations/auto` call. Batch 9D-A remained **reference-only**.
+
+## Cleanup results
+
+```text
+FX sync leases                          = 0
+FX reference rates                      = 0
+FX sync runs                            = 0
+orphan Running runs                     = 0
+temporary Finance Manager role assignments = 0
+```
+
+**No synthetic metadata was intentionally retained.**
+
+## Limitations and deviations (non-blocking)
+
+1. The initial deploy command used an incorrect CLI workdir and failed before deployment; the corrected
+   deployment succeeded.
+2. A PostgREST schema-cache reload was required after migration `020`.
+3. The provided Finance Manager token was expired/invalid; a temporary staging-only role assignment was
+   used and then cleaned.
+4. Local `psql` was unavailable; genuine concurrency used independent parallel Supabase CLI DB sessions
+   instead.
+
+All four are classified as **non-blocking** deviations.
+
+## Blocking findings
+
+**None.**
+
+## Staging runtime safety boundary
+
+The completed staging runtime work introduced **none** of the following:
+
+- production action;
+- Frankfurter integration;
+- real provider call;
+- provider credentials;
+- scheduler;
+- cron;
+- automatic promotion to `public.exchange_rates`;
+- `public.exchange_rates` mutation;
+- booked snapshot mutation;
+- invoice mutation;
+- receipt mutation;
+- allocation mutation;
+- journal mutation;
+- financial RPC invocation;
+- frontend work;
+- `/allocations/auto` call or change.
+
+## Staging runtime — next gate recommendation
+
+Full chain:
+Original → Post-Implementation Review `PASS WITH REQUIRED FIXES` → **Fix1**
+→ Post-Fix1 `FAIL — FIX2 REQUIRED` → **Fix2**
+→ Post-Fix2 `PASS` → Staging Readiness `PASS`
+→ **first staging runtime `FAIL`** (anon direct `EXECUTE`)
+→ **Fix3** → Post-Fix3 `PASS`
+→ **Staging Runtime Resume `PASS`** (this section).
+
+**Current status:** *Batch 9D-A staging runtime verification has passed. All required privilege, RLS,
+authorization, mock sync, lease lifecycle, true concurrency, read API, financial zero-mutation, and
+cleanup checks completed successfully. Batch 9D-A is **ready for Closure Review** but is **not yet
+officially closed**.*
+
+Proceed to **Codex Batch 9D-A Closure Review**. Batch 9D-A is **not** declared officially closed in
+this document. Real provider / Frankfurter integration and scheduler activation remain blocked by DG-1
+and out of scope for Batch 9D-A. Batch 9D-B has not started.
