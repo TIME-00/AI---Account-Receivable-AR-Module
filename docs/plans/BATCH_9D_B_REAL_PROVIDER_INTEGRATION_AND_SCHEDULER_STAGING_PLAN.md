@@ -6,13 +6,39 @@
 - **Parent plan:** `docs/plans/BATCH_9D_DAILY_FX_RATE_SYNC_AND_MULTI_CURRENCY_UX_PLAN.md` (authoritative phase/order document; this file is the 9D-B sub-plan referenced by master §0.4).
 - **Baseline commit at authoring:** `22a52377df5d338ffe4a2a7501fa38ef320e7bfb` (`docs(plan): lock Batch 9D DG-1 provider decision`; `HEAD == origin/main`, clean tree).
 - **Current approved state:** Batch **9D-A OFFICIALLY CLOSED**; **DG-1 FORMALLY APPROVED, LOCKED, CODEX CONFIRMED**; Batch **9D-B READY FOR DETAILED IMPLEMENTATION PLANNING, NOT YET IMPLEMENTED**.
-- **Next gate:** **Codex Batch 9D-B Plan Second Review** → user staging-implementation approval → implementation → technical review → staging readiness → explicit staging approval → staging deployment → runtime verification → evidence → closure review.
+- **Amendment baseline commit:** `fddc03b419a8fdb8165e591f93746f0784ca554a` (`docs(plan): add Batch 9D-B provider integration plan`; `HEAD == origin/main`, clean tree at amendment start).
+- **Next gate:** **Codex Batch 9D-B Plan Amendment Confirmation Review** → user staging-implementation approval → implementation → technical review → staging readiness → explicit staging approval → staging deployment → runtime verification → evidence → closure review. **Implementation approval has NOT been granted.**
 
 > **Planning-only banner.** No backend code was written, no migration was created or applied, no Edge
 > Function was deployed, no scheduler/cron was configured, no external FX provider (Frankfurter/MAS) was
 > called, and neither staging nor production was mutated while producing this plan. Real provider
-> integration and scheduler activation remain blocked until this plan passes Codex second review and the
-> user grants explicit implementation approval.
+> integration and scheduler activation remain blocked until this plan passes Codex amendment confirmation
+> and the user grants explicit implementation approval.
+
+---
+
+## 0. Codex Batch 9D-B Plan Second Review outcome (recorded)
+
+**Verdict:** `PASS WITH REQUIRED AMENDMENTS`.
+**Final recommendation of that review:** `BATCH 9D-B PLAN AMENDMENT REQUIRED BEFORE IMPLEMENTATION APPROVAL`.
+
+**Codex confirmed (no architecture rejection occurred):**
+- 9D-B architecture direction is sound;
+- 9D-A foundation compatibility is sound;
+- DG-1 compatibility is sound;
+- Frankfurter v2 supports explicit provider filtering (`providers` parameter);
+- `MAS` is an official Frankfurter provider key;
+- no architecture rejection occurred.
+
+**Codex required seven implementation-critical amendments before implementation approval**, all now
+applied in this revision: (1) lock the verified Frankfurter v2 provider contract (§6); (2) lock the source
+identity proof / fail-closed rule (§5); (3) clarify MAS rebasing/provenance wording (§6A); (4) lock the
+scheduler authentication mechanism (§17); (5) lock scheduler cadence/timezone/date semantics (§16); (6)
+lock the initial staging currency allowlist (§8); (7) lock the migration / scheduler-artifact decision
+(§21). Test, acceptance-criteria, and open-decision sections are updated accordingly (§23, §24, §30, §31).
+
+**This revision does not claim that implementation approval has been granted.** The only next gate is
+Codex Batch 9D-B Plan Amendment Confirmation Review, followed by explicit user implementation approval.
 
 ---
 
@@ -133,8 +159,8 @@ ignores `scenario` (mock-only) and instead performs real HTTP with timeout/retry
 ### 4.3 Flow (conceptually identical to 9D-A; no second architecture)
 
 ```text
-trigger (manual privileged OR staging scheduler)
-  → authorization (Edge Function user/role OR scheduler principal)
+trigger (manual privileged /sync OR staging scheduler /scheduled-sync)
+  → authorization (manual: user JWT role; scheduler: internal scheduler secret — §17)
   → fx_acquire_sync_lease
   → provider.fetchRates  (real Frankfurter v2, timeout + bounded retry)
   → response validation  (strict schema)
@@ -169,54 +195,71 @@ fallback/substitution behavior. Enforcement design:
 - **Provider written into history/observability.** The pinned provider ID is persisted to
   `fx_sync_runs.provider` and every `fx_reference_rates.provider`, so staging can prove which provider
   actually ran.
-- **Requested-vs-returned consistency check.** If, and only if, the provider response exposes source/
-  provider metadata, the adapter asserts it is consistent with the pinned provider and **fails closed**
-  on mismatch (maps to `FX_PROVIDER_MISMATCH`, non-retryable). It never silently accepts metadata that
-  differs from the requested provider.
-- **Source-identity limitation (called out honestly).** Frankfurter is an open transport that historically
-  serves ECB-published reference data; whether Frankfurter v2 exposes a **MAS**-specific source and
-  whether provider/source identity is independently provable from the response is **NOT assumed** here and
-  is a **MUST-LOCK** contract item (§8, §36). If source identity cannot be independently proven from the
-  response, the strongest verifiable contract available is: (1) fixed approved host + fixed path
-  (transport identity), (2) the pinned provider ID recorded in observability, (3) an explicit provider/
-  base parameter sent on every request, and (4) fail-closed on any returned metadata that contradicts the
-  request. This limitation must be documented in the 9D-B evidence rather than papered over.
+- **Source identity proof (LOCKED — Codex-verified, mandatory fail-closed).** Frankfurter v2 supports
+  explicit provider filtering and `MAS` is an official Frankfurter provider key (confirmed by Codex second
+  review). Every real sync request **must** send both `providers=MAS` and `expand=providers` (§6), and the
+  adapter **must** verify that the returned provider attribution includes `MAS`. The adapter **fails
+  closed** (maps to `FX_PROVIDER_MISMATCH`, non-retryable) if any of the following holds:
+  - provider attribution is missing;
+  - provider attribution is empty;
+  - provider attribution does not contain `MAS`;
+  - response provider metadata conflicts with the requested `providers=MAS`;
+  - the adapter cannot prove the row came through the MAS provider filter.
+- **Internally persisted `provider='MAS'` is NOT sufficient proof by itself.** MAS source identity must be
+  proven from the **provider response** where attribution is available; the persisted provider column is a
+  record, not a proof. If a Frankfurter endpoint/shape lacks provider attribution, that endpoint/shape
+  **must not** be used for 9D-B real sync unless Codex explicitly approves an equivalent proof mechanism.
+  The chosen `/rates` + `expand=providers` contract (§6) is the approved attribution-bearing shape.
 
 ---
 
-## 6. Provider contract verification (must be validated before coding assumptions are finalized)
+## 6. Provider contract (LOCKED — Frankfurter v2, Codex-verified)
 
-The following Frankfurter v2 contract items are **NOT hard-coded** in this plan. Each is marked
-`[VERIFY]` and must be validated by Codex against current official provider documentation during
-implementation review before the adapter is finalized:
+The Frankfurter v2 contract below is **LOCKED** from the Codex second review. These are no longer open
+`[VERIFY]` questions.
 
-- `[VERIFY]` exact endpoint host and base path (latest vs dated);
-- `[VERIFY]` query parameter names for base currency and target/symbols;
-- `[VERIFY]` how an explicit provider/source (`MAS`) is expressed, or whether it is unsupported by
-  Frankfurter v2 (this directly affects §5 pinning and is the highest-risk item);
-- `[VERIFY]` rate response JSON shape (object of `{ symbol: rate }` vs array);
-- `[VERIFY]` base/from representation in the response;
-- `[VERIFY]` quote/to representation in the response;
-- `[VERIFY]` date/effective-date field name and format;
-- `[VERIFY]` availability of provider/source metadata for identity proof;
-- `[VERIFY]` unsupported-currency behavior (error vs omission);
-- `[VERIFY]` unsupported-pair behavior;
-- `[VERIFY]` weekend behavior (returns last publication vs error);
-- `[VERIFY]` holiday / no-publication-day behavior;
-- `[VERIFY]` historical-date behavior and earliest supported date;
-- `[VERIFY]` "latest prior published rate" behavior when a requested date has no publication;
-- `[VERIFY]` HTTP error semantics (status codes and bodies);
-- `[VERIFY]` documented rate-limit behavior, if any;
-- `[VERIFY]` timeout/retry implications and any documented SLA.
+- **Base host:** `https://api.frankfurter.dev/v2`.
+- **Source host recorded in observability:** `api.frankfurter.dev`.
+- **Primary endpoint:** `GET /rates` (explicit endpoint, not a vague reference).
+- **Query parameters:**
+  - `base=<from_currency>`;
+  - `quotes=<to_currency>`;
+  - `date=<requested_date>` when a historical/requested sync date is supplied (omit for latest);
+  - `providers=MAS` (provider parameter is `providers`; initial provider identifier is `MAS`);
+  - `expand=providers` (required so provider attribution is returned — see §5 fail-closed rule).
+- **Provider parameter:** `providers`.
+- **Initial provider identifier:** `MAS`.
+- **Response shape:** `/rates` returns an **array** of records, each containing at least: `date`, `base`,
+  `quote`, `rate`, and optional provider attribution when `expand=providers` is used. The adapter parses
+  the array (not a `{ symbol: rate }` object).
+- **Authentication:** **no provider API key is required.**
+- **Error / rate-limit behavior:** Frankfurter documents **no daily/monthly quota**, but requests are
+  **rate-limited**, and standard HTTP/JSON error behavior is expected. Rate-limit responses map to
+  `FX_PROVIDER_RATE_LIMIT` (bounded retry, honor `Retry-After`); other HTTP errors map per §12.
 
-**Direction reconciliation.** Frankfurter is base-centric (rates expressed relative to a base). The
-adapter must convert the base-centric response into the module's explicit `from_currency × rate =
-to_currency` direction **without introducing silent inversion or silent reciprocal computation**. Because
-9D-A requires `to_currency == company base`, and Frankfurter expresses rates relative to its own base,
-the mapping strategy (which base to request, and how each requested pair maps onto the response) is a
-`[VERIFY]` + design item: the adapter must request rates in a way that yields the requested direction
-directly, or explicitly reject pairs it cannot represent without inversion. Reciprocal/inverted derivation
-is **out of scope for 9D-B** unless separately approved (§9).
+**Direction reconciliation.** The `/rates` request expresses direction explicitly via `base=<from>` and
+`quotes=<to>`, and each returned record carries `base` and `quote`, so the adapter maps directly to the
+module's `from_currency × rate = to_currency` semantics **without silent inversion or silent reciprocal
+computation**. The adapter asserts returned `base`/`quote` equal the requested `from`/`to`; a pair that
+would require inversion/reciprocal is rejected (per-pair failure), never silently derived (out of scope
+for 9D-B unless separately approved, §9). Because 9D-A requires `to_currency == company base`, `quotes` is
+always the company base currency.
+
+### 6A. MAS rebasing / provenance classification (LOCKED)
+
+MAS's official source commonly publishes exchange rates **relative to SGD**. If Frankfurter returns a
+requested **non-SGD** pair using MAS-sourced data and performs rebasing/conversion internally, the AR
+module must classify that row as a **`Frankfurter-rebased MAS reference rate`**, **not** a **`direct
+MAS-published pair quote`**. Evidence must not overstate provider provenance.
+
+For each stored real provider row, preserve: requested `from_currency`; requested `to_currency`; provider
+effective date; `fetched_at`; `provider = MAS`; `source_host = api.frankfurter.dev`; provider attribution
+evidence where available; and whether the pair is **direct provider-published** or **Frankfurter-rebased**
+where this can be determined (e.g. SGD-quoted pairs are candidates for direct; non-SGD pairs against a
+non-SGD base are candidates for rebased). If direct-vs-rebased cannot be independently proven per row, the
+evidence must **say so clearly** and classify the rate **conservatively** as
+`Frankfurter-normalized / Frankfurter-rebased MAS reference data`. (Implementation note: the existing
+`provider_rate_type` column carries this classification label; no schema change is needed.)
 
 ---
 
@@ -245,22 +288,29 @@ failure) unless separately approved.
 
 ---
 
-## 8. Currency universe and pair scope (conservative staging policy)
+## 8. Initial staging currency allowlist (LOCKED)
 
-9D-B does **not** sync all possible pairs. The controlled staging policy:
+9D-B does **not** sync all possible pairs. The initial 9D-B staging allowlist is **LOCKED** to a
+conservative set:
 
-- **Base:** company base currency (verified from `companies.base_currency`; test fixtures use `MYR`).
-- **Source set:** the existing supported reference set intersected with currencies actually in use:
-  `SUPPORTED_REFERENCE_CURRENCIES = {MYR, SGD, USD, EUR, GBP, CNY}` (from `validation.ts`), minus the
-  base. Singapore/Malaysia relevance keeps SGD/MYR central.
-- **Policy chosen:** **explicit allowlist of `source → base` pairs**, i.e. each supported source currency
-  quoted against the company base (mirrors `defaultMockPairs`). This avoids uncontrolled all-pairs
-  expansion and keeps `to_currency == base` invariant intact.
-- `[VERIFY]` narrow the staging allowlist to currencies present in real transaction data (inspect
-  `invoices` / `receipts` transaction currencies during implementation) so staging does not sync
-  irrelevant pairs.
-- **Tenant scoping preserved:** all sync is company-scoped; the pair set is resolved per company from that
-  company's base currency.
+```text
+SGD → MYR
+USD → MYR
+EUR → MYR
+```
+
+Rationale:
+- **MYR** is the expected practical staging destination/base for Malaysia-oriented testing;
+- **SGD → MYR** is core Singapore/Malaysia business relevance;
+- **USD** and **EUR** provide common foreign-currency coverage;
+- this avoids uncontrolled all-pairs expansion and keeps the `to_currency == base` invariant intact.
+
+**Preflight rule (mandatory):** if staging preflight proves the selected staging company base currency is
+**not `MYR`**, Codex must **stop and propose a plan amendment before implementation**. The destination
+currency must **not** be silently switched, and the allowlist must **not** be auto-expanded to all
+available currencies. Unsupported or unavailable pairs must **fail explicitly** (per-pair failure, no
+fabrication). All sync remains company-scoped; the pair set is resolved per company from that company's
+base currency.
 
 ---
 
@@ -277,14 +327,15 @@ fetched_at            = wall-clock ingestion timestamp
 Rules:
 - **No fabricated weekend rows, no fabricated holiday rows, no fake effective date.** Persist only the
   provider's actual effective date.
-- **Weekend/holiday scheduler behavior (proposed, pending §6 `[VERIFY]`):** on a non-publication day the
-  scheduler run requests the latest available rate; if the provider returns the **latest prior published
-  date**, the sync ingests it under that real effective date — which, if already present, resolves to a
-  **noop** via the existing versioned upsert (no new history). The run is still recorded in
-  `fx_sync_runs` (status `Succeeded`, `inserted=0`, `unchanged=N`). If the provider instead returns an
-  error/empty for a non-publication day, the run terminalizes as `Succeeded` with zero pairs or
-  `PartialFailure`, never fabricating a row. The exact choice (noop-latest vs skip) is locked once §6
-  weekend/holiday behavior is verified.
+- **Weekend/holiday scheduler behavior (LOCKED):** the scheduler may still fire daily. The **provider
+  response's actual effective date is authoritative**. On a non-publication day the run requests the
+  latest available rate; if the provider returns the **latest prior published date**, the sync ingests it
+  under that real prior effective date — which, if already present, resolves to a **noop** via the
+  existing versioned upsert (no new history), recorded in `fx_sync_runs` (`Succeeded`, `inserted=0`,
+  `unchanged=N`). If the provider returns **no result**, the run terminalizes as a controlled `Succeeded`
+  (zero pairs) or `PartialFailure`/`Failed` per existing run semantics — **never fabricating a row**. The
+  module **never fabricates a weekend/holiday row** and **never claims a rate was published on a date the
+  provider did not return.**
 - **Duplicate retrieval of the same effective date** → existing upsert returns `noop` (unchanged), no
   extra history row.
 - **Provider later revises a historical value** → existing upsert supersedes the prior Active row and
@@ -381,6 +432,10 @@ real route; the mock route is preserved.
   `effective_date`. Safe error via existing `errorResponse`.
 - **Reference-only:** route writes only to `fx_reference_rates` / `fx_sync_runs` / lease infra via the
   existing helper RPCs.
+- **Scheduler sibling route:** `POST /fx-rate-sync/scheduled-sync` is added alongside `/sync` for
+  scheduler invocation; it is authenticated by the internal scheduler secret (not a user JWT) over a
+  controlled configured company/pair scope, and reuses the **same** orchestration after authorization
+  (§17). The mock route `/mock-sync` is preserved.
 
 ---
 
@@ -415,12 +470,12 @@ The scheduler design must define:
 
 | Aspect | 9D-B staging decision |
 | --- | --- |
-| technology | `pg_cron` + `pg_net`, Vault-stored secret (staging only) |
-| invocation target | `POST /fx-rate-sync/sync` Edge Function route (**not** a direct SQL call to `fx_upsert_reference_rate`) |
-| authorization model | scheduler principal (see §17); least privilege |
-| daily cadence | once daily (§16) |
-| timezone | Asia/Singapore (SGT, UTC+8) — proposed (§16) |
-| provider publication timing | run after expected publication; `[VERIFY]` (§6/§16) |
+| technology | `pg_cron` + `pg_net` + Supabase Vault + dedicated internal scheduler secret (staging only) |
+| invocation target | `POST /fx-rate-sync/scheduled-sync` Edge Function route (**not** a direct SQL call to `fx_upsert_reference_rate`; **not** the manual `/sync` route) |
+| authorization model | internal scheduler secret validated by the Edge Function (see §17); no user JWT, no service-role key in cron |
+| daily cadence | once daily at **15:30 SGT** (§16) |
+| timezone | Asia/Singapore (SGT, UTC+8) — LOCKED (§16) |
+| provider publication timing | run after the MAS midday quote window; LOCKED 15:30 SGT (§16) |
 | weekend behavior | latest-prior / noop, no fabrication (§9) |
 | holiday behavior | same as weekend; no fabrication (§9) |
 | overlap interaction | reuse `fx_sync_leases`; `FX_SYNC_ALREADY_RUNNING` on overlap (§18) |
@@ -437,39 +492,78 @@ The scheduler design must define:
 
 ---
 
-## 16. Scheduler cadence and timezone (proposed)
+## 16. Scheduler cadence and timezone (LOCKED)
 
-- **Timezone:** Asia/Singapore (SGT, UTC+8) — matches the Singapore deployment context.
-- **Daily execution time (proposed):** **06:30 SGT** daily, chosen to run after the prior business day's
-  provider publication has settled. Marked **proposed pending §6 publication-timing `[VERIFY]`**;
-  Frankfurter/ECB publishes ~16:00 CET on TARGET working days, and MAS timing differs — the exact run time
-  is locked only once publication timing is verified.
-- **Rationale relative to publication:** requesting "latest" at 06:30 SGT captures the most recent
-  published effective date without racing publication.
-- **Weekend handling:** run still fires; resolves to latest-prior/noop (§9), no fabrication.
+Codex found that the MAS official source indicates rates are quoted around **midday Singapore**, while
+Frankfurter ingestion timing is not independently proven. The weak 06:30 SGT proposal is replaced. Locked
+staging cadence:
+
+```text
+Daily at 15:30 Asia/Singapore time
+```
+
+- **Timezone:** Asia/Singapore (SGT, UTC+8).
+- **Daily execution time:** **15:30 SGT**, chosen because it runs **after the MAS midday quote window**;
+  it is more conservative than a morning sync, still within the Singapore/Malaysia business day, and
+  remains **staging-first and subject to runtime evidence**.
+- **Freshness (explicit):** the 9D-B staging scheduler **does not guarantee same-day freshness.** If
+  Frankfurter returns the **latest prior published provider effective date**, the module stores that
+  **actual provider effective date** and **must not fabricate a same-day effective date.**
+- **Weekend/holiday handling (LOCKED, per §9):** scheduler may still fire daily; the provider response's
+  actual effective date is authoritative; if the provider returns a prior business date, store that prior
+  effective date; if the provider returns no result, terminalize as a controlled failure/noop per existing
+  run semantics; **never fabricate weekend/holiday rows**; **never claim a rate was published on a date the
+  provider did not return.**
 - **Retry window:** shared bounded retry (§11), total budget ≪ lease.
 - **Previous run still active:** overlap rejection via lease (`FX_SYNC_ALREADY_RUNNING`); the scheduler
   does not force-steal an active lease.
 
 ---
 
-## 17. Scheduler authentication (no long-lived secret in repo/SQL/docs/frontend)
+## 17. Scheduler authentication (LOCKED)
 
-Constraints (mandatory): **no** long-lived secret in repository files, SQL text, documentation, or
-frontend environment variables.
+Locked staging design:
 
-- **Recommended model:** a **dedicated automation principal per eligible company** holding the minimum
-  privileged sync role (`Finance Manager` **or** `System Admin`), whose access token is stored **only in
-  Supabase Vault**; `pg_net` reads it from Vault at invocation time and sends it as the `Authorization`
-  header to the Edge Function. This reuses the existing role checks unchanged (least surprise, least new
-  code) and keeps the secret out of the repo.
-- **Alternative (`[VERIFY]`/decide at review):** a service-role internal-invocation path guarded by a
-  Vault-stored shared secret header validated inside the Edge Function. Rejected as the default because it
-  adds a new auth path; kept as a documented fallback only.
-- **Secret storage:** Supabase Vault (staging). **Least privilege:** automation principal limited to the
-  sync trigger scope. **Rotation:** rotate the Vault secret without code changes. **Logging redaction:**
-  `pg_net`/function logs must never include the Authorization header or token; sanitization enforced.
-- No credential is invented, printed, or committed in this plan or in the implementation.
+```text
+pg_cron + pg_net + Supabase Vault + dedicated internal scheduler secret + Edge Function scheduler route
+```
+
+**Behavioral rules (mandatory):**
+- the scheduler must **invoke Edge Function orchestration** (HTTP), not mutate FX tables directly;
+- the scheduler must **not** call helper RPCs directly;
+- the scheduler must **not** store or use the **service-role key** in the cron job;
+- the scheduler must **not** store an expiring **user JWT** as a permanent cron credential;
+- the scheduler must **not** store secrets in repository files;
+- the scheduler must **not** store raw secret values in SQL migration text;
+- the scheduler must **not** expose secrets in logs.
+
+**Credential model (LOCKED):**
+- Use a **dedicated internal scheduler secret** (not the service-role key, not a user JWT).
+- The secret is stored in **Supabase Vault** for the database scheduler side; `pg_net` reads it from Vault
+  at invocation time and sends it to the Edge Function.
+- The Edge Function validates the scheduler invocation against a **matching secure secret stored in the
+  function runtime secret environment**.
+- **Secret creation and value injection are operational steps** and **must not be committed to Git**
+  (no repo file, no SQL text, no documentation contains the raw value). Migrations reference the Vault
+  secret **by name only**.
+- **Least privilege / rotation / redaction:** the scheduler secret is scoped to the scheduler route only;
+  rotate via Vault + function env without code changes; `pg_net`/function logs must never include the
+  Authorization header, the scheduler secret, or any token.
+
+**Scheduler route (LOCKED — recommended): `POST /fx-rate-sync/scheduled-sync`.** Reasons: avoids
+overloading the manual user-trigger route; separates scheduler-secret authentication from user-JWT role
+authorization; still reuses the same sync orchestration service after authorization; easier to audit and
+test.
+
+- **Manual route** remains `POST /fx-rate-sync/sync` and **requires normal privileged user authorization**
+  (`Finance Manager` or `System Admin`).
+- **Scheduler route** `POST /fx-rate-sync/scheduled-sync` **requires a valid internal scheduler secret**
+  and a **controlled configured company/pair scope** (it does **not** accept a user JWT as scheduler
+  auth).
+- **Both routes reuse the same service orchestration after authorization** (single sync code path; no
+  second sync architecture).
+
+No credential is invented, printed, or committed in this plan or in the implementation.
 
 ---
 
@@ -521,28 +615,34 @@ path:
 
 ---
 
-## 21. Database migration assessment
+## 21. Database migration / scheduler-artifact decision (LOCKED)
 
 **Reference-rate ingestion needs no schema change.** The 017 schema already carries `provider`,
 `source_host`, `provider_rate_type`, `provider_timestamp`, `fetched_at`, `sync_run_id`, versioning, RLS,
 and grants sufficient for real provider data. Migrations **017–020 must not be modified.**
 
-A **new forward-only migration (proposed `021_fx_scheduler_staging.sql`)** is likely required **only for
-the scheduler**, and only if the scheduler design stores state in the database. Its candidate contents
-(each `[VERIFY]`/decide at review):
+**Locked decision:** Batch 9D-B **will include a forward-only scheduler infrastructure migration only if
+required for staging scheduler setup**, and the **default implementation path is
+`database/021_fx_scheduler_staging.sql`** unless implementation preflight proves a safer no-migration
+scheduler configuration. This is **no longer an unresolved open question.**
 
-- enable `pg_cron` and `pg_net` extensions in **staging** (if not already enabled);
-- optionally a small `fx_sync_schedules` / eligible-company config table (RLS, `service-role`-only writes,
-  SELECT gated by company access) if eligibility is DB-driven;
-- the scheduled job definition (or leave the job creation to a controlled staging operational step rather
-  than committed SQL, to avoid embedding invocation details);
-- **no** secret in SQL text (Vault only);
-- backward compatible, additive, forward-only; **no** change to 017–020;
-- rollback/containment = drop the job and (if created) the config table (§31).
+**`database/021_fx_scheduler_staging.sql` — purpose (forward-only, additive):**
+- enable/use required scheduler/network extensions (`pg_cron`, `pg_net`) if not already available;
+- create the staging scheduler job **if** the chosen Supabase scheduler approach requires SQL-managed
+  cron;
+- reference the **Vault secret by name only**;
+- store **no raw secret value**;
+- perform **no rate-data schema change**;
+- perform **no financial table change**;
+- perform **no helper RPC privilege weakening** (and if any `CREATE OR REPLACE FUNCTION` is introduced, it
+  repeats explicit privilege hardening — Fix3 lesson);
+- perform **no `exchange_rates` write**;
+- rollback/containment = drop the job and (if created) any config table (§28).
 
-If review concludes the scheduler can be fully expressed via `config.toml`/Vault without SQL state, then
-**no migration is required** and this is stated explicitly in the evidence. Decision is an Open Decision
-(§35).
+**No-migration escape hatch:** if implementation preflight proves the scheduler can be configured safely
+**without** a migration (e.g. fully via `config.toml` + Vault + function env), Codex must instead create a
+**scheduler runbook/config artifact** and **explicitly document why no migration is needed** in the
+evidence. Either way, the decision and its justification are recorded; the question is not left open.
 
 ---
 
@@ -553,8 +653,8 @@ If review concludes the scheduler can be fully expressed via `config.toml`/Vault
 | `backend/supabase/functions/fx-rate-sync/frankfurter.ts` | **create** | real `FrankfurterFxProvider` (host allowlist, request builder, fetch+timeout+retry, parser, per-pair mapping) |
 | `backend/supabase/functions/fx-rate-sync/provider.ts` | **modify** | add `createFxProvider(providerId)` selection factory; preserve `DeterministicMockFxProvider` unchanged |
 | `backend/supabase/functions/fx-rate-sync/validation.ts` | **modify** | add `APPROVED_REAL_PROVIDER_ID`, `APPROVED_PROVIDER_HOSTS`, `assertApprovedProvider`, timeout/retry constants, optional metadata-consistency check; keep all existing validators |
-| `backend/supabase/functions/fx-rate-sync/service.ts` | **modify** | add `runProviderSync` reusing the lease lifecycle; extract shared orchestration from `runMockSync`; wrap `fetchRates` with timeout/retry; replace `assertProviderNeutralOnly` with `assertApprovedProvider` |
-| `backend/supabase/functions/fx-rate-sync/index.ts` | **modify** | add `POST /fx-rate-sync/sync` route; keep `/mock-sync` |
+| `backend/supabase/functions/fx-rate-sync/service.ts` | **modify** | add `runProviderSync` reusing the lease lifecycle; extract shared orchestration from `runMockSync`; wrap `fetchRates` with timeout/retry; replace `assertProviderNeutralOnly` with `assertApprovedProvider`; add scheduler-secret validation for the `/scheduled-sync` path (env-secret compare) reusing the same orchestration after auth |
+| `backend/supabase/functions/fx-rate-sync/index.ts` | **modify** | add `POST /fx-rate-sync/sync` (manual, user-JWT) and `POST /fx-rate-sync/scheduled-sync` (scheduler-secret) routes; keep `/mock-sync` |
 | `backend/supabase/functions/fx-rate-sync/types.ts` | **modify** | add real-provider/adapter config + retry/timeout + metadata types |
 | `backend/supabase/functions/fx-rate-sync/fx_reference_test.ts` | **modify** | add adapter/service unit + integration tests (injected fake fetch); preserve existing tests |
 | `backend/supabase/functions/fx-rates/index.ts` | **no change (assess)** | read API is provider-generic; prefer no change |
@@ -588,6 +688,20 @@ testable; manual-trigger overlap.
 **D. Regression tests:** 9D-A mock path still works; helper privilege boundary unchanged (`service-role`
 only); RLS unchanged; concurrency fencing unchanged; read APIs remain `reference_only`; **no financial
 mutation path introduced**.
+
+**E. Source-attribution and scheduler-auth tests (required by Codex second review):**
+1. source-attribution test requiring returned providers include `MAS`;
+2. Frankfurter `/rates` **array** response parsing test;
+3. **missing** providers attribution → fail-closed test (`FX_PROVIDER_MISMATCH`);
+4. **empty** providers attribution → fail-closed test;
+5. provider attribution **mismatch** → fail-closed test;
+6. **rebased** MAS pair provenance test (non-SGD pair classified `Frankfurter-rebased MAS reference rate`,
+   §6A);
+7. scheduler **auth failure** test (missing/invalid scheduler secret rejected);
+8. **expired/invalid scheduler credential** test;
+9. **no unverified MAS pinning based only on internally persisted provider ID** (persisted `provider='MAS'`
+   alone must not satisfy proof);
+10. staging runtime proof that `providers=MAS` **and** `expand=providers` were actually used on the wire.
 
 Deno test suite must remain green (existing 9D-A tests preserved); new tests added, not replaced.
 
@@ -635,6 +749,17 @@ must never be labeled as real runtime proof.**
 34. read API smoke **[M]**
 35. health observability reflects real runs **[M]**
 36. cleanup of synthetic/manual staging artifacts **[M]**
+37. returned provider attribution includes `MAS` **[M]**
+38. `providers=MAS` **and** `expand=providers` actually sent on the wire (staging proof) **[M]**
+39. missing provider attribution → fail-closed **[S]**
+40. empty provider attribution → fail-closed **[S]**
+41. provider attribution mismatch → fail-closed **[S]**
+42. `/rates` array response parsing **[M/S]**
+43. rebased MAS pair classified `Frankfurter-rebased MAS reference rate` (§6A) **[M/S]**
+44. persisted `provider='MAS'` alone is NOT accepted as pinning proof **[S]**
+45. scheduler auth failure (missing/invalid scheduler secret) rejected **[R]**
+46. expired/invalid scheduler credential rejected **[R]**
+47. staging company base currency is `MYR` preflight (else stop + amend, §8) **[M]**
 
 ---
 
@@ -718,41 +843,54 @@ deleted.
 
 ## 30. Open decisions
 
-**Must be locked before implementation:**
-- exact Frankfurter v2 endpoint/host/path contract (`[VERIFY]` §6);
-- exact provider/base query parameter names (`[VERIFY]` §6);
-- **whether/how `MAS` is expressible on Frankfurter v2 and how source identity is proven** — highest risk;
-  if unprovable, adopt the strongest verifiable contract in §5 and document the limitation
-  (recommendation: proceed with transport identity + pinned provider ID + fail-closed metadata check);
-- exact approved real provider ID string (`APPROVED_REAL_PROVIDER_ID`) and source-host allowlist;
-- real route name — **recommendation: `POST /fx-rate-sync/sync`**;
-- currency allowlist policy — **recommendation: explicit `source → base` allowlist narrowed to in-use
-  transaction currencies**;
-- scheduler technology — **recommendation: `pg_cron` + `pg_net` + Vault**;
-- scheduler timezone/cadence — **recommendation: 06:30 SGT daily, pending publication-timing verify**;
-- retry numbers + timeout — **recommendation: 3 attempts, expo backoff + jitter, 8 s timeout, ≤~30 s
-  budget**;
-- multi-company scheduling strategy — **recommendation: per-company invocation over an explicit eligible
-  allowlist (single staging company first)**;
-- whether a schema migration is needed — **recommendation: none for rate data; conditional forward-only
-  `021` for scheduler state only**.
+**LOCKED / reviewed (moved out of open by Codex second review — no longer open questions):**
+- endpoint host/base path — `https://api.frankfurter.dev/v2` (§6);
+- primary endpoint — `GET /rates` (§6);
+- query parameters — `base`, `quotes`, `date`, `providers`, `expand` (§6);
+- provider parameter — `providers` (§6);
+- MAS identifier — `MAS` (§6);
+- `expand=providers` attribution + fail-closed proof rule (§5, §6);
+- authentication — **no API key** (§6);
+- scheduler authentication model — `pg_cron` + `pg_net` + Vault + dedicated internal scheduler secret +
+  `POST /fx-rate-sync/scheduled-sync` route (§17);
+- scheduler cadence/timezone — **daily 15:30 Asia/Singapore** (§16);
+- initial staging allowlist — `SGD→MYR`, `USD→MYR`, `EUR→MYR` with MYR base preflight (§8);
+- default scheduler migration path — `database/021_fx_scheduler_staging.sql`, or a documented
+  no-migration scheduler artifact if preflight proves it safe (§21).
 
-**May be resolved during implementation review (no architecture/security impact):** exact backoff
-constants within the stated bounds; log field formatting; test fixture values; health-response cosmetic
-fields.
+**May be resolved during implementation review (explicitly non-architecture-changing, non-security-critical
+— safe to resolve at implementation):** exact request timeout value within the stated bound (proposed 8 s,
+§10); exact retry backoff constants within the stated bounds (3 attempts, expo + jitter, ≤~30 s budget,
+§11); the exact `APPROVED_REAL_PROVIDER_ID` string constant and `provider_rate_type` provenance label
+text; narrowing the eligible-company scope to the single staging company; log field formatting; test
+fixture values; health-response cosmetic fields.
+
+No architecture- or security-critical decision remains unresolved.
 
 ---
 
 ## 31. Acceptance criteria
 
-9D-B is complete only when: real provider adapter works against Frankfurter v2; MAS pinning is proven (or
-the strongest verifiable contract is proven and its limitation documented); no fallback/substitution
+9D-B is complete only when: real provider adapter works against Frankfurter v2; no fallback/substitution
 occurs; pair direction is correct with no inversion; date/effective-date/weekend semantics are correct
 with no fabrication; timeout/retry semantics work; scheduler staging invocation is proven; scheduler
 overlap safety works; 9D-A lease/fencing/RLS/privilege regressions pass; correction history remains valid;
 read APIs remain `reference_only`; **zero `exchange_rates` mutation**; **zero financial mutation**;
 security boundaries intact; cleanup/retained-staging metadata documented; evidence complete (three
 evidence classes not blended); Closure Review passes.
+
+**Additional acceptance criteria (Codex second review):**
+- provider attribution with `MAS` is **verified from the response** where available;
+- **no “MAS pinning” proof based solely on the internal persisted provider value**;
+- evidence classifies non-direct pairs as **`Frankfurter-rebased MAS reference rates`** where applicable
+  (§6A), and does not overstate provenance;
+- **scheduler authentication proof** is produced **before** scheduler activation;
+- the scheduler route **does not accept a user JWT as scheduler auth**;
+- the scheduler route **does not use the service-role key in cron**;
+- the **staging allowlist is exactly `SGD→MYR`, `USD→MYR`, `EUR→MYR`** (§8) unless a reviewed amendment
+  changes it, and the MYR base-currency preflight passed (else stop + amend);
+- the **`021` migration decision** (or the no-migration scheduler artifact decision) is **documented with
+  evidence** (§21).
 
 ---
 
