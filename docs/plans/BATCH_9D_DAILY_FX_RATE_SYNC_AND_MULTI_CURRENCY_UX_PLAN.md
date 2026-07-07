@@ -136,6 +136,12 @@ separation is now proven, not assumed.
 
 ### 0.4 Batch 9D-B — Real Provider Integration and Scheduler Staging
 
+> **Detailed sub-plan (documentation-only pointer):** the implementation-ready 9D-B plan lives in
+> `docs/plans/BATCH_9D_B_REAL_PROVIDER_INTEGRATION_AND_SCHEDULER_STAGING_PLAN.md` (adapter design,
+> provider-contract verification, scheduler design, file-level change map, 36-item runtime matrix). It is
+> **not yet implemented** and is pending Codex Batch 9D-B Plan Second Review. This master section remains
+> the authoritative scope/order summary.
+
 **Provider adapter:** Frankfurter v2 integration; explicit provider parameter/pinning; **initial MAS
 source**; exact pair normalization; explicit unsupported-pair handling; explicit **no-silent-fallback**
 behavior; response validation; safe provider error mapping; sanitized error handling; request timeout;
