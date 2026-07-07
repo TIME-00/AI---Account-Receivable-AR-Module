@@ -5,11 +5,13 @@
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { extractCompanyId, getAuthContext } from '../_shared/auth.ts';
-import { errorResponse, successResponse, ValidationError } from '../_shared/errors.ts';
+import { errorResponse, successResponse, BusinessError, ValidationError } from '../_shared/errors.ts';
+import { validateUUID } from '../_shared/validators.ts';
 import { FxRateSyncService, assertProviderNeutralOnly } from './service.ts';
 import type { ProviderPairRequest } from './types.ts';
-import { MOCK_PROVIDER_ID, assertDate } from './validation.ts';
+import { APPROVED_REAL_PROVIDER_ID, MOCK_PROVIDER_ID, assertApprovedRealProvider, assertDate } from './validation.ts';
 import type { MockFxScenario } from './provider.ts';
+import { SCHEDULER_COMPANY_ENV, SCHEDULER_SECRET_ENV, validateSchedulerSecret } from './scheduler_auth.ts';
 
 const MOCK_SCENARIOS: MockFxScenario[] = [
   'success',
@@ -64,6 +66,15 @@ function parseScenario(value: unknown): MockFxScenario | undefined {
   return scenario as MockFxScenario;
 }
 
+function getScheduledCompanyId(): string {
+  const companyId = Deno.env.get(SCHEDULER_COMPANY_ENV);
+  if (!companyId) {
+    throw new BusinessError('FX_SCHEDULER_SCOPE_NOT_CONFIGURED', 'FX scheduler company scope is not configured.', 500);
+  }
+  validateUUID(companyId, 'FX_SCHEDULER_COMPANY_ID');
+  return companyId;
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') return handleCORS();
 
@@ -71,7 +82,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
     const subPath = getSubPath(url.pathname);
 
-    if (req.method !== 'POST' || !/^\/mock-sync\/?$/i.test(subPath)) {
+    const service = new FxRateSyncService();
+
+    if (req.method === 'POST' && /^\/scheduled-sync\/?$/i.test(subPath)) {
+      validateSchedulerSecret(req, Deno.env.get(SCHEDULER_SECRET_ENV));
+      const companyId = getScheduledCompanyId();
+      const result = await service.runScheduledProviderSync({
+        companyId,
+        effectiveDate: new Date().toISOString().slice(0, 10),
+        requestMode: 'latest',
+      });
+      return jsonResponse(successResponse(result), 200);
+    }
+
+    if (req.method !== 'POST' || (!/^\/mock-sync\/?$/i.test(subPath) && !/^\/sync\/?$/i.test(subPath))) {
       return jsonResponse({
         success: false,
         error: { code: 'ROUTE_NOT_FOUND', message: `No route matches ${req.method} ${url.pathname}` },
@@ -82,23 +106,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const auth = await getAuthContext(req, companyId);
     const body = await parseJson(req);
 
-    const provider = String(body.provider ?? MOCK_PROVIDER_ID);
-    assertProviderNeutralOnly(provider);
-
     const effectiveDate = assertDate(
       String(body.effective_date ?? new Date().toISOString().slice(0, 10)),
       'effective_date',
     );
 
     const pairs = parsePairs(body.pairs);
-    const scenario = parseScenario(body.scenario);
 
-    const service = new FxRateSyncService();
-    const result = await service.runMockSync(auth, {
-      effectiveDate,
-      pairs,
-      scenario,
-    });
+    let result;
+    if (/^\/mock-sync\/?$/i.test(subPath)) {
+      const provider = String(body.provider ?? MOCK_PROVIDER_ID);
+      assertProviderNeutralOnly(provider);
+      const scenario = parseScenario(body.scenario);
+      result = await service.runMockSync(auth, {
+        effectiveDate,
+        pairs,
+        scenario,
+      });
+    } else {
+      const provider = String(body.provider ?? APPROVED_REAL_PROVIDER_ID);
+      assertApprovedRealProvider(provider);
+      result = await service.runProviderSync(auth, {
+        provider,
+        effectiveDate,
+        pairs,
+        requestMode: 'date',
+      });
+    }
 
     return jsonResponse(successResponse(result), 200);
   } catch (error) {

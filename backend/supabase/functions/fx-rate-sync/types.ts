@@ -43,6 +43,15 @@ export interface ProviderFetchResult {
   failures: ProviderPairFailure[];
 }
 
+export type ProviderRequestMode = 'date' | 'latest';
+
+export interface ProviderFetchParams {
+  effectiveDate: string;
+  requestMode?: ProviderRequestMode;
+  pairs: ProviderPairRequest[];
+  scenario?: string;
+}
+
 export interface ExistingReferenceRate {
   id: string;
   rate: string | number;

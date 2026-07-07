@@ -1,5 +1,6 @@
-import type { ProviderFetchResult, ProviderPairRequest, ProviderRateInput } from './types.ts';
-import { MOCK_PROVIDER_ID, MOCK_SOURCE_HOST } from './validation.ts';
+import type { ProviderFetchParams, ProviderFetchResult, ProviderPairRequest, ProviderRateInput } from './types.ts';
+import { FrankfurterFxProvider, type FrankfurterProviderOptions } from './frankfurter.ts';
+import { APPROVED_REAL_PROVIDER_ID, MOCK_PROVIDER_ID, MOCK_SOURCE_HOST } from './validation.ts';
 
 export type MockFxScenario =
   | 'success'
@@ -14,11 +15,7 @@ export type MockFxScenario =
 export interface FxProviderAdapter {
   readonly provider: string;
   readonly sourceHost: string;
-  fetchRates(params: {
-    effectiveDate: string;
-    pairs: ProviderPairRequest[];
-    scenario?: MockFxScenario;
-  }): Promise<ProviderFetchResult>;
+  fetchRates(params: ProviderFetchParams): Promise<ProviderFetchResult>;
 }
 
 const FIXTURE_RATES: Record<string, string> = {
@@ -41,12 +38,8 @@ export class DeterministicMockFxProvider implements FxProviderAdapter {
   readonly provider = MOCK_PROVIDER_ID;
   readonly sourceHost = MOCK_SOURCE_HOST;
 
-  async fetchRates(params: {
-    effectiveDate: string;
-    pairs: ProviderPairRequest[];
-    scenario?: MockFxScenario;
-  }): Promise<ProviderFetchResult> {
-    const scenario = params.scenario ?? 'success';
+  async fetchRates(params: ProviderFetchParams): Promise<ProviderFetchResult> {
+    const scenario = (params.scenario as MockFxScenario | undefined) ?? 'success';
 
     if (scenario === 'malformed') {
       return {
@@ -131,4 +124,13 @@ export class DeterministicMockFxProvider implements FxProviderAdapter {
 
 export function createMockFxProvider(): FxProviderAdapter {
   return new DeterministicMockFxProvider();
+}
+
+export function createFxProvider(
+  providerId: string,
+  options: FrankfurterProviderOptions = {},
+): FxProviderAdapter {
+  if (providerId === MOCK_PROVIDER_ID) return createMockFxProvider();
+  if (providerId === APPROVED_REAL_PROVIDER_ID) return new FrankfurterFxProvider(options);
+  throw new Error(`Unsupported FX provider: ${providerId}`);
 }

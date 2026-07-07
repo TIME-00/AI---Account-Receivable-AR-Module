@@ -9,8 +9,19 @@ import type {
 export const SUPPORTED_REFERENCE_CURRENCIES = ['MYR', 'SGD', 'USD', 'EUR', 'GBP', 'CNY'] as const;
 export const MOCK_PROVIDER_ID = 'mock_batch_9d_a';
 export const MOCK_SOURCE_HOST = 'mock.fx.local';
+export const APPROVED_REAL_PROVIDER_ID = 'MAS';
+export const FRANKFURTER_SOURCE_HOST = 'api.frankfurter.dev';
+export const FRANKFURTER_BASE_URL = `https://${FRANKFURTER_SOURCE_HOST}/v2`;
+export const FRANKFURTER_PROVIDER_RATE_TYPE = 'frankfurter-rebased-mas-reference';
+export const PROVIDER_TIMEOUT_MS = 8_000;
+export const REAL_PROVIDER_MAX_ATTEMPTS = 3;
+export const INITIAL_REAL_PROVIDER_PAIRS = [
+  { fromCurrency: 'SGD', toCurrency: 'MYR' },
+  { fromCurrency: 'USD', toCurrency: 'MYR' },
+  { fromCurrency: 'EUR', toCurrency: 'MYR' },
+] as const;
 
-const PROVIDER_RE = /^[a-z0-9][a-z0-9_-]{1,63}$/;
+const PROVIDER_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
 const SOURCE_HOST_RE = /^[a-z0-9][a-z0-9_.:-]{1,127}$/;
 const RATE_TYPE_RE = /^[A-Za-z0-9 _.-]{1,64}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -29,6 +40,30 @@ export function assertSupportedCurrency(currency: string, field: string): void {
     throw new ValidationError(`Unsupported reference currency: ${currency}.`, {
       field,
       supported_currencies: [...SUPPORTED_REFERENCE_CURRENCIES],
+    });
+  }
+}
+
+export function assertApprovedRealProvider(provider: string): void {
+  if (provider !== APPROVED_REAL_PROVIDER_ID) {
+    throw new ValidationError('Unsupported real FX provider.', {
+      provider,
+      approved_provider: APPROVED_REAL_PROVIDER_ID,
+    });
+  }
+}
+
+export function assertInitialRealProviderPair(fromCurrency: string, toCurrency: string): void {
+  const from = normalizeCurrency(fromCurrency, 'from_currency');
+  const to = normalizeCurrency(toCurrency, 'to_currency');
+  const allowed = INITIAL_REAL_PROVIDER_PAIRS.some((pair) =>
+    pair.fromCurrency === from && pair.toCurrency === to
+  );
+  if (!allowed) {
+    throw new ValidationError('FX pair is outside the approved Batch 9D-B staging allowlist.', {
+      from_currency: from,
+      to_currency: to,
+      allowed_pairs: INITIAL_REAL_PROVIDER_PAIRS.map((pair) => `${pair.fromCurrency}/${pair.toCurrency}`),
     });
   }
 }

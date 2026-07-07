@@ -1,15 +1,22 @@
 import { DeterministicMockFxProvider } from './provider.ts';
+import { FrankfurterFxProvider, assertMasAttribution } from './frankfurter.ts';
+import { SCHEDULER_SECRET_HEADER, validateSchedulerSecret } from './scheduler_auth.ts';
 import {
+  APPROVED_REAL_PROVIDER_ID,
+  FRANKFURTER_BASE_URL,
+  FRANKFURTER_PROVIDER_RATE_TYPE,
   calculateStaleState,
+  assertApprovedRealProvider,
+  assertInitialRealProviderPair,
   lookupLatestOnOrBefore,
   normalizeProviderRate,
   normalizeRate,
   reconcileReferenceRate,
   sanitizeErrorSummary,
 } from './validation.ts';
-import { calculateTerminalFailureCounts, defaultMockPairs, isLeaseLostError } from './service.ts';
+import { calculateTerminalFailureCounts, defaultMockPairs, defaultRealPairs, isLeaseLostError } from './service.ts';
 import { FxRatesReadService } from '../fx-rates/service.ts';
-import { ValidationError } from '../_shared/errors.ts';
+import { AuthenticationError, BusinessError, ValidationError } from '../_shared/errors.ts';
 
 const FIXED_NOW = new Date('2026-07-06T00:00:00.000Z');
 
@@ -211,6 +218,252 @@ Deno.test('read API pair parameter parser supports canonical query names', () =>
   assertEquals(parsed.requestedDate, '2026-07-05');
 });
 
+Deno.test('real provider constants and initial allowlist are locked to MAS and MYR pairs', () => {
+  assertEquals(APPROVED_REAL_PROVIDER_ID, 'MAS');
+  assertEquals(FRANKFURTER_BASE_URL, 'https://api.frankfurter.dev/v2');
+  assertEquals(defaultRealPairs('MYR'), [
+    { fromCurrency: 'SGD', toCurrency: 'MYR' },
+    { fromCurrency: 'USD', toCurrency: 'MYR' },
+    { fromCurrency: 'EUR', toCurrency: 'MYR' },
+  ]);
+  assertRejects(() => Promise.resolve(defaultRealPairs('SGD')), ValidationError, 'requires company base currency MYR');
+  assertApprovedRealProvider('MAS');
+  assertRejects(() => Promise.resolve(assertApprovedRealProvider('ECB')), ValidationError, 'Unsupported real FX provider');
+  assertInitialRealProviderPair('SGD', 'MYR');
+  assertRejects(() => Promise.resolve(assertInitialRealProviderPair('GBP', 'MYR')), ValidationError, 'outside the approved');
+});
+
+Deno.test('Frankfurter adapter builds locked /rates request with MAS attribution parameters', async () => {
+  const urls: string[] = [];
+  const provider = new FrankfurterFxProvider({
+    fetchImpl: ((input: URL | Request | string) => {
+      urls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify([{
+        date: '2026-07-03',
+        base: 'SGD',
+        quote: 'MYR',
+        rate: 3.48,
+        providers: [{ key: 'MAS', date: '2026-07-03', rate: 3.48 }],
+      }]), { status: 200 }));
+    }) as typeof fetch,
+    retryDelayMs: () => 0,
+  });
+
+  const result = await provider.fetchRates({
+    effectiveDate: '2026-07-03',
+    requestMode: 'date',
+    pairs: [{ fromCurrency: 'SGD', toCurrency: 'MYR' }],
+  });
+
+  assertEquals(result.failures.length, 0);
+  assertEquals(result.rates.length, 1);
+  assertEquals(result.rates[0].provider, 'MAS');
+  assertEquals(result.rates[0].sourceHost, 'api.frankfurter.dev');
+  assertEquals(result.rates[0].fromCurrency, 'SGD');
+  assertEquals(result.rates[0].toCurrency, 'MYR');
+  assertEquals(result.rates[0].providerRateType, FRANKFURTER_PROVIDER_RATE_TYPE);
+  const url = new URL(urls[0]);
+  assertEquals(`${url.origin}${url.pathname}`, 'https://api.frankfurter.dev/v2/rates');
+  assertEquals(url.searchParams.get('base'), 'SGD');
+  assertEquals(url.searchParams.get('quotes'), 'MYR');
+  assertEquals(url.searchParams.get('date'), '2026-07-03');
+  assertEquals(url.searchParams.get('providers'), 'MAS');
+  assertEquals(url.searchParams.get('expand'), 'providers');
+});
+
+Deno.test('Frankfurter adapter latest mode omits date and still requires MAS attribution', async () => {
+  const urls: string[] = [];
+  const provider = new FrankfurterFxProvider({
+    fetchImpl: ((input: URL | Request | string) => {
+      urls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify([{
+        date: '2026-07-02',
+        base: 'USD',
+        quote: 'MYR',
+        rate: '4.70000000',
+        providers: [{ key: 'MAS', date: '2026-07-02', rate: '4.70000000' }],
+      }]), { status: 200 }));
+    }) as typeof fetch,
+    retryDelayMs: () => 0,
+  });
+  const result = await provider.fetchRates({
+    effectiveDate: '2026-07-06',
+    requestMode: 'latest',
+    pairs: [{ fromCurrency: 'USD', toCurrency: 'MYR' }],
+  });
+  assertEquals(result.failures.length, 0);
+  assertEquals(result.rates[0].effectiveDate, '2026-07-02');
+  assertEquals(new URL(urls[0]).searchParams.has('date'), false);
+});
+
+Deno.test('Frankfurter adapter fails closed for missing, empty, or non-MAS attribution', async () => {
+  const cases = [
+    { providers: undefined, category: 'FX_PROVIDER_MISMATCH' },
+    { providers: [], category: 'FX_PROVIDER_MISMATCH' },
+    { providers: [{ key: 'ECB', date: '2026-07-03', rate: 3.48 }], category: 'FX_PROVIDER_MISMATCH' },
+    { providers: [{ key: 'MAS', date: '2026-07-03', rate: 3.48 }, { key: 'ECB', date: '2026-07-03', rate: 3.47 }], category: 'FX_PROVIDER_MISMATCH' },
+  ];
+
+  for (const testCase of cases) {
+    const provider = new FrankfurterFxProvider({
+      fetchImpl: (() => Promise.resolve(new Response(JSON.stringify([{
+        date: '2026-07-03',
+        base: 'SGD',
+        quote: 'MYR',
+        rate: 3.48,
+        providers: testCase.providers,
+      }]), { status: 200 }))) as typeof fetch,
+      retryDelayMs: () => 0,
+    });
+    const result = await provider.fetchRates({
+      effectiveDate: '2026-07-03',
+      pairs: [{ fromCurrency: 'SGD', toCurrency: 'MYR' }],
+    });
+    assertEquals(result.rates.length, 0);
+    assertEquals(result.failures[0].category, testCase.category);
+  }
+});
+
+Deno.test('Frankfurter adapter rejects malformed payload, zero rate, and base/quote mismatch', async () => {
+  const malformedProvider = new FrankfurterFxProvider({
+    fetchImpl: (() => Promise.resolve(new Response(JSON.stringify({ rates: { MYR: 3.48 } }), { status: 200 }))) as typeof fetch,
+    retryDelayMs: () => 0,
+  });
+  const malformed = await malformedProvider.fetchRates({
+    effectiveDate: '2026-07-03',
+    pairs: [{ fromCurrency: 'SGD', toCurrency: 'MYR' }],
+  });
+  assertEquals(malformed.failures[0].category, 'FX_PROVIDER_MALFORMED');
+
+  const mismatchProvider = new FrankfurterFxProvider({
+    fetchImpl: (() => Promise.resolve(new Response(JSON.stringify([{
+      date: '2026-07-03',
+      base: 'MYR',
+      quote: 'SGD',
+      rate: 0.28,
+      providers: [{ key: 'MAS', date: '2026-07-03', rate: 0.28 }],
+    }]), { status: 200 }))) as typeof fetch,
+    retryDelayMs: () => 0,
+  });
+  const mismatch = await mismatchProvider.fetchRates({
+    effectiveDate: '2026-07-03',
+    pairs: [{ fromCurrency: 'SGD', toCurrency: 'MYR' }],
+  });
+  assertEquals(mismatch.failures[0].category, 'FX_PROVIDER_UNSUPPORTED_PAIR');
+
+  const zeroProvider = new FrankfurterFxProvider({
+    fetchImpl: (() => Promise.resolve(new Response(JSON.stringify([{
+      date: '2026-07-03',
+      base: 'SGD',
+      quote: 'MYR',
+      rate: 0,
+      providers: [{ key: 'MAS', date: '2026-07-03', rate: 0 }],
+    }]), { status: 200 }))) as typeof fetch,
+    retryDelayMs: () => 0,
+  });
+  const zero = await zeroProvider.fetchRates({
+    effectiveDate: '2026-07-03',
+    pairs: [{ fromCurrency: 'SGD', toCurrency: 'MYR' }],
+  });
+  assertRejects(
+    () => Promise.resolve(normalizeProviderRate(zero.rates[0], 'MYR', FIXED_NOW)),
+    ValidationError,
+    'greater than zero',
+  );
+});
+
+Deno.test('Frankfurter adapter retries transient provider failures within bounded attempts', async () => {
+  let attempts = 0;
+  const provider = new FrankfurterFxProvider({
+    fetchImpl: (() => {
+      attempts += 1;
+      if (attempts === 1) {
+        return Promise.resolve(new Response(JSON.stringify({ message: 'temporary' }), { status: 503 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify([{
+        date: '2026-07-03',
+        base: 'EUR',
+        quote: 'MYR',
+        rate: 5.08,
+        providers: [{ key: 'MAS', date: '2026-07-03', rate: 5.08 }],
+      }]), { status: 200 }));
+    }) as typeof fetch,
+    retryDelayMs: () => 0,
+  });
+  const result = await provider.fetchRates({
+    effectiveDate: '2026-07-03',
+    pairs: [{ fromCurrency: 'EUR', toCurrency: 'MYR' }],
+  });
+  assertEquals(attempts, 2);
+  assertEquals(result.failures.length, 0);
+});
+
+Deno.test('Frankfurter adapter times out and reports retryable timeout without raw payload', async () => {
+  const provider = new FrankfurterFxProvider({
+    fetchImpl: ((_input: URL | Request | string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      })) as typeof fetch,
+    timeoutMs: 1,
+    maxAttempts: 1,
+    retryDelayMs: () => 0,
+  });
+  const result = await provider.fetchRates({
+    effectiveDate: '2026-07-03',
+    pairs: [{ fromCurrency: 'SGD', toCurrency: 'MYR' }],
+  });
+  assertEquals(result.failures[0].category, 'FX_PROVIDER_TIMEOUT');
+});
+
+Deno.test('scheduler secret validation rejects missing, malformed, and user-JWT-only requests', () => {
+  assertRejects(
+    () => Promise.resolve(validateSchedulerSecret(new Request('https://example.test'), 'expected-secret')),
+    AuthenticationError,
+    'Invalid FX scheduler authentication',
+  );
+  assertRejects(
+    () => Promise.resolve(validateSchedulerSecret(new Request('https://example.test', {
+      headers: { Authorization: 'Bearer user.jwt.token' },
+    }), 'expected-secret')),
+    AuthenticationError,
+    'Invalid FX scheduler authentication',
+  );
+  assertRejects(
+    () => Promise.resolve(validateSchedulerSecret(new Request('https://example.test', {
+      headers: { [SCHEDULER_SECRET_HEADER]: 'wrong-secret' },
+    }), 'expected-secret')),
+    AuthenticationError,
+    'Invalid FX scheduler authentication',
+  );
+  assertRejects(
+    () => Promise.resolve(validateSchedulerSecret(new Request('https://example.test', {
+      headers: { [SCHEDULER_SECRET_HEADER]: 'expected-secret' },
+    }))),
+    BusinessError,
+    'not configured',
+  );
+});
+
+Deno.test('scheduler secret validation accepts the dedicated scheduler secret header', () => {
+  validateSchedulerSecret(new Request('https://example.test', {
+    headers: { [SCHEDULER_SECRET_HEADER]: 'expected-secret' },
+  }), 'expected-secret');
+});
+
+Deno.test('MAS attribution helper rejects persisted-provider-only proof', () => {
+  assertRejects(
+    () => Promise.resolve(assertMasAttribution(undefined)),
+    BusinessError,
+    'missing',
+  );
+  assertRejects(
+    () => Promise.resolve(assertMasAttribution([{ key: 'ECB' }])),
+    BusinessError,
+    'does not include MAS',
+  );
+  assertMasAttribution([{ key: 'MAS', date: '2026-07-03', rate: 3.48 }]);
+});
+
 Deno.test('sanitized errors redact bearer tokens, JWTs, and key-like values', () => {
   const summary = sanitizeErrorSummary(
     'Bearer abc.def.ghi token=sample-token-value api_key=sample-key-value eyJhbGciOiJIUzI1NiJ9.payload.sig',
@@ -350,6 +603,21 @@ Deno.test('Fix3 migration explicitly revokes anon helper RPC execution', async (
   assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
   assert(!/allocation_details|journal_entries|journal_entry_lines|allocated_amount|unallocated_amount|allocations\/auto/i.test(migration));
   assert(!/https?:\/\/|fetch\(|cron|scheduler|frankfurter/i.test(migration));
+});
+
+Deno.test('9D-B migration permits uppercase MAS provider identifiers without scheduler activation', async () => {
+  const migrationUrl = new URL('../../../../database/021_fx_real_provider_identifier_support.sql', import.meta.url);
+  const migration = await Deno.readTextFile(migrationUrl);
+
+  assert(migration.includes("CHECK (provider ~ '^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$')"));
+  assert(migration.includes('chk_fx_sync_runs_provider_bounded'));
+  assert(migration.includes('chk_fx_reference_rates_provider_bounded'));
+  assert(migration.includes('chk_fx_sync_leases_provider_bounded'));
+  assert(migration.includes('MAS'));
+  assert(!/INSERT\s+INTO\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/UPDATE\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/DELETE\s+FROM\s+(public\.)?exchange_rates/i.test(migration));
+  assert(!/cron\.schedule|net\.http|vault\./i.test(migration));
 });
 
 Deno.test('lease-lost errors are detected and fail closed', () => {

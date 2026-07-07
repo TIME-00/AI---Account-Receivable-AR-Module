@@ -3,10 +3,14 @@ import { AuthorizationError, BusinessError, ValidationError } from '../_shared/e
 import type { AuthContext } from '../_shared/auth.ts';
 import { requireAnyRole } from '../_shared/auth.ts';
 import { getAdminClient } from '../_shared/db.ts';
-import { createMockFxProvider, type MockFxScenario } from './provider.ts';
-import type { FxSyncLeaseRun, NormalizedProviderRate, ProviderPairRequest } from './types.ts';
+import { createFxProvider, createMockFxProvider, type FxProviderAdapter, type MockFxScenario } from './provider.ts';
+import type { FxSyncLeaseRun, NormalizedProviderRate, ProviderPairRequest, ProviderRequestMode } from './types.ts';
 import {
+  APPROVED_REAL_PROVIDER_ID,
+  INITIAL_REAL_PROVIDER_PAIRS,
   MOCK_PROVIDER_ID,
+  assertApprovedRealProvider,
+  assertInitialRealProviderPair,
   normalizeCurrency,
   normalizeProviderRate,
   sanitizeErrorSummary,
@@ -15,7 +19,9 @@ import {
 export interface FxSyncRequest {
   effectiveDate: string;
   pairs?: ProviderPairRequest[];
+  provider?: string;
   scenario?: MockFxScenario;
+  requestMode?: ProviderRequestMode;
 }
 
 export interface FxSyncResult {
@@ -33,6 +39,7 @@ export interface FxSyncResult {
 }
 
 type CompanyRow = { id: string; base_currency: string };
+type SyncActor = { companyId: string; userId: string | null };
 const DEFAULT_LEASE_SECONDS = 300;
 
 export class FxRateSyncService {
@@ -42,12 +49,81 @@ export class FxRateSyncService {
     requireAnyRole(auth, ['Finance Manager', 'System Admin']);
 
     const company = await this.fetchCompany(auth.companyId);
-    const effectiveDate = input.effectiveDate;
     const baseCurrency = normalizeCurrency(company.base_currency, 'company_base_currency');
     const provider = createMockFxProvider();
     const pairs = this.normalizePairs(input.pairs ?? defaultMockPairs(baseCurrency), baseCurrency);
 
-    const run = await this.acquireLeaseAndStartRun(auth, {
+    return await this.runSyncLifecycle(
+      { companyId: auth.companyId, userId: auth.userId },
+      {
+        effectiveDate: input.effectiveDate,
+        requestMode: input.requestMode ?? 'date',
+        pairs,
+        scenario: input.scenario,
+      },
+      provider,
+      baseCurrency,
+    );
+  }
+
+  async runProviderSync(auth: AuthContext, input: FxSyncRequest): Promise<FxSyncResult> {
+    requireAnyRole(auth, ['Finance Manager', 'System Admin']);
+
+    const providerId = input.provider ?? APPROVED_REAL_PROVIDER_ID;
+    assertApprovedRealProvider(providerId);
+
+    const company = await this.fetchCompany(auth.companyId);
+    const baseCurrency = normalizeCurrency(company.base_currency, 'company_base_currency');
+    const provider = createFxProvider(providerId);
+    const pairs = this.normalizePairs(input.pairs ?? defaultRealPairs(baseCurrency), baseCurrency, true);
+
+    return await this.runSyncLifecycle(
+      { companyId: auth.companyId, userId: auth.userId },
+      {
+        effectiveDate: input.effectiveDate,
+        requestMode: input.requestMode ?? 'date',
+        pairs,
+      },
+      provider,
+      baseCurrency,
+    );
+  }
+
+  async runScheduledProviderSync(input: {
+    companyId: string;
+    effectiveDate: string;
+    requestMode?: ProviderRequestMode;
+  }): Promise<FxSyncResult> {
+    const company = await this.fetchCompany(input.companyId);
+    const baseCurrency = normalizeCurrency(company.base_currency, 'company_base_currency');
+    const provider = createFxProvider(APPROVED_REAL_PROVIDER_ID);
+    const pairs = this.normalizePairs(defaultRealPairs(baseCurrency), baseCurrency, true);
+
+    return await this.runSyncLifecycle(
+      { companyId: input.companyId, userId: null },
+      {
+        effectiveDate: input.effectiveDate,
+        requestMode: input.requestMode ?? 'latest',
+        pairs,
+      },
+      provider,
+      baseCurrency,
+    );
+  }
+
+  private async runSyncLifecycle(
+    actor: SyncActor,
+    input: Required<Pick<FxSyncRequest, 'effectiveDate' | 'pairs'>> & {
+      scenario?: MockFxScenario;
+      requestMode: ProviderRequestMode;
+    },
+    provider: FxProviderAdapter,
+    baseCurrency: string,
+  ): Promise<FxSyncResult> {
+    const effectiveDate = input.effectiveDate;
+    const pairs = input.pairs;
+
+    const run = await this.acquireLeaseAndStartRun(actor, {
       provider: provider.provider,
       sourceHost: provider.sourceHost,
       effectiveDate,
@@ -64,6 +140,7 @@ export class FxRateSyncService {
       await this.renewLeaseOrFail(run);
       const fetchResult = await provider.fetchRates({
         effectiveDate,
+        requestMode: input.requestMode,
         pairs,
         scenario: input.scenario,
       });
@@ -129,7 +206,11 @@ export class FxRateSyncService {
     }
   }
 
-  private normalizePairs(pairs: ProviderPairRequest[], baseCurrency: string): ProviderPairRequest[] {
+  private normalizePairs(
+    pairs: ProviderPairRequest[],
+    baseCurrency: string,
+    enforceRealAllowlist = false,
+  ): ProviderPairRequest[] {
     if (!Array.isArray(pairs) || pairs.length === 0) {
       throw new ValidationError('At least one FX pair is required.', { field: 'pairs' });
     }
@@ -145,6 +226,7 @@ export class FxRateSyncService {
           company_base_currency: baseCurrency,
         });
       }
+      if (enforceRealAllowlist) assertInitialRealProviderPair(fromCurrency, toCurrency);
       return { fromCurrency, toCurrency };
     });
   }
@@ -161,16 +243,16 @@ export class FxRateSyncService {
   }
 
   private async acquireLeaseAndStartRun(
-    auth: AuthContext,
+    actor: SyncActor,
     params: { provider: string; sourceHost: string; effectiveDate: string; attemptedPairCount: number },
   ): Promise<FxSyncLeaseRun> {
     const { data, error } = await this.client.rpc('fx_acquire_sync_lease', {
-      p_company_id: auth.companyId,
+      p_company_id: actor.companyId,
       p_provider: params.provider,
       p_source_host: params.sourceHost,
       p_effective_date: params.effectiveDate,
       p_attempted_pair_count: params.attemptedPairCount,
-      p_created_by: auth.userId,
+      p_created_by: actor.userId,
       p_lease_seconds: DEFAULT_LEASE_SECONDS,
     });
     if (error) throw new Error(`Failed to acquire FX sync lease: ${error.message}`);
@@ -195,7 +277,7 @@ export class FxRateSyncService {
     }
     return {
       id: result.run_id,
-      company_id: auth.companyId,
+      company_id: actor.companyId,
       provider: params.provider,
       source_host: params.sourceHost,
       effective_date: params.effectiveDate,
@@ -277,6 +359,18 @@ export function defaultMockPairs(companyBaseCurrency = 'MYR'): ProviderPairReque
   return ['SGD', 'USD', 'EUR', 'GBP', 'CNY']
     .filter((fromCurrency) => fromCurrency !== base)
     .map((fromCurrency) => ({ fromCurrency, toCurrency: base }));
+}
+
+export function defaultRealPairs(companyBaseCurrency = 'MYR'): ProviderPairRequest[] {
+  const base = normalizeCurrency(companyBaseCurrency, 'company_base_currency');
+  if (base !== 'MYR') {
+    throw new ValidationError('Batch 9D-B real provider staging scope requires company base currency MYR.', {
+      company_base_currency: base,
+      required_base_currency: 'MYR',
+      code: 'STAGING_BASE_CURRENCY_MISMATCH_PLAN_AMENDMENT_REQUIRED',
+    });
+  }
+  return INITIAL_REAL_PROVIDER_PAIRS.map((pair) => ({ ...pair }));
 }
 
 export function assertProviderNeutralOnly(provider: string): void {
