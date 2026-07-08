@@ -14,15 +14,17 @@
 > OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS - OFFICIAL CLOSURE`). Batch **9D-C** is the next
 > batch in the canonical order `9D-A (CLOSED) -> DG-1 -> 9D-B (CLOSED) -> 9D-C -> 9D-D -> 9D-E`.
 
-- **Current state:** Batch 9D-C **targeted plan amendment completed**. Nothing is implemented, no
+- **Current state:** Batch 9D-C **final narrow plan amendment completed**. Nothing is implemented, no
   migration is created, no Edge Function/frontend is changed, and no staging/production is mutated by this
-  task. The Codex Batch 9D-C Plan Amendment Confirmation Review returned `TARGETED AMENDMENT REQUIRED —
-  RETURN TO CLAUDE CODE`; this revision applies the five targeted fixes (see §1B). Findings B9DC-001,
-  B9DC-004, B9DC-005, B9DC-007 remain **CLOSED** and are not reopened.
-- **Next gate:** **Codex Batch 9D-C Targeted Amendment Confirmation Re-Review** -> user implementation
-  approval -> implementation -> technical review -> staging readiness -> explicit staging approval ->
-  staging deployment -> runtime verification -> evidence -> closure review. **Implementation approval has
-  NOT been granted; 9D-C implementation has NOT started.**
+  task. The Codex Batch 9D-C Targeted Amendment Confirmation Re-Review returned `TARGETED AMENDMENT STILL
+  REQUIRED — RETURN TO CLAUDE CODE` (TF-1..TF-4 CLOSED; TF-5 partially closed; B9DC-001..008 CLOSED);
+  this revision applies the two remaining fixes — **Final Fix A** (root decision-row semantics, §16B) and
+  **Final Fix B** (historical transaction-to-decision bootstrap linkage, §11B) (see §1C). TF-1..TF-4 and
+  B9DC-001..008 remain **CLOSED** and are not reopened; TF-5's locked architecture is preserved.
+- **Next gate:** **Codex Batch 9D-C Final Targeted Amendment Confirmation Re-Review** -> user
+  implementation approval -> implementation -> technical review -> staging readiness -> explicit staging
+  approval -> staging deployment -> runtime verification -> evidence -> closure review. **Implementation
+  approval has NOT been granted; 9D-C implementation has NOT started.**
 - **Planning-only banner.** No booking-rate logic, migration, RPC, Edge Function, or frontend was changed
   while producing/amending this plan; no posted financial record was touched; the ACTIVE Batch 9D-B
   staging scheduler was not modified; production was not touched. `POST /allocations/auto` remains
@@ -63,6 +65,26 @@ locked architectural boundary (§5) is changed.
 | **TF-3** Historical same-currency non-parity anomaly | Historical `currency == base` with stored rate `!= 1.0` -> `LEGACY_UNVERIFIED` + deterministic anomaly marker `BASE_CURRENCY_NON_PARITY_RATE`; snapshot preserved; no recompute/force-to-1.0; source FKs null; anomaly count + affected rows in evidence. | §11A, §29, §31, §33, §34, §36, §39 |
 | **TF-4** Strong `MANUAL_OVERRIDE` baseline provenance | Add optional `baseline_exchange_rate_id` / `baseline_fx_reference_rate_id` FKs governed by `baseline_kind` (`BASE_PARITY`/`CATALOG`/`REFERENCE`/`NONE`); final source stays FK-less for override, but the **comparison baseline** is a strong FK to the exact record used for deviation; company/pair/`to_currency==base`/date-eligibility validated. | §11, §24, §31, §32, §33, §34, §29 |
 | **TF-5** One decision-version storage model | Locked **versioned decision rows**: one version = one row; material Draft FX change supersedes the current row and inserts a **new UUID** row with `decision_version+1` and lineage (`root_decision_id` / `supersedes_decision_id`); prior rows queryable; prior approval cannot be reused; `fx_decision_id` moves only while Draft, frozen once Posted; posting validates the exact current row+version. | §16A, §23, §24, §28, §25, §31, §33, §34, §39 |
+
+---
+
+## 1C. Codex Batch 9D-C Targeted Amendment Confirmation Re-Review — Final Narrow Resolutions (recorded)
+
+**Verdict:** `TARGETED AMENDMENT STILL REQUIRED — RETURN TO CLAUDE CODE`. Codex confirmed **TF-1, TF-2,
+TF-3, TF-4 CLOSED**, **TF-5 PARTIALLY CLOSED**, and **B9DC-001..B9DC-008 CLOSED**. Only two exact plan
+blockers remained; both are resolved here without redesigning any closed finding or TF-5's locked
+architecture.
+
+| Final fix | Blocker | Resolution summary | Sections |
+| --- | --- | --- | --- |
+| **Final Fix A** | First/root decision-row semantics not explicit | Locked root convention: root row `decision_version = 1`, `root_decision_id = id` (self), `supersedes_decision_id = NULL`; version N>1 keeps `root_decision_id`, `decision_version = prior+1`, `supersedes_decision_id = prior id`; `UNIQUE(root_decision_id, decision_version)`; same-lineage/company/transaction + immediately-prior + monotonic + no-branching integrity; superseded approved rows preserve historical checker facts. | §16B, §16B.1, §33, §34, §39 |
+| **Final Fix B** | Historical transaction-to-decision backfill linkage not explicit | Every in-scope historical invoice/receipt gets exactly one **bootstrap decision row** (version 1, self root, NULL supersedes, truthful source category) + non-null `fx_decision_id` + matching `fx_source_category` + a `LegacyBackfilled` event; no `fx_source_category`-set / `fx_decision_id`-NULL gap; enumerated-only exclusions; posted bootstrap = truthful `Posted` provenance with **no** fabricated approvals; Draft `LEGACY_UNVERIFIED` bootstrap is non-postable without a new governed version. | §11B, §11B.1, §11B.2, §31.1, §33, §34, §39 |
+
+No locked architectural boundary (§5) is changed; cyclic-FK ordering remains **NO ISSUE** (§31.1).
+
+---
+
+## 2. Executive Summary
 
 Today the AR module already snapshots a booking exchange rate onto each invoice and receipt at
 create/edit time and uses that snapshot immutably at posting. However, the **manual override path is
@@ -425,6 +447,77 @@ snapshot; and that **no** historical row receives fabricated `CATALOG`/provider 
 
 ---
 
+## 11B. Historical Transaction-to-Decision Bootstrap Linkage (Final Fix B — LOCKED)
+
+The hybrid model uses **one consistent transaction-to-decision relationship for both historical and new
+transactions**. There must be **no** ambiguous historical state where `fx_source_category` is populated
+but `fx_decision_id` is `NULL`.
+
+**Locked bootstrap rule.** For **every** in-scope historical invoice/receipt governed by the 9D-C backfill:
+```text
+historical transaction
+  -> create exactly one bootstrap fx_booking_rate_decisions row:
+        decision_version       = 1
+        root_decision_id       = own id            (root convention, §16B)
+        supersedes_decision_id = NULL
+        source_category        = truthful classification (§11A / §11B source rules)
+        source FKs             = NULL for BASE_PARITY / LEGACY_UNVERIFIED (§11A)
+  -> set transaction.fx_decision_id      = that bootstrap decision row id
+  -> set transaction.fx_source_category  = that decision row's source_category (must be equal)
+  -> emit a LegacyBackfilled event referencing: company, exact transaction (invoice_id/receipt_id),
+     exact decision row id, source_category, and the anomaly marker where applicable (§11A/TF-3)
+```
+
+After a successful backfill, **all in-scope historical invoice/receipt rows have a non-null
+`fx_decision_id`** linked to their bootstrap decision row. The ambiguous `fx_source_category` populated /
+`fx_decision_id` NULL state is **prohibited** for in-scope rows.
+
+**Out-of-scope exclusions (must be explicit, never a silent gap).** If the repository has an unavoidable
+excluded transaction category (e.g. a document type outside AR booking-rate governance), the plan/migration
+must: (a) name the **exact exclusion predicate**; (b) justify why it is outside 9D-C governance; (c) define
+its query/audit behavior; and (d) ensure it does not create a silent provenance gap. **No generic nullable
+legacy exception is permitted.** Default: no exclusions — all posted/draft invoices and receipts in the
+governed company scope are in scope.
+
+### 11B.1 Historical bootstrap source classification (preserve §11A / TF-3)
+
+- same-currency parity (`currency == base` and `exchange_rate = 1.0`) -> `BASE_PARITY`;
+- same-currency non-parity (`currency == base` and `exchange_rate != 1.0`) -> `LEGACY_UNVERIFIED` +
+  `BASE_CURRENCY_NON_PARITY_RATE` anomaly marker;
+- foreign-currency unprovable source -> `LEGACY_UNVERIFIED`.
+
+For all: preserve the numeric snapshot unchanged; no recomputation; no catalog re-resolution; no fabricated
+`CATALOG` attribution; no fabricated provider attribution. The bootstrap decision row carries the truthful
+source category and the transaction pointer links to it.
+
+### 11B.2 Historical bootstrap lifecycle semantics (no fabricated approvals)
+
+**Already-posted historical transaction** — the bootstrap decision is a truthful provenance record:
+```text
+lifecycle_status       = Posted
+decision_version       = 1
+root_decision_id       = self
+supersedes_decision_id = NULL
+LegacyBackfilled event = required
+```
+Do **not** fabricate `approved_by`, `approved_at`, or checker identity for pre-governance records where no
+such evidence exists. Backfill reconstructs provenance truthfully **without pretending a 9D-C approval
+occurred in the past**.
+
+**Historical Draft transaction** — a bootstrap decision must **not** become postable merely because backfill
+created a row:
+- a Draft transaction whose bootstrap decision is `LEGACY_UNVERIFIED` is a **historical provenance record
+  only / non-postable** under the normal postability guard (§28A). **Before posting**, a **new governed
+  current decision version** must be created from an eligible governed source (`BASE_PARITY` / `CATALOG` /
+  governed `REFERENCE_SELECTED` / governed `MANUAL_OVERRIDE`) and must pass the normal 9D-C
+  approval/postability rules;
+- a Draft deterministic `BASE_PARITY` bootstrap may follow normal `NotRequired` governance if all other
+  requirements pass;
+- **`LEGACY_UNVERIFIED` Draft must not bypass governance and must not silently become postable.** (Exact
+  status labels follow the existing lifecycle enum; the semantics above are binding.)
+
+---
+
 ## 12. Override Governance
 
 - **Who may enter an override:** operational roles able to edit the draft transaction (AR Clerk on
@@ -553,6 +646,62 @@ Locked clarifications:
 - **a Posted transaction cannot switch to a different decision row.**
 - The plan does **not** describe a design where a single decision row simultaneously represents all
   historical versions.
+
+---
+
+## 16B. First/Root Decision-Row Semantics (Final Fix A — LOCKED)
+
+The lineage columns (`root_decision_id`, `decision_version`, `supersedes_decision_id`) already exist
+(§16A/TF-5); this section locks the **first/root row convention** explicitly.
+
+**Root (first) decision row of a lineage:**
+```text
+id                    = generated UUID
+decision_version      = 1
+root_decision_id      = id            (self-referential: root points to itself)
+supersedes_decision_id= NULL
+```
+
+**Subsequent version N (N > 1):**
+```text
+id                    = new UUID
+decision_version      = prior decision_version + 1
+root_decision_id      = same root_decision_id as the prior version
+supersedes_decision_id= immediately prior decision row id
+```
+
+**Worked example:**
+```text
+Version 1:  id=A  root_decision_id=A  decision_version=1  supersedes_decision_id=NULL
+Version 2:  id=B  root_decision_id=A  decision_version=2  supersedes_decision_id=A
+Version 3:  id=C  root_decision_id=A  decision_version=3  supersedes_decision_id=B
+```
+
+**Integrity requirements (LOCKED):**
+- `UNIQUE (root_decision_id, decision_version)` (or an equivalent enforceable uniqueness guarantee);
+- `supersedes_decision_id` must belong to the **same lineage** (`root_decision_id` matches), **same
+  company**, and **same transaction** (`invoice_id`/`receipt_id`);
+- `supersedes_decision_id` must reference the **immediately prior** version only (`prior.decision_version
+  = this.decision_version - 1`);
+- `decision_version` is **monotonic** within a lineage; the root is always `1` with self `root_decision_id`
+  and `NULL` supersedes;
+- **no branching** of a transaction's current-decision chain (a single linear supersession chain per
+  transaction) unless a future, separately approved model explicitly supports branching.
+
+**Transaction linkage:** `transaction.fx_decision_id` points to the **exact current decision row**; while
+**Draft** it may move to a newer version row; once **Posted** it is **frozen** (§17A trigger).
+
+### 16B.1 Historical approval facts are preserved on supersession (Final Fix A clarification)
+
+Superseding an approved prior decision row **does not erase historical approval facts**. For a prior row
+that was `Approved` then superseded:
+- its `lifecycle_status` becomes `Superseded`, **but** `approved_by`, `approved_at`, and `checker_user_id`
+  (and the corresponding append-only `Approved` event) **remain preserved** — historical checker evidence
+  is never overwritten or deleted;
+- the **new** decision-version row receives its **own independent** approval lifecycle and **cannot reuse**
+  the prior approval.
+
+This is a clarification only; it does **not** redesign the append-only event architecture (B9DC-007, §29).
 
 ---
 
@@ -962,14 +1111,33 @@ event table; and rejection of UPDATE/DELETE/direct-INSERT against the event tabl
 ### 31.1 Cyclic-FK migration ordering (Codex: NO ISSUE — preserved)
 
 Codex classified the hybrid cyclic FK (transaction -> decision and decision -> transaction) as **NO
-ISSUE**; the hybrid FK architecture is **not** redesigned. A feasible order is kept explicit:
+ISSUE**; the hybrid FK architecture is **not** redesigned. The order below guarantees historical pointers
+are backfilled (in **022**) **before** the **023** immutability triggers freeze governance fields:
 1. create `fx_booking_rate_decisions` / `fx_booking_rate_decision_events` with transaction FKs to existing
    `invoices`/`receipts`;
 2. add nullable `fx_source_category` and `fx_decision_id` columns to `invoices`/`receipts`;
-3. add the transaction -> decision FK (`fx_decision_id`) in valid order (nullable);
-4. perform the truthful deterministic backfill (§11A);
-5. validate constraints (use `NOT VALID` + `VALIDATE CONSTRAINT` / deferred validation where appropriate);
-6. apply immutability triggers / append-only triggers / RPC + posting integration (023).
+3. create **bootstrap decision rows** (root convention §16B; version 1; self root; NULL supersedes) for
+   every in-scope historical transaction, with the truthful source category (§11A/§11B);
+4. set `transaction.fx_source_category` = the bootstrap decision's `source_category`;
+5. set `transaction.fx_decision_id` = the bootstrap decision row id;
+6. emit `LegacyBackfilled` events referencing company + exact transaction + exact decision row + source
+   category + anomaly marker where applicable;
+7. validate the **one transaction <-> one current decision** linkage;
+8. validate root/version/lineage constraints (`UNIQUE(root_decision_id, decision_version)`, monotonic
+   version, same-lineage/company/transaction supersession, §16B);
+9. validate FK/CHECK constraints (use `NOT VALID` + `VALIDATE CONSTRAINT` / deferred validation where
+   appropriate);
+10. **023** applies DB immutability triggers (§17A);
+11. **023** applies governed RPC / in-transaction posting integration (§28A).
+
+**Mandatory backfill verification (§34):**
+```text
+count(in-scope historical transactions)
+  == count(historical bootstrap decision rows)
+  == count(transactions with non-null fx_decision_id after successful backfill)
+```
+subject only to any explicitly enumerated out-of-scope predicate (§11B). Also verify, for every backfilled
+row: `transaction.fx_source_category == linked decision.source_category`.
 
 ---
 
@@ -1028,6 +1196,19 @@ ISSUE**; the hybrid FK architecture is **not** redesigned. A feasible order is k
   `decision_version` increments monotonically; prior row remains queryable; prior approval cannot
   authorize the new version; `fx_decision_id` moves while Draft; stale-version submission/approval fails;
   Posted transaction cannot switch decision row.
+- **Root decision-row semantics (§16B, Final Fix A):** first/root row has `decision_version = 1`;
+  `root_decision_id = id`; `supersedes_decision_id IS NULL`; version 2 preserves `root_decision_id` and
+  supersedes version 1; duplicate `(root_decision_id, decision_version)` rejected; cross-lineage
+  `supersedes_decision_id` rejected; a stale prior version cannot become current after a newer version
+  exists; superseding an approved prior row **preserves** its `approved_by`/`approved_at`/`checker_user_id`
+  (historical facts not erased).
+- **Historical bootstrap linkage (§11B, Final Fix B):** every in-scope historical **invoice** gets a
+  bootstrap decision row + non-null `fx_decision_id`; every in-scope historical **receipt** likewise;
+  `transaction.fx_source_category == linked decision.source_category`; `LegacyBackfilled` event references
+  the exact linked decision; same-currency parity, same-currency non-parity anomaly, and foreign-currency
+  `LEGACY_UNVERIFIED` linkages all work; historical posted rows contain **no** fabricated
+  checker/approval identities; a Draft `LEGACY_UNVERIFIED` bootstrap decision **cannot** pass posting
+  authorization without a new governed decision version.
 - **Audit (§29):** full lifecycle reconstruction from the event table; UPDATE/DELETE/direct-INSERT against
   the event table rejected.
 - **Allocation regression:** **exact deterministic database-value equality and/or scoped financial
@@ -1093,6 +1274,16 @@ Includes at least the following mandatory cases (B9DC amendment additions explic
 44. TF-4 catalog-backed and reference-backed override baseline FK persisted + validated; mismatched company/pair and dual baseline FK rejected; deviation recomputed against the linked baseline [S]
 45. TF-5 material edit creates new decision-version row; version increments; prior row queryable; prior approval cannot authorize new version [S]
 46. TF-5 `fx_decision_id` moves while Draft; stale-version submission/approval fails; Posted txn cannot switch decision row [S]
+47. Root row: `decision_version = 1`, `root_decision_id = id`, `supersedes_decision_id IS NULL` (Final Fix A) [S]
+48. Version 2 preserves root + supersedes version 1; duplicate `(root_decision_id, decision_version)` rejected; cross-lineage supersedes rejected [S]
+49. Superseding an approved prior row preserves `approved_by`/`approved_at`/`checker_user_id` (historical facts not erased) [S]
+50. Every in-scope historical invoice gets bootstrap decision row + non-null `fx_decision_id` (Final Fix B) [S]
+51. Every in-scope historical receipt gets bootstrap decision row + non-null `fx_decision_id` [S]
+52. `transaction.fx_source_category == linked decision.source_category` for every backfilled row [S]
+53. `LegacyBackfilled` event references the exact linked decision row [S]
+54. Backfill count equality: in-scope historical txns == bootstrap decision rows == txns with non-null `fx_decision_id` (minus any enumerated exclusion) [S]
+55. Historical posted bootstrap rows contain no fabricated checker/approval identity [S]
+56. Draft `LEGACY_UNVERIFIED` bootstrap decision cannot pass posting authorization without a new governed decision version [S]
 
 Evidence classes (kept distinct; do **not** blend):
 - **[M]** mock/synthetic governance behavior;
@@ -1194,6 +1385,20 @@ allocation behavior show **exact deterministic value equality / scoped fingerpri
 the **append-only governance event table** reconstructs the lifecycle and rejects mutation (§29);
 RLS/tenant isolation and `service-role`-only RPC privilege hold; staging matrix (§34) passes; evidence
 classes are not blended; Closure Review passes. No production action occurs.
+
+**Final narrow amendment additions (must also hold):**
+- the **root decision convention is deterministic** — root row has `decision_version = 1`,
+  `root_decision_id = id`, `supersedes_decision_id = NULL`; `UNIQUE(root_decision_id, decision_version)`
+  and same-lineage/company/transaction supersession enforced (§16B); **one version = one row**;
+- **every in-scope historical invoice/receipt has explicit decision-row linkage** — a bootstrap decision
+  row with non-null `fx_decision_id` after successful backfill; `fx_decision_id` points to the
+  current/bootstrap decision as applicable; no `fx_source_category`-populated / `fx_decision_id`-NULL
+  historical rows (except an explicitly enumerated, justified out-of-scope predicate, §11B);
+- **`LegacyBackfilled` events link the exact transaction and decision row**; historical approval identity
+  is **not fabricated**; superseded approved rows retain historical checker facts (§16B.1);
+- **Draft `LEGACY_UNVERIFIED` bootstrap rows cannot bypass governance** or silently become postable (§11B.2);
+- **022 backfills the pointers before 023 immutability triggers** freeze governance fields, and the
+  backfill count-equality + `fx_source_category == linked decision.source_category` checks pass (§31.1).
 
 ---
 
