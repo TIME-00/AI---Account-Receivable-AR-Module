@@ -1,19 +1,44 @@
 # Batch 9D-B — Real Provider Integration and Scheduler Staging — Detailed Implementation Plan
 
+> **AUTHORITATIVE CURRENT STATE (updated 2026-07-09 — Batch 9D-B closure-condition correction).** This
+> block supersedes any "not yet implemented / pending implementation approval / pending plan review"
+> wording below, which is retained only as clearly labeled **Historical / Superseded** record.
+>
+> | Stage | Status |
+> | --- | --- |
+> | Plan | **PASS / confirmed** |
+> | Implementation | **COMPLETED** |
+> | Technical Review | **PASSED** after required narrow documentation fix and re-review |
+> | Staging Readiness | **PASS** |
+> | Staging Runtime Verification | **PASS** |
+> | Evidence Consolidation | **COMPLETED** |
+> | Closure Review | **PASS WITH CLOSURE CONDITIONS** |
+> | Official Batch 9D-B Closure | **PENDING Closure Re-Review** |
+>
+> **Next gate:** **Codex Batch 9D-B Closure Re-Review.** Batch 9D-B is **not** officially closed.
+>
+> Batch 9D-A is **OFFICIALLY CLOSED**; DG-1 is **FORMALLY APPROVED AND LOCKED**; Batch 9D-C is **NOT
+> STARTED** and may begin only after Batch 9D-B official closure. Staging deployment and staging scheduler
+> activation occurred after explicit user approval; the staging scheduler **remains ACTIVE** for continued
+> staging observation. **No production deployment, provider call, scheduler activation, or mutation
+> occurred.** Runtime evidence:
+> `docs/evidence/SPRINT_BATCH_9D_B_REAL_PROVIDER_INTEGRATION_AND_SCHEDULER_STAGING_IMPLEMENTATION_EVIDENCE.md`.
+
 - **Batch:** 9D-B — Real Provider Integration and Scheduler Staging.
-- **Type:** Detailed, implementation-ready sub-plan (planning/documentation only; **no** code, migration, deployment, provider call, or scheduler activation in this task).
+- **Type:** Detailed, implementation-ready sub-plan. *(Authored as planning/documentation only; implementation, staging deployment, and staging scheduler activation have since occurred under later explicit approvals — see the authoritative current-state block above.)*
 - **Author:** Claude Code (discovery + implementation plan).
 - **Parent plan:** `docs/plans/BATCH_9D_DAILY_FX_RATE_SYNC_AND_MULTI_CURRENCY_UX_PLAN.md` (authoritative phase/order document; this file is the 9D-B sub-plan referenced by master §0.4).
 - **Baseline commit at authoring:** `22a52377df5d338ffe4a2a7501fa38ef320e7bfb` (`docs(plan): lock Batch 9D DG-1 provider decision`; `HEAD == origin/main`, clean tree).
-- **Current approved state:** Batch **9D-A OFFICIALLY CLOSED**; **DG-1 FORMALLY APPROVED, LOCKED, CODEX CONFIRMED**; Batch **9D-B READY FOR DETAILED IMPLEMENTATION PLANNING, NOT YET IMPLEMENTED**.
+- **State at authoring (Historical):** Batch **9D-A OFFICIALLY CLOSED**; **DG-1 FORMALLY APPROVED, LOCKED, CODEX CONFIRMED**; Batch **9D-B was then READY FOR DETAILED IMPLEMENTATION PLANNING, NOT YET IMPLEMENTED**. Batch 9D-B has since been implemented and staging-verified (PASS) — see the authoritative current-state block above.
 - **Amendment baseline commit:** `fddc03b419a8fdb8165e591f93746f0784ca554a` (`docs(plan): add Batch 9D-B provider integration plan`; `HEAD == origin/main`, clean tree at amendment start).
-- **Next gate:** **Codex Batch 9D-B Plan Amendment Confirmation Review** → user staging-implementation approval → implementation → technical review → staging readiness → explicit staging approval → staging deployment → runtime verification → evidence → closure review. **Implementation approval has NOT been granted.**
+- **Next gate:** **Codex Batch 9D-B Closure Re-Review** (see the authoritative current-state block above). *(Historical: the next gate at authoring was Codex Batch 9D-B Plan Amendment Confirmation Review → user staging-implementation approval → implementation → technical review → staging readiness → explicit staging approval → staging deployment → runtime verification → evidence → closure review; all of these have since occurred, and Batch 9D-B official closure is now pending Closure Re-Review.)*
 
-> **Planning-only banner.** No backend code was written, no migration was created or applied, no Edge
-> Function was deployed, no scheduler/cron was configured, no external FX provider (Frankfurter/MAS) was
-> called, and neither staging nor production was mutated while producing this plan. Real provider
-> integration and scheduler activation remain blocked until this plan passes Codex amendment confirmation
-> and the user grants explicit implementation approval.
+> **Planning-only banner (Historical — describes the planning/authoring phase of this document).** No
+> backend code was written, no migration was created or applied, no Edge Function was deployed, no
+> scheduler/cron was configured, no external FX provider (Frankfurter/MAS) was called, and neither staging
+> nor production was mutated **while producing this plan**. *(Superseded: implementation, staging
+> deployment, and staging scheduler activation have since occurred under later explicit approvals; see the
+> authoritative current-state block above. Production remains untouched.)*
 
 ---
 
@@ -37,8 +62,11 @@ scheduler authentication mechanism (§17); (5) lock scheduler cadence/timezone/d
 lock the initial staging currency allowlist (§8); (7) lock the migration / scheduler-artifact decision
 (§21). Test, acceptance-criteria, and open-decision sections are updated accordingly (§23, §24, §30, §31).
 
-**This revision does not claim that implementation approval has been granted.** The only next gate is
-Codex Batch 9D-B Plan Amendment Confirmation Review, followed by explicit user implementation approval.
+*(Historical, at the time of that review:* **implementation approval had not yet been granted**, and the
+then next gate was Codex Batch 9D-B Plan Amendment Confirmation Review followed by explicit user
+implementation approval.*)* Implementation approval was subsequently granted; Batch 9D-B has since been
+implemented, staging-verified (PASS), and consolidated, and its official closure is now pending Codex
+Batch 9D-B Closure Re-Review — see the authoritative current-state block at the top of this document.
 
 ---
 
@@ -419,9 +447,9 @@ Inspected routing: `fx-rate-sync/index.ts` matches only `/^\/mock-sync\/?$/i`. 9
 real route; the mock route is preserved.
 
 - **Method/path:** `POST /fx-rate-sync/sync`.
-- **Request body:** `{ provider?: string (must equal APPROVED_REAL_PROVIDER_ID if present; omitted ⇒
-  route pins the approved real provider explicitly — never an implicit default to a *different*
-  provider), effective_date?: YYYY-MM-DD (default today, non-future), pairs?: [{from_currency,
+- **Request body:** `{ provider?: string (must equal APPROVED_REAL_PROVIDER_ID if present; omitted ->
+  default approved provider (route pins the approved real provider explicitly, never an implicit default
+  to a *different* provider)), effective_date?: YYYY-MM-DD (default today, non-future), pairs?: [{from_currency,
   to_currency}] (optional; default = company allowlist §8) }`.
 - **Company scope:** `extractCompanyId` (UUID-validated) + `getAuthContext`, identical to today.
 - **Provider selection behavior:** `assertApprovedProvider` (real route only accepts the approved real

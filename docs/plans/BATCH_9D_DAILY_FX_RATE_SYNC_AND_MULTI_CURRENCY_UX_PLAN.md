@@ -15,20 +15,23 @@
      the validated reference-only foundation now allows a real provider to be integrated (9D-B) **before**
      the booking-rate governance batch (9D-C). See **§0** (the authoritative current-state section).
 - **Predecessor:** Batch 9C — Receipt PDF/Image Import Intake (officially closed at `2e5d86e`).
-- **Next gate (Rev 2, updated 2026-07-07):** DG-1 is now **FORMALLY APPROVED AND LOCKED** (user approval
-  2026-07-07; see §0.3). The remaining flow is: Codex **DG-1 Lock Confirmation Review** → **9D-B detailed
-  implementation planning** → 9D-B implementation approval → 9D-B implementation. Real provider
-  integration remains blocked until 9D-B is separately approved for implementation.
-  - *(Historical: the Rev 2 gate was originally "Codex Batch 9D Plan Amendment Review → user approval →
-    DG-1 locked → 9D-B implementation"; the amendment review and DG-1 lock are now complete.)*
+- **Next gate:** **Codex Batch 9D-B Closure Re-Review** (see the authoritative current-state block in
+  §0.0). Batch 9D-A is CLOSED, DG-1 is FORMALLY APPROVED AND LOCKED, and Batch 9D-B is implemented and
+  staging-verified (PASS) with official closure pending.
+  - *(Historical, 2026-07-07: the then-remaining flow was Codex DG-1 Lock Confirmation Review → 9D-B
+    detailed implementation planning → 9D-B implementation approval → 9D-B implementation; all of these
+    have since occurred. Earlier still, the Rev 2 gate was "Codex Batch 9D Plan Amendment Review → user
+    approval → DG-1 locked → 9D-B implementation"; the amendment review and DG-1 lock are complete.)*
 
 > This document is planning and discovery only. No backend/frontend code was changed, no migration was
 > created, no schema was modified, no Edge Function was deployed, no cron/provider credential was
 > configured, no external FX provider was called, and neither staging nor production was mutated while
 > producing it. **Daily FX Sync is NOT live in production.** Provider reference rates do **NOT**
 > automatically become booking rates. A latest/reference conversion is **NOT** accounting-authoritative.
-> Frankfurter/MAS is now a **formally approved and LOCKED DG-1 decision (see §0.3) — but still NOT
-> implemented** (no code, migration, Edge Function, scheduler, or provider call).
+> Frankfurter/MAS is a **formally approved and LOCKED DG-1 decision** (see §0.3). *(Historical note: this
+> banner describes the planning/authoring context of this document. Batch 9D-B has since been implemented
+> and staging-verified (PASS) under approved staging scope — see the authoritative current-state block in
+> §0.0. Production remains untouched.)*
 > Batch 9D-A (provider-neutral foundation) is officially closed; **§0 supersedes the earlier execution
 > ordering** in §13 and §20 where they differ.
 
@@ -40,6 +43,30 @@
 > order, and the proposed DG-1 provider decision. Where it differs from the earlier ordering in §13 and
 > §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
 > history and is **not** erased.
+
+### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-09 — Batch 9D-B closure-condition correction)
+
+> **This block is the single authoritative current-state statement for Batch 9D and supersedes any
+> "9D-B not yet implemented / pending plan review / implementation approval not granted" wording elsewhere
+> in this document, which is retained only as clearly labeled Historical / Superseded record.**
+>
+> | Item | Current status |
+> | --- | --- |
+> | Batch 9D-A | **OFFICIALLY CLOSED** |
+> | DG-1 (provider decision) | **FORMALLY APPROVED AND LOCKED** |
+> | Batch 9D-B — implementation | **COMPLETED** |
+> | Batch 9D-B — staging runtime verification | **PASS** |
+> | Batch 9D-B — evidence consolidation | **COMPLETED** |
+> | Batch 9D-B — Closure Review | **PASS WITH CLOSURE CONDITIONS** |
+> | Batch 9D-B — official closure | **PENDING** (awaits Codex Batch 9D-B Closure Re-Review) |
+> | Batch 9D-C | **NOT STARTED** — may begin only after Batch 9D-B official closure |
+>
+> **Current next gate:** **Codex Batch 9D-B Closure Re-Review.** Batch 9D-B is **not** officially closed.
+>
+> Batch 9D-B staging deployment and staging scheduler activation occurred **after explicit user approval**;
+> the staging scheduler **remains ACTIVE** for continued staging observation. **No production deployment,
+> no production provider call, no production scheduler activation, and no production mutation occurred.**
+> Canonical execution order is unchanged: `9D-A (CLOSED) → DG-1 → 9D-B → 9D-C → 9D-D → 9D-E` (§0.2).
 
 ### 0.1 Batch 9D-A closure status
 
@@ -96,10 +123,11 @@ separation is now proven, not assumed.
 ### 0.3 DG-1 — Formal FX Provider Decision (FORMALLY APPROVED AND LOCKED)
 
 > **Status: FORMALLY APPROVED BY THE USER AND LOCKED (2026-07-07).** The provider decision below is now
-> the authoritative, locked DG-1 outcome. It remains **NOT implemented**: no backend code, migration, or
-> Edge Function has been written for it, no scheduler/cron is configured, and **no provider API has been
-> called.** The lock authorizes **detailed 9D-B implementation planning only** — not 9D-B implementation,
-> deployment, or any real provider call.
+> the authoritative, locked DG-1 outcome. *(Historical, as at the 2026-07-07 lock: DG-1 was then **NOT
+> implemented** — no backend code, migration, or Edge Function had been written for it, no scheduler/cron
+> was configured, and **no provider API had been called** — and the lock authorized detailed 9D-B
+> implementation planning only.)* Batch 9D-B has since been implemented and staging-verified (PASS) under
+> approved staging scope; see the authoritative current-state block in §0.0. Production remains untouched.
 >
 > **History (preserved):** DG-1 was previously recorded here as **PROPOSED — pending Codex review and
 > user approval** (Rev 2 amendment). The Codex Batch 9D Plan Amendment Review returned **PASS WITH
@@ -107,8 +135,10 @@ separation is now proven, not assumed.
 > gave **explicit formal approval** of the decision below. This section is now upgraded from PROPOSED to
 > LOCKED; the earlier proposed/pending status is retained above for historical accuracy.
 >
-> **Authoritative current state:** Batch 9D-A — **OFFICIALLY CLOSED**; DG-1 — **FORMALLY APPROVED AND
-> LOCKED**; Batch 9D-B — **READY FOR DETAILED IMPLEMENTATION PLANNING, NOT YET IMPLEMENTED**.
+> **Authoritative current state (see §0.0):** Batch 9D-A — **OFFICIALLY CLOSED**; DG-1 — **FORMALLY
+> APPROVED AND LOCKED**; Batch 9D-B — **IMPLEMENTED; staging runtime verification PASS; evidence
+> consolidated; Closure Review PASS WITH CLOSURE CONDITIONS; official closure PENDING Closure Re-Review**;
+> Batch 9D-C — **NOT STARTED**.
 
 - **API / transport:** **Frankfurter v2**.
 - **Provider strategy:** **explicit provider pinning is mandatory**. **Initial provider: `MAS`.**
@@ -139,9 +169,9 @@ separation is now proven, not assumed.
 > **Detailed sub-plan (documentation-only pointer):** the implementation-ready 9D-B plan lives in
 > `docs/plans/BATCH_9D_B_REAL_PROVIDER_INTEGRATION_AND_SCHEDULER_STAGING_PLAN.md` (adapter design,
 > provider-contract verification, scheduler design, file-level change map, expanded mandatory runtime
-> matrix). It is
-> **not yet implemented** and is pending Codex Batch 9D-B Plan Second Review. This master section remains
-> the authoritative scope/order summary.
+> matrix). Batch 9D-B has since been **implemented and staging-verified (PASS)**; per §0.0 its official
+> closure is **PENDING Codex Batch 9D-B Closure Re-Review**. This master section remains the authoritative
+> scope/order summary.
 
 **Provider adapter:** Frankfurter v2 integration; explicit provider parameter/pinning; **initial MAS
 source**; exact pair normalization; explicit unsupported-pair handling; explicit **no-silent-fallback**
@@ -778,9 +808,12 @@ report totals.
 
 > **Lock update (2026-07-07):** DG-1 is now **FORMALLY APPROVED BY THE USER AND LOCKED** — **Frankfurter
 > v2** transport, mandatory explicit provider pinning, **initial provider `MAS`**, no API key expected,
-> reference-only destination (see the authoritative record in **§0.3**). It remains **NOT implemented**
-> and **no provider API has been called**; the lock authorizes 9D-B **detailed implementation planning
-> only**. The historical Rev 2 note below is retained for accuracy.
+> reference-only destination (see the authoritative record in **§0.3** and the current-state block in
+> **§0.0**). *(Historical at the 2026-07-07 lock: DG-1 was then not implemented and no provider API had
+> been called, and the lock authorized 9D-B detailed implementation planning only.)* Batch 9D-B has since
+> been implemented and staging-verified (PASS); the staging MAS provider was called under approved staging
+> scope, while **no production provider call occurred**. The historical Rev 2 note below is retained for
+> accuracy.
 >
 > **Rev 2 update (historical — now superseded by the lock above):** a **proposed** DG-1 decision existed
 > in **§0.3** — **Frankfurter v2** transport with mandatory explicit provider pinning, **initial provider
@@ -790,9 +823,11 @@ report totals.
 
 **DG-1 remains a dedicated gate before 9D-B.** As of 2026-07-07 the DG-1 provider decision is now
 **formally approved and LOCKED** (Frankfurter v2 / initial provider `MAS`; authoritative record in §0.3).
-The decision is locked but **not implemented** and **no provider API has been called**; 9D-B
-implementation is still separately gated. *(Historical: at the Rev 2 amendment this decision was still
-proposed and pending approval, and no provider decision was formally locked in that amendment.)*
+The decision is locked; Batch 9D-B has since been implemented and staging-verified (PASS) under approved
+staging scope (see §0.0), with official closure pending Codex Batch 9D-B Closure Re-Review. *(Historical
+at the 2026-07-07 lock: the decision was then not implemented and no provider API had been called; and at
+the earlier Rev 2 amendment it was still proposed and pending approval, with no provider decision formally
+locked in that amendment.)*
 
 - **Blocking for:** real provider integration, external host, real external calls, credentials,
   real-provider adapter, provider-specific retry, cron/scheduled real sync, production provider setup and
