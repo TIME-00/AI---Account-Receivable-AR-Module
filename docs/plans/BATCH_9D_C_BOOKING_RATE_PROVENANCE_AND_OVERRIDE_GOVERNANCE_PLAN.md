@@ -14,15 +14,37 @@
 > OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS - OFFICIAL CLOSURE`). Batch **9D-C** is the next
 > batch in the canonical order `9D-A (CLOSED) -> DG-1 -> 9D-B (CLOSED) -> 9D-C -> 9D-D -> 9D-E`.
 
-- **Current state:** Batch 9D-C is in **detailed implementation planning** only. Nothing is implemented,
-  no migration is created, no Edge Function/frontend is changed, and no staging/production is mutated by
-  this task.
-- **Next gate:** **Codex Batch 9D-C Plan Second Review** -> user implementation approval -> implementation
-  -> technical review -> staging readiness -> explicit staging approval -> staging deployment -> runtime
-  verification -> evidence -> closure review. **Implementation approval has NOT been granted.**
+- **Current state:** Batch 9D-C is in **detailed implementation planning / plan amendment** only. Nothing
+  is implemented, no migration is created, no Edge Function/frontend is changed, and no staging/production
+  is mutated by this task. The Codex Batch 9D-C Plan Second Review returned `AMENDMENT REQUIRED — RETURN TO
+  CLAUDE CODE`; this revision applies the required amendments (see §1A).
+- **Next gate:** **Codex Batch 9D-C Plan Amendment Confirmation Review** -> user implementation approval ->
+  implementation -> technical review -> staging readiness -> explicit staging approval -> staging
+  deployment -> runtime verification -> evidence -> closure review. **Implementation approval has NOT been
+  granted; 9D-C implementation has NOT started.**
 - **Planning-only banner.** No booking-rate logic, migration, RPC, Edge Function, or frontend was changed
-  while producing this plan; no posted financial record was touched; the staging scheduler was not
-  modified; production was not touched.
+  while producing/amending this plan; no posted financial record was touched; the ACTIVE Batch 9D-B
+  staging scheduler was not modified; production was not touched. `POST /allocations/auto` remains
+  `AUTO_ALLOCATION_DISABLED`.
+
+---
+
+## 1A. Codex Batch 9D-C Plan Second Review — Amendment Resolutions (recorded)
+
+**Verdict:** `AMENDMENT REQUIRED — RETURN TO CLAUDE CODE`. All eight blocking findings are resolved in
+this revision as summarized below and detailed in the referenced sections. No locked architectural
+boundary (§5) is changed.
+
+| Finding | Resolution summary | Sections |
+| --- | --- | --- |
+| **B9DC-001** Master-plan status consistency | Stale "9D-B closure pending / 9D-C not started" wording in master §0.3/§0.4/§18 corrected to `9D-B OFFICIALLY CLOSED` and `9D-C detailed implementation planning / plan amendment`; next gate = Codex Batch 9D-C Plan Amendment Confirmation Review. | master §0.0/§0.3/§0.4/§0.6/§18 |
+| **B9DC-002** Truthful historical provenance | Blanket historical `CATALOG` backfill removed. Deterministic same-currency-to-base rows -> `BASE_PARITY`; unprovable historical foreign-currency rows -> `LEGACY_UNVERIFIED` (snapshot preserved; no recompute; no re-resolve; no catalog link on numeric match; source FKs null). | §10, §11, §11A, §24, §31, §34 |
+| **B9DC-003** DB-level posted FX immutability | Corrected the "already immutable" claim; require a narrowly scoped DB-level `BEFORE UPDATE` immutability trigger blocking protected FX/governance fields once `status` is non-Draft; txn-date protection decision documented. | §3.3, §4, §17, §17A, §28, §31, §33, §34 |
+| **B9DC-004** Transaction-safe post-time authorization | Check-then-post across a separate Edge Function boundary is explicitly rejected (TOCTOU). Authoritative governance verification runs **inside** the `post_invoice`/`post_receipt` transaction after a row lock; `fx_assert_booking_decision_postable` is an internal in-transaction helper and/or non-authoritative preflight only. | §25, §28, §28A |
+| **B9DC-005** Remove new posted-FX correction mutation from scope | Prevention/immutability/audit kept; any **new** reverse-and-repost / compensating FX adjustment / post-allocation FX correction mutation is **DEFERRED** to a separate, reviewed, approved batch. Posted rate correction attempts are rejected in 9D-C. | §7, §17, §26, §34, §37, §39 |
+| **B9DC-006** Lock initial authorization defaults | Deviation bands, stale threshold (7 days), source/default policy (`PROMOTED_CATALOG` OFF), and import/unattended auto-post defaults locked as **initial configurable technical defaults** (not final client accounting policy). | §9, §14, §10, §21, §22 |
+| **B9DC-007** Explicit append-only governance audit design | Do not rely on `005` for coverage. Add append-only `fx_booking_rate_decision_events`; explicit event set; append-only enforcement via mutation-prevention triggers + privilege revocation + RLS; reconstruction tests. | §29, §24, §31, §32, §34 |
+| **B9DC-008** Strong referential integrity | Polymorphic `source_record_id` replaced by explicit nullable `exchange_rate_id` + `fx_reference_rate_id` with per-source-category CHECK; polymorphic `transaction_type/id` replaced by nullable `invoice_id` + `receipt_id` with exactly-one CHECK; cross-company / mismatch / wrong-`to_currency` protections. | §11, §11A, §24, §31, §32 |
 
 ---
 
@@ -91,9 +113,12 @@ indicative anchors for the implementation team.
   exchange_rate, base_currency`.
 - **Posting** (`database/007_financial_rpcs.sql`): `post_invoice` computes `v_base_total =
   ROUND(v_total_amount * v_inv.exchange_rate, 2)` and writes journal lines using **the invoice row's own
-  `exchange_rate`** (not a fresh lookup). `post_receipt` likewise uses `v_rct.exchange_rate`. **Therefore
-  the numeric booked rate is already effectively immutable at posting: later `exchange_rates` catalog
-  edits or `fx_reference_rates` corrections do not alter posted rows.**
+  `exchange_rate`** (not a fresh lookup). `post_receipt` likewise uses `v_rct.exchange_rate`. **Accurate
+  current condition (B9DC-003):** later `exchange_rates` catalog edits and `fx_reference_rates`
+  corrections **do not automatically mutate** posted snapshots (posting does not re-read them), and
+  service-layer draft guards exist — **but full DB-level posted-FX immutability is not yet sufficiently
+  enforced.** A direct/authenticated or service-path UPDATE to a posted row's FX fields is not currently
+  blocked at the database layer. 9D-C must add DB-level enforcement (§17A).
 
 ### 3.4 Allocation / realized FX
 
@@ -129,8 +154,9 @@ Auditor. Company scope enforced via `extractCompanyId` (UUID-validated) + `getAu
 ## 4. Existing Booking-Rate Behavior (summary invariants to preserve)
 
 1. Booking rate is chosen at **create/edit** and snapshotted on the transaction row.
-2. Posting reads the **row snapshot**, not a fresh catalog lookup -> posted numeric rate is already
-   immutable to later catalog/reference changes.
+2. Posting reads the **row snapshot**, not a fresh catalog lookup -> later catalog/reference changes do
+   **not** automatically mutate posted rows. (Full DB-level immutability against direct/service UPDATE is
+   **not** yet enforced and is added by 9D-C, §17A.)
 3. `resolveExchangeRate` = latest curated `exchange_rates` with `effective_date <= txn_date`, direction
    `currency -> base`, `1.0` when currency == base, hard error when missing.
 4. A caller-supplied rate silently overrides the catalog lookup (the ungoverned override to be governed).
@@ -179,10 +205,12 @@ base totals, and journals all depend on a rate whose provenance cannot be explai
 2. Per-transaction **booking-rate decision + provenance** record (auditable, immutable once posted).
 3. **Maker-checker override governance** with role gating, mandatory reason, and deviation thresholds.
 4. **Reference-rate suggestion** surfaced to users (read-only) without automatic promotion.
-5. **Post-posting correction** via governed reversal/adjustment, never in-place mutation.
-6. Full **audit trail** reusing existing append-only audit infrastructure.
+5. **DB-level posted-FX immutability** (§17A) and the rule that posted snapshots are never mutated in
+   place; **any new correction-mutation workflow is deferred** to a separate approved batch (B9DC-005).
+6. Full **append-only governance audit trail** via a dedicated event table (§29), not reliance on `005`.
 7. **Zero regression** to posting, allocation, realized FX, reversal, and bounced-cheque behavior.
-8. Company-scoped **RLS** and backend-controlled mutation only.
+8. Company-scoped **RLS** and backend-controlled (service-role RPC) mutation only.
+9. **Strong referential integrity** for provenance (explicit FKs + CHECKs; no weak polymorphic columns).
 
 ---
 
@@ -194,25 +222,40 @@ base totals, and journals all depend on a rate whose provenance cannot be explai
 - No production rollout, migration, provider deploy, scheduler change, or Vault change (that is 9D-E).
 - No multi-currency UX aggregation redesign (that is 9D-D).
 - No new provider integration (9D-B is closed).
-- No retroactive rewrite of historical posted snapshots.
+- No retroactive rewrite of historical posted snapshots; no fabricated historical provenance.
+- **No new posted-FX correction-mutation workflow** (reverse-and-repost / compensating FX adjustment /
+  post-allocation FX correction) — deferred to a separate reviewed, approved batch (B9DC-005).
+- No enabling of `POST /allocations/auto` (stays `AUTO_ALLOCATION_DISABLED`).
 
 ---
 
-## 9. Business Decisions Required (`[BUSINESS DECISION REQUIRED]`)
+## 9. Locked Initial Authorization Defaults (B9DC-006)
 
-The plan proposes safe technical defaults but flags the following as business policy to confirm before or
-during implementation review:
+To keep 9D-C implementation planning unblocked, the following are **locked as initial technical
+implementation defaults**. They are **configuration-driven** (stored company-scoped, see §14) and are
+**explicitly not claimed to be final client-approved accounting policy**; a future reviewed business-policy
+change may adjust the configured values without re-architecting. Production rollout of any values remains
+owned by Batch 9D-E.
 
-1. **Source priority** when both catalog and an eligible reference rate exist (default proposal: curated
-   catalog is authoritative; reference is suggestion-only). `[BUSINESS DECISION REQUIRED]`
-2. **Deviation thresholds** (default proposal below, §14). `[BUSINESS DECISION REQUIRED]`
-3. **Stale-reference age** (default 7 calendar days). `[BUSINESS DECISION REQUIRED]`
-4. **Who may approve overrides** (default: AR Supervisor for minor band, Finance Manager for major band;
-   maker-checker enforced). `[BUSINESS DECISION REQUIRED]`
-5. **Whether overrides on imports are permitted without human approval** (default: import overrides beyond
-   the informational band are queued for approval; never auto-posted). `[BUSINESS DECISION REQUIRED]`
-6. **Whether promotion of a reference rate into the `exchange_rates` catalog is ever allowed** (default:
-   optional, Finance-Manager-only, explicit, audited; off by default). `[BUSINESS DECISION REQUIRED]`
+1. **Source priority:** `BASE_PARITY` > `CATALOG` > user-initiated `REFERENCE_SELECTED` /
+   `MANUAL_OVERRIDE`. Curated catalog is the authoritative governed booking source where eligible;
+   reference is suggestion + explicit governed selection only; **never auto-selected**. **LOCKED (default).**
+2. **Deviation bands** (absolute % from the governance baseline): Informational `<= 0.50%`; Minor
+   `> 0.50%` and `<= 2.00%`; Major `> 2.00%` and `<= 5.00%`; Blocked `> 5.00%`. See §14. **LOCKED (default).**
+3. **Stale-reference threshold:** `7 calendar days`; a reference older than this is stale and cannot
+   silently authorize booking or posting. **LOCKED (default).**
+4. **Approver roles:** Minor -> AR Supervisor (or higher); Major -> Finance Manager; maker-checker
+   mandatory (the maker cannot approve their own decision); System Admin is **not** a financial approver
+   merely due to administrative access; Auditor is read-only. **LOCKED (default).**
+5. **Import / unattended auto-post:** may proceed only when ALL of {`source_category in
+   {BASE_PARITY, CATALOG}`, decision valid, `approval_status = NotRequired`, no stale condition, no missing
+   baseline, no pending approval, no rejection, no decision-version mismatch}. All other conditions HOLD
+   (never auto-post). See §21/§22. **LOCKED (default).**
+6. **`PROMOTED_CATALOG`:** behavior **OFF / not implemented in 9D-C**. No scheduler or sync process may
+   select or promote a rate automatically. **LOCKED (default).**
+
+*(These defaults are configurable for future reviewed business-policy changes; they are safe initial
+values, not a claim of final accounting sign-off.)*
 
 ---
 
@@ -221,17 +264,20 @@ during implementation review:
 Each transaction's booked rate must originate from exactly one **source category**, recorded in
 provenance:
 
-| Source category | Origin | Eligibility | Approval | Fallback |
+| Source category | Origin | Eligibility | Approval | Source FKs (B9DC-008) |
 | --- | --- | --- | --- | --- |
-| `BASE_PARITY` | currency == base | always (rate = 1.0) | none | n/a |
-| `CATALOG` | `public.exchange_rates` via `resolveExchangeRate` | catalog entry exists for `currency->base`, `effective_date <= txn_date` | none (curated) | -> `REFERENCE_SUGGESTED` (if enabled) or error |
-| `REFERENCE_SELECTED` | Active `fx_reference_rates` chosen through governed selection | §15 eligibility passes; user explicitly selects | required if it deviates from catalog beyond threshold (§14) | -> manual override or error |
-| `MANUAL_OVERRIDE` | user-entered rate | operational role; mandatory reason | required per deviation band (§14); maker-checker | none (must resolve) |
-| `PROMOTED_CATALOG` (optional, off by default) | reference rate promoted into `exchange_rates` by FM | FM-only, explicit, audited | FM approval | n/a |
+| `BASE_PARITY` | currency == base (rate = 1.0, deterministic) | always | none | both null |
+| `CATALOG` | `public.exchange_rates` via `resolveExchangeRate` | catalog entry exists for `currency->base`, `effective_date <= txn_date` | none (curated) | `exchange_rate_id` required; `fx_reference_rate_id` null |
+| `REFERENCE_SELECTED` | Active `fx_reference_rates` chosen through governed selection | §15 eligibility passes; user explicitly selects | required if it deviates beyond band (§14) | `fx_reference_rate_id` required; `exchange_rate_id` null |
+| `MANUAL_OVERRIDE` | user-entered rate | operational role; mandatory reason | required per deviation band (§14); maker-checker | both null; baseline reference recorded as provenance context only |
+| `LEGACY_UNVERIFIED` | historical foreign-currency row predating governance where the source path is unprovable | backfill only (§11A) | none (historical) | both null |
+| `PROMOTED_CATALOG` | reference promoted into `exchange_rates` by FM | **OFF / not implemented in 9D-C** | n/a | n/a |
 
-**Priority (default):** `BASE_PARITY` > `CATALOG` > (user-initiated) `REFERENCE_SELECTED` /
+**Priority (default, LOCKED §9):** `BASE_PARITY` > `CATALOG` > (user-initiated) `REFERENCE_SELECTED` /
 `MANUAL_OVERRIDE`. Reference is **never** auto-selected; it is suggested and may be selected by a user
-subject to governance.
+subject to governance. `LEGACY_UNVERIFIED` is a **backfill-only** category (never chosen for a new
+decision). `PROMOTED_CATALOG` is **off** in 9D-C; no scheduler/sync process may auto-select or auto-promote
+any rate.
 
 ### Architecture option decision (A/B/C/D)
 
@@ -253,21 +299,71 @@ full provenance and immutability.
 
 ## 11. Provenance Model
 
-Minimum provenance fields to explain a booked rate (stored in a normalized decision record, §24):
-`company_id`, `transaction_type` (`invoice`|`receipt`), `transaction_id`, `from_currency`, `to_currency`,
-`transaction_date`, `booked_rate` (final), `source_category` (§10), `source_record_id` (catalog row or
-`fx_reference_rates.id` when applicable), `provider` + `provider_effective_date` + `reference_fetched_at`
-(when reference-derived), `suggested_rate` (original suggestion), `deviation_pct` (vs suggestion/catalog),
-`selected_by`, `selected_at`, `override_reason`, `approval_status`
-(`NotRequired`|`Pending`|`Approved`|`Rejected`), `approved_by`, `approved_at`, `decision_version`
-(optimistic-concurrency), `posted` (bool) + `posted_at`.
+Minimum provenance fields on `fx_booking_rate_decisions` (§24). **Referential integrity is explicit
+(B9DC-008): no weak polymorphic columns.**
 
-Placement (see §24 recommendation): the **immutable numeric snapshot** stays on `invoices`/`receipts`
-(`exchange_rate`, `base_currency`, `base_total`/`base_amount` — unchanged); a small set of **source
-columns** may be added to the transaction for fast display (`fx_source_category`,
-`fx_decision_id`); the **full governance/provenance/history** lives in a normalized
-`fx_booking_rate_decisions` table + audit log. Avoids duplication while keeping the accounting snapshot
-authoritative and immutable.
+- **Transaction ownership (exactly one):** `invoice_id UUID` nullable FK -> `invoices(id)`, `receipt_id
+  UUID` nullable FK -> `receipts(id)`, with a CHECK enforcing **exactly one** is non-null. (Replaces the
+  weak `transaction_type`/`transaction_id` pair.)
+- **Source identity (per category):** `exchange_rate_id UUID` nullable FK -> `exchange_rates(id)`,
+  `fx_reference_rate_id UUID` nullable FK -> `fx_reference_rates(id)`, governed by a CHECK tied to
+  `source_category`: `CATALOG` -> `exchange_rate_id` NOT NULL and `fx_reference_rate_id` NULL;
+  `REFERENCE_SELECTED` -> `fx_reference_rate_id` NOT NULL and `exchange_rate_id` NULL; `BASE_PARITY`,
+  `MANUAL_OVERRIDE`, `LEGACY_UNVERIFIED` -> both NULL. (Replaces the weak polymorphic `source_record_id`.)
+- **Core provenance:** `company_id`, `from_currency`, `to_currency`, `transaction_date`, `booked_rate`
+  (final), `source_category` (§10), `baseline_rate` + `baseline_kind` (catalog/reference/none, provenance
+  context for `MANUAL_OVERRIDE`), `suggested_rate`, `deviation_pct`.
+- **Reference provenance (when reference-derived):** `provider`, `provider_effective_date`,
+  `reference_fetched_at` (mirrored from the referenced `fx_reference_rates` row; the FK is authoritative).
+- **Governance/lifecycle:** `selected_by`, `selected_at`, `override_reason`, `approval_status`
+  (`NotRequired`|`Pending`|`Approved`|`Rejected`), `approved_by`, `approved_at`, `maker_user_id`,
+  `checker_user_id`, `decision_version` (optimistic concurrency), `status`
+  (`Draft`->`Pending`->`Approved`/`Rejected`->`Superseded`/`Posted`), `posted` + `posted_at`.
+
+**Integrity protections (trigger/CHECK/FK-enforced, B9DC-008):** the referenced `exchange_rate`/
+`fx_reference_rate` must belong to the **same company**; the source currency pair must match the
+decision's `from_currency`/`to_currency`; a reference source's `to_currency` must equal the **company base
+currency**; a decision's `invoice_id`/`receipt_id` must belong to the same company; an invoice decision
+cannot attach to a receipt (and vice-versa); a decision cannot attach to a different transaction after
+creation.
+
+Placement (see §24): the **immutable numeric snapshot** stays on `invoices`/`receipts` (`exchange_rate`,
+`base_currency`, `base_total`/`base_amount` — unchanged); the transaction carries two display pointers
+`fx_source_category` and `fx_decision_id` (the **current/final** decision for the booked snapshot); the
+**full governance/provenance history** lives in `fx_booking_rate_decisions` + the append-only event table
+(§29). `fx_decision_id` changes only while the transaction is Draft.
+
+---
+
+## 11A. Truthful Historical Provenance / Backfill (B9DC-002)
+
+The pre-governance code allowed the booked rate to come from **either** a caller-supplied `exchange_rate`
+**or** the catalog `resolveExchangeRate` lookup, and the stored numeric snapshot **does not prove which
+path produced it**. Therefore the backfill must be deterministic and truthful — it **must not** label
+historical foreign-currency rows as `CATALOG`.
+
+Locked backfill rules:
+
+- **`BASE_PARITY`** — where the transaction currency equals the company base currency and the booked rate
+  is deterministically `1.0`: set `source_category = BASE_PARITY`; both source FKs null.
+- **`LEGACY_UNVERIFIED`** — every historical foreign-currency transaction whose source path cannot be
+  independently proven: set `source_category = LEGACY_UNVERIFIED`. For these rows:
+  - preserve the existing numeric booked snapshot **unchanged**;
+  - **do not** recompute the rate;
+  - **do not** re-resolve from `exchange_rates`;
+  - **do not** link to a catalog row merely because the numeric value matches;
+  - **do not** claim provider/reference provenance;
+  - record explicitly that the transaction **predates booking-rate governance**;
+  - `exchange_rate_id` and `fx_reference_rate_id` remain **null**;
+  - deterministic, idempotent migration/backfill semantics (re-running yields the same classification).
+
+A numeric match against a historical catalog row may be surfaced **for analysis only** and must **never**
+be recorded as proof of source origin. The backfill emits a `LegacyBackfilled` audit event (§29).
+
+Mandatory migration + staging verification (see §31/§34): prove that same-currency historical rows are
+classified `BASE_PARITY`; that historical foreign-currency rows are classified `LEGACY_UNVERIFIED` with
+null source FKs and unchanged numeric snapshot; and that **no** historical row receives fabricated
+`CATALOG`/provider provenance.
 
 ---
 
@@ -311,21 +407,22 @@ edit-after-approval or post-during-pending race.
 
 ## 14. Deviation / Materiality Policy
 
-Deviation measured as `abs(entered_rate - reference_baseline) / reference_baseline` where the baseline is
-the eligible catalog rate, else the eligible Active reference rate. Proposed **safe default** bands
-(all `[BUSINESS DECISION REQUIRED]`):
+Deviation measured as `abs(entered_rate - governance_baseline) / governance_baseline` where the baseline is
+the eligible catalog rate, else the eligible Active reference rate. **LOCKED initial default bands**
+(configurable; not final accounting policy — see §9):
 
-| Band | Default trigger | Behavior |
+| Band | Trigger (default) | Behavior |
 | --- | --- | --- |
-| Informational | <= 2% | inline warning; reason optional; no approval |
-| Minor | > 2% and <= 5% | mandatory reason; AR Supervisor approval; maker-checker |
-| Major | > 5% and <= 25% | mandatory reason; Finance Manager approval; maker-checker |
-| Blocked | > 25%, or rate <= 0, or both sources missing with no override justification | hard reject |
+| Informational | `<= 0.50%` | inline warning; reason optional; `approval_status = NotRequired` |
+| Minor | `> 0.50%` and `<= 2.00%` | mandatory reason; AR Supervisor (or higher) approval; maker-checker |
+| Major | `> 2.00%` and `<= 5.00%` | mandatory reason; Finance Manager approval; maker-checker |
+| Blocked | `> 5.00%`, or rate `<= 0`, or missing baseline with no justification | reject / cannot proceed |
 
-Additional dimensions to consider: reference staleness (default > 7 days -> escalate one band), and
-transaction materiality (default: base_total/base_amount above a company-configured threshold -> escalate
-one band). Exact numbers are business policy; implementation stores them as company-scoped configuration
-(reuse `ar_system_config` pattern) rather than hard-coded constants.
+Maker-checker is **mandatory**; the maker cannot approve their own decision. **Stale-reference threshold:
+7 calendar days** (a stale reference cannot silently authorize booking/posting; it escalates and requires
+reason). Optional additional dimension (materiality): a company-configured base-amount threshold may
+escalate one band. All values are stored as **company-scoped configuration** (reuse the `ar_system_config`
+pattern) rather than hard-coded constants, so a future reviewed business-policy change adjusts config only.
 
 ---
 
@@ -356,21 +453,85 @@ Catalog selection reuses the existing `resolveExchangeRate` semantics unchanged.
 
 ---
 
+## 16A. Hybrid Decision Lifecycle (clarified)
+
+```text
+baseline/suggestion resolved -> decision created -> selection or override
+  -> approval routing (band, §14) -> approval / rejection
+  -> (material FX edit) invalidates prior approval + new decision_version
+  -> current/final decision selected (fx_decision_id on the txn)
+  -> transaction booked snapshot remains the numeric authority
+  -> post-time in-transaction validation (§28A) -> posting
+  -> decision + event history remain immutable and queryable
+```
+
+Locked clarifications:
+- **Editing** a material FX value (rate/source/currency) does **not** overwrite history: it creates a
+  **new `decision_version`** (prior version marked `Superseded` in the decision lineage) and emits
+  `DecisionSuperseded` + `DecisionCreated` events.
+- **Prior approval is invalidated** on any material FX change (status returns to `Pending`, `Approved`
+  cleared, `ApprovalInvalidated` event) so a stale approval can never apply to a changed rate.
+- **`fx_decision_id` on the transaction changes only while the transaction is Draft**; once posted it is
+  frozen by the §17A trigger.
+- The **post-time RPC verifies the decision's final rate equals the transaction booked snapshot** (§28A);
+  a mismatch aborts posting.
+- **Posted transactions cannot switch to a different decision.**
+- Full prior decision history remains queryable from `fx_booking_rate_decisions` (versioned lineage) and
+  `fx_booking_rate_decision_events` (append-only).
+
+---
+
 ## 17. Posted Transaction Immutability
 
 - Posted `invoices.exchange_rate` / `receipts.exchange_rate` / `base_total` / `base_amount` and their
-  journals remain **immutable** (already the case: posting snapshots the row rate).
+  journals must remain **immutable**, enforced at the **DB level** by 9D-C (§17A) — not merely by the fact
+  that posting snapshots the row rate.
 - Later `fx_reference_rates` corrections and `exchange_rates` catalog edits **do not** mutate posted rows
   (verified: posting does not re-read catalog).
 - Scheduler/provider sync **never** touches posted transactions (reaffirmed from 9D-B).
-- **Correction after posting** (choose per scenario; never in-place mutation):
-  - **Reverse and repost** — reverse the posted transaction (existing reversal path) and repost with the
-    corrected governed rate; or
-  - **Explicit adjustment / correction journal** — a compensating journal entry capturing the FX
-    correction with full provenance and approval.
-  - Recommended default: **reverse-and-repost for pre-allocation corrections; compensating adjustment
-    journal for post-allocation corrections** (avoids unwinding downstream allocations). Both are audited
-    and approval-gated; neither deletes history.
+- **Post-posting correction scope (B9DC-005):** the **governance rule is kept** — *posted booked FX
+  snapshots are never mutated in place.* However, **9D-C does not implement any new correction-mutation
+  workflow.** Building new reverse-and-repost FX-correction flows, compensating FX adjustment journals, or
+  post-allocation FX-correction mutation is **DEFERRED to a separately planned, technically reviewed,
+  explicitly approved batch**, unless the workflow is already an existing, proven-safe primitive.
+  - In 9D-C: a posted-transaction rate-correction attempt **must be rejected**; there is **no in-place
+    posted FX mutation**; governance/audit **may record** that a correction was requested or rejected; the
+    actual accounting-correction mutation is **out of scope**.
+  - Executing a compensating-journal workflow is **not** a 9D-C closure condition.
+
+---
+
+## 17A. DB-Level Posted FX Immutability Enforcement (B9DC-003)
+
+Service-layer / Edge-Function validation is **not sufficient**. 9D-C adds a narrowly scoped DB-level
+enforcement — a `BEFORE UPDATE` trigger (or equivalent DB constraint mechanism) on `invoices` and
+`receipts` — that **blocks changes to protected FX/governance fields once the row is no longer Draft**
+(`OLD.status` is non-Draft).
+
+**Protected fields (where applicable):** `currency`, `exchange_rate`, `base_currency`,
+`base_total` / `base_amount`, `fx_source_category`, `fx_decision_id`.
+
+**Transaction-date fields:** the trigger **also protects the booking-rate-eligibility date field**
+(`invoice_date` / `receipt_date`) after the row leaves Draft, because that date determines rate
+eligibility; changing it post-posting would invalidate provenance. **Decision documented and locked:
+protect these date fields after posting.**
+
+**Behavioral requirements:**
+- allow legitimate **Draft** editing of all fields;
+- allow the **Draft -> Posted** transition itself;
+- when `OLD.status` is non-Draft, **reject** any UPDATE that changes a protected field (raise a clear
+  error);
+- **preserve** legitimate financial-RPC updates to unrelated fields (status transitions, balances,
+  allocated/unallocated amounts, timestamps) — the trigger checks only the protected column set, not the
+  whole row;
+- apply **even where broad operational UPDATE RLS policies exist** (a trigger fires regardless of RLS);
+- **not** rely on frontend or Edge Function validation alone.
+
+**Mandatory tests (see §33/§34):**
+- direct authenticated UPDATE attempt on a posted row's FX fields -> **rejected**;
+- ordinary service-path UPDATE attempt on a posted row's FX fields -> **rejected**;
+- approved financial RPC changing unrelated permitted fields (e.g. balance/status) -> **remains
+  functional**.
 
 ---
 
@@ -406,37 +567,54 @@ Invariants that **must not change**:
 - discount/short-payment/bank-charge branches (007) unaffected.
 
 9D-C only governs how the snapshot rate is **chosen and recorded before posting**; once posted, allocation
-consumes the snapshot exactly as today. Regression tests (§33) must prove byte-identical realized-FX
-behavior on a fixed dataset.
+consumes the snapshot exactly as today. Regression tests (§33) must prove **exact deterministic
+database-value equality and/or scoped financial fingerprints** for a fixed regression dataset, proving no
+change to: realized FX amount; journal amounts; allocation amounts; reversal outcome; bounced-cheque
+outcome; and discount/bank-charge behavior where applicable. Existing financial semantics are unchanged.
 
 ---
 
 ## 21. Import Compatibility
 
-Import flows (CSV/XLSX invoice/receipt imports; receipt PDF/Image intake; auto-create draft; auto-post
-boundary from `013_import_enable_auto_post.sql`) must **not bypass** booking-rate governance:
-- imported rate absent -> catalog `resolveExchangeRate`; if missing -> row flagged, not silently posted;
-- imported rate present and within Informational band -> accepted with provenance `source_category =
-  MANUAL_OVERRIDE (import)`;
-- imported rate beyond Informational band -> **queued for approval**, never auto-posted;
+Current receipt import **can create and auto-post** through service paths (auto-create draft; auto-post
+boundary from `013_import_enable_auto_post.sql`). Governance must be integrated at **all** relevant paths
+so none can bypass it:
+
+```text
+invoice create | invoice draft edit | invoice post
+receipt create | receipt draft edit | receipt post
+CSV import | XLSX import | PDF/Image receipt intake | review queue | receipt import auto-post
+future approved automation paths
+```
+
+Locked import behavior (per §9 defaults):
+- imported rate absent -> catalog `resolveExchangeRate`; if missing -> row flagged, **not** silently posted;
+- imported rate present and within Informational band with a clean `CATALOG`/`BASE_PARITY` posture ->
+  accepted with provenance and may auto-post;
+- imported rate beyond the Informational band, or `MANUAL_OVERRIDE`/`REFERENCE_SELECTED` posture ->
+  **queued for approval**, never auto-posted;
 - batch approval supported via the same approval queue;
 - provenance records the import origin (batch id / source file reference) where available.
 
-Auto-post must respect the same approval gate: an import row requiring approval stays Draft/Pending.
+Auto-post respects the same gate: an import row requiring approval stays Draft/Pending. **`POST
+/allocations/auto` remains `AUTO_ALLOCATION_DISABLED` and is not enabled by 9D-C.**
 
 ---
 
 ## 22. Automation Compatibility
 
-For automatic draft creation / posting / allocation:
-- **clean candidate** (catalog or base parity, within Informational band) -> may proceed automatically;
-- **stale reference** -> warn; do not auto-select reference; fall back to catalog or hold;
-- **missing rate** -> hold (no fabrication, no auto-post);
-- **override beyond threshold** -> hold for approval; never auto-post;
-- **approval pending** -> hold.
+Unattended auto-post may proceed **only when ALL** of these hold (locked default, §9):
+`source_category in {BASE_PARITY, CATALOG}`; current decision valid; `approval_status = NotRequired`; no
+stale condition; no missing baseline; no pending approval; no rejection; no decision-version mismatch.
+
+The following **must HOLD** (never auto-post):
+`REFERENCE_SELECTED` requiring user action; `MANUAL_OVERRIDE`; pending approval; rejected decision; stale
+baseline/reference; missing governed rate; invalidated approval; decision-version mismatch.
 
 Principle: automation may proceed only through the **Informational / NotRequired** path; anything needing
 human judgment is queued. A reference rate merely existing never authorizes automatic financial mutation.
+These are safe initial implementation defaults and remain configurable for future reviewed business-policy
+changes. Production rollout remains owned by Batch 9D-E.
 
 ---
 
@@ -470,18 +648,24 @@ Comparison:
 **Adopt Option C (hybrid).**
 
 - Keep `invoices.exchange_rate`, `receipts.exchange_rate`, `base_currency`, `base_total`/`base_amount`
-  **unchanged and authoritative** as the immutable accounting snapshot.
-- Add two lightweight display columns to `invoices` and `receipts`: `fx_source_category TEXT`
-  (nullable, backfilled to `CATALOG`/`BASE_PARITY` for existing rows) and `fx_decision_id UUID` (nullable
-  FK to the decision table).
-- Add a normalized, append-mostly `fx_booking_rate_decisions` table holding the full provenance + override
-  + approval fields (§11), with `decision_version` for optimistic concurrency and a `status` lifecycle
-  (`Draft` -> `Pending` -> `Approved`/`Rejected` -> `Posted`).
-- Record governance events in the **existing append-only audit log** (005 pattern), not a new store.
-- Selection/override/approval/posting-gate logic lives in **PostgreSQL RPCs** (transaction-safe, service
-  role) invoked by Edge Functions; reads via company-scoped RLS.
+  **unchanged and authoritative** as the immutable accounting snapshot; enforce posted-FX immutability at
+  the **DB level** (§17A).
+- Add two lightweight display columns to `invoices` and `receipts`: `fx_source_category TEXT` and
+  `fx_decision_id UUID` (nullable FK to the decision table; points to the current/final decision, changes
+  only while Draft). **Historical backfill is truthful (B9DC-002, §11A): `BASE_PARITY` for deterministic
+  same-currency rows; `LEGACY_UNVERIFIED` for unprovable historical foreign-currency rows; never a
+  fabricated `CATALOG` label.**
+- Add a normalized `fx_booking_rate_decisions` table with the full provenance + override + approval fields
+  and **explicit source/transaction FKs + CHECK constraints** (B9DC-008, §11), `decision_version` for
+  optimistic concurrency, and a `status` lifecycle (`Draft` -> `Pending` -> `Approved`/`Rejected` ->
+  `Superseded`/`Posted`).
+- Add an **append-only `fx_booking_rate_decision_events`** table (B9DC-007, §29) for the governance event
+  log — this is a **new dedicated store**, not a claim that `005` auto-covers it.
+- Selection/override/approval logic and the **in-transaction posting guard** (§28A) live in **PostgreSQL
+  RPCs** (transaction-safe, service role) invoked by Edge Functions; reads via company-scoped RLS.
 
-This satisfies all 20 acceptance questions (§34) while preserving backward compatibility and immutability.
+This satisfies all 20 acceptance questions (§39/§34) while preserving backward compatibility and
+DB-enforced immutability.
 
 ---
 
@@ -499,11 +683,16 @@ capability where cross-cutting):
 
 PostgreSQL RPCs (service-role, transaction boundaries):
 - `fx_record_booking_decision(...)`, `fx_submit_override(...)`, `fx_approve_booking_decision(...)`,
-  `fx_reject_booking_decision(...)`, and a posting-time guard used by `post_invoice`/`post_receipt`
-  (`fx_assert_booking_decision_postable(...)`).
+  `fx_reject_booking_decision(...)`.
+- `fx_assert_booking_decision_postable(...)` exists **only** as (1) an internal helper executed **inside**
+  the `post_invoice`/`post_receipt` transaction **after** the transaction-row lock, and/or (2) a
+  non-authoritative UI/preflight check. It is **never** the sole financial authorization boundary in a
+  separate check-then-post call sequence (B9DC-004; see §28A).
 
 **No direct financial-table mutation API is exposed.** All mutations go through RPCs that own the
-transaction boundary; frontend hooks call Edge Functions only.
+transaction boundary; frontend hooks call Edge Functions only. The authoritative booking-governance
+verification is performed inside the same PostgreSQL transaction as posting (§28A), never as a separate
+Edge Function "assert postable -> then post" sequence.
 
 ---
 
@@ -521,23 +710,32 @@ transaction boundary; frontend hooks call Edge Functions only.
 | Post with approved override | yes (assigned)* | yes | yes | no | no |
 | View provenance | yes (assigned) | yes | yes | yes | no |
 | View audit history | yes (assigned) | yes | yes | yes | no |
-| Post-posting correction workflow | no | initiate | initiate+approve per band | no | no |
+| Request/record a correction (mutation deferred, B9DC-005) | no | request | request | no | no |
 
 `*` subject to existing posting permissions. **System Admin is intentionally NOT a financial approver**
-(config-only), and Auditor is read-only. Maker-checker: the submitter is excluded from approving their own
-decision. Items dependent on business policy are `[BUSINESS DECISION REQUIRED]` (see §9).
+(config-only, never a financial approver merely due to administrative access), and Auditor is read-only.
+Maker-checker: the submitter is excluded from approving their own decision; the approver role is derived
+from the authenticated **server-side** identity (no caller-supplied role trust). The actual post-posting
+correction **mutation** is **out of 9D-C scope** (deferred, §17/B9DC-005); 9D-C may only record/reject a
+correction request. Initial authorization defaults are **locked** in §9 (configurable, not final client
+accounting policy).
 
 ---
 
 ## 27. RLS / Tenant Isolation
 
-- `fx_booking_rate_decisions`: SELECT gated by `rls_has_company_access` (company-scoped); no direct
-  client INSERT/UPDATE/DELETE (writes only via service-role RPC).
-- New transaction display columns inherit existing invoice/receipt RLS.
-- Audit rows: append-only (existing triggers), company-scoped reads.
+- `fx_booking_rate_decisions` and `fx_booking_rate_decision_events`: SELECT gated by
+  `rls_has_company_access` (company-scoped); **no direct client INSERT/UPDATE/DELETE** (privileged mutation
+  only through controlled service-role RPC paths).
+- New transaction display columns inherit existing invoice/receipt RLS; posted-FX fields additionally
+  protected at the DB layer (§17A) even where broad operational UPDATE RLS exists.
+- Event table is append-only (mutation-prevention triggers, §29); company-scoped reads.
 - Cross-company access denied; anon denied; authenticated direct writes denied.
-- Helper RPCs `service-role`-only (repeat the 020 privilege-hardening pattern for any new
-  `SECURITY DEFINER` function; explicit `REVOKE ... FROM PUBLIC/anon/authenticated`).
+- Every new `SECURITY DEFINER` function repeats the **020 privilege-hardening pattern**: fixed safe
+  `search_path`; explicit `REVOKE EXECUTE FROM PUBLIC/anon/authenticated`; explicit intended grants only.
+- Server-side company/transaction/source ownership validation; **no caller-supplied role trust**; the
+  maker-checker role is derived from the authenticated server-side identity; direct posted-FX mutation is
+  rejected at the DB layer.
 
 ---
 
@@ -557,15 +755,67 @@ Prevent the inconsistent sequence `approve override | concurrent edit | post`:
 
 ---
 
-## 29. Audit Trail
+## 28A. Transaction-Safe Post-Time Authorization (B9DC-004)
 
-Reuse the existing append-only audit infrastructure (005). Events:
-`rate_suggested`, `source_selected`, `override_requested`, `override_edited`, `override_approved`,
-`override_rejected`, `booking_rate_finalized`, `transaction_posted`, `correction_requested`,
-`correction_approved`, `correction_rejected`, `adjustment_created`. Each event records:
-actor, role, company_id, transaction_type+id, source_category, source_rate/suggested_rate, selected_rate,
-before/after, deviation, reason, approval linkage, timestamp. Audit rows are immutable (UPDATE/DELETE
-prevented by existing triggers).
+**Rejected design (TOCTOU-unsafe):** an Edge Function that calls "assert postable -> PASS" and then calls
+a **separate** post RPC. Between the check and the post, the decision could be edited, invalidated,
+superseded, or the rate changed — producing inconsistent provenance. This is explicitly **not** an
+acceptable authorization boundary.
+
+**Locked authoritative design:** authoritative governance verification occurs **inside the same
+PostgreSQL transaction** as `post_invoice` / `post_receipt`:
+
+```text
+post_invoice / post_receipt transaction
+  -> SELECT ... FOR UPDATE the transaction row (lock)
+  -> identify current fx_decision_id on the locked row
+  -> verify the decision belongs to the same company and this exact transaction
+  -> verify current decision_version (no stale version)
+  -> verify approval_status in {NotRequired, Approved}
+  -> verify the decision is not invalidated or superseded
+  -> verify the decision's final selected rate EQUALS the current transaction booked snapshot
+  -> verify source eligibility and governance status (band/stale/source-FK integrity)
+  -> perform the posting mutation
+  -> COMMIT
+```
+
+**Concurrency expectations:** the transaction-row `FOR UPDATE` lock serializes posting against concurrent
+edit/approve on the same transaction; a concurrent editor must wait or fail the version check; posting
+aborts (whole transaction rolls back) if any verification fails. `fx_assert_booking_decision_postable` may
+encapsulate these checks but only when invoked **after** the lock **within** the posting transaction (or
+as a non-authoritative preflight). A posted transaction can never switch to a different decision.
+
+---
+
+## 29. Audit Trail (B9DC-007) — explicit append-only governance events
+
+**Do not rely on `database/005_audit_triggers.sql` to automatically cover the new governance tables.**
+9D-C adds an explicit, append-only event table:
+
+```text
+fx_booking_rate_decisions        (current decision state per lifecycle)
+fx_booking_rate_decision_events  (append-only event log)
+```
+
+**Event semantics to reconstruct** (exact names may follow repo conventions):
+`LegacyBackfilled`, `DecisionCreated`, `BaselineResolved`, `ReferenceSuggested`, `CatalogSelected`,
+`ReferenceSelected`, `OverrideSubmitted`, `ApprovalRequired`, `Approved`, `Rejected`,
+`ApprovalInvalidated`, `DecisionSuperseded`, `Posted`.
+
+**Each event records (where relevant):** actor identity, actor role, `company_id`, transaction identity
+(`invoice_id`/`receipt_id`), `decision_id`, `decision_version`, `event_type`, `timestamp`, prior and
+resulting `approval_status`, reason/comment, maker/checker identity, provenance source identity
+(`source_category` + `exchange_rate_id`/`fx_reference_rate_id`), and selected/final rate.
+
+**Append-only enforcement (combination):**
+- **no** client direct INSERT (writes only via controlled service-role RPC paths);
+- **no** UPDATE and **no** DELETE (mutation-prevention triggers, mirroring the `005`
+  `fn_prevent_audit_log_modification()` pattern, applied to the new event table);
+- **privilege revocation** (`REVOKE ... FROM PUBLIC/anon/authenticated`) + explicit intended grants only;
+- **RLS** company-scoped reads.
+
+**Mandatory tests / staging evidence:** full **audit reconstruction** of a decision's lifecycle from the
+event table; and rejection of UPDATE/DELETE/direct-INSERT against the event table (§33/§34).
 
 ---
 
@@ -583,17 +833,26 @@ prevented by existing triggers).
 
 ## 31. Migration Plan (forward-only; do not create now)
 
-- Next available number is **022** (017-021 exist; **do not edit 017-021**).
-- Proposed sequence:
-  - `database/022_fx_booking_rate_governance.sql` — create `fx_booking_rate_decisions`; add
-    `fx_source_category` + `fx_decision_id` to `invoices` and `receipts`; indexes; RLS policies; backfill
-    existing rows to `CATALOG`/`BASE_PARITY`; **no change to posted numeric snapshots**.
-  - `database/023_fx_booking_rate_rpcs.sql` (optional split) — `SECURITY DEFINER` RPCs
-    (select/override/approve/reject/postable-guard) with explicit privilege hardening; update
-    `post_invoice`/`post_receipt` to call the postable-guard.
-  - Optional `024` — company-scoped deviation/materiality config (or extend `ar_system_config`).
-- All forward-only, additive; no financial recomputation of existing posted rows; no `exchange_rates` /
-  `fx_reference_rates` schema change; no privilege weakening.
+- Next available number is **022** (017-021 exist; **do not edit 017-021**). Forward-only.
+- Proposed sequence (split for reviewability):
+  - `database/022_fx_booking_rate_governance.sql` — create `fx_booking_rate_decisions` with explicit
+    nullable source FKs (`exchange_rate_id`, `fx_reference_rate_id`) and transaction FKs (`invoice_id`,
+    `receipt_id`), per-source-category CHECK constraints, exactly-one-transaction CHECK, and
+    same-company/currency-pair/`to_currency==base` integrity (CHECK/trigger); create append-only
+    `fx_booking_rate_decision_events`; add `fx_source_category` + `fx_decision_id` to `invoices`/`receipts`;
+    indexes; RLS policies; **truthful legacy backfill** (`BASE_PARITY` for deterministic same-currency
+    rows; `LEGACY_UNVERIFIED` for unprovable foreign-currency rows; null source FKs; no fabricated
+    `CATALOG`; §11A); **no change to posted numeric snapshots**.
+  - `database/023_fx_booking_rate_rpcs_and_immutability.sql` — DB-level posted-FX immutability triggers on
+    `invoices`/`receipts` (§17A); append-only mutation-prevention triggers on
+    `fx_booking_rate_decision_events`; `SECURITY DEFINER` governed RPCs
+    (select/override/approve/reject) and the in-transaction posting guard (§28A) integrated into
+    `post_invoice`/`post_receipt`; explicit privilege hardening (fixed `search_path`;
+    `REVOKE EXECUTE FROM PUBLIC/anon/authenticated`; intended grants only — 020 pattern).
+  - Optional `024` — company-scoped deviation/materiality/stale config (or extend `ar_system_config`).
+- All forward-only, additive; **no historical rate recomputation; no posted snapshot mutation; no
+  fabricated provenance**; no `exchange_rates` / `fx_reference_rates` schema change; no privilege
+  weakening. Ordering: 022 (schema/backfill) before 023 (triggers/RPCs/posting integration).
 
 ---
 
@@ -601,8 +860,8 @@ prevented by existing triggers).
 
 | File | Action | Responsibility |
 | --- | --- | --- |
-| `database/022_fx_booking_rate_governance.sql` | create | decision table + txn display columns + RLS + backfill |
-| `database/023_fx_booking_rate_rpcs.sql` | create | governed RPCs + posting guard integration + privilege hardening |
+| `database/022_fx_booking_rate_governance.sql` | create | decision table + event table + explicit FKs/CHECKs + txn display columns + RLS + truthful legacy backfill |
+| `database/023_fx_booking_rate_rpcs_and_immutability.sql` | create | DB posted-FX immutability triggers + append-only event triggers + governed RPCs + in-transaction posting guard + privilege hardening |
 | `backend/supabase/functions/invoices/service.ts` | modify | route rate selection/override through governance; record decision |
 | `backend/supabase/functions/receipts/service.ts` | modify | symmetric governance |
 | `backend/supabase/functions/invoices/validators.ts` / `receipts/validators.ts` | modify | reason/deviation validation |
@@ -623,13 +882,26 @@ prevented by existing triggers).
   self-approval rejected; edit-after-approval returns to Pending and blocks stale approval.
 - **Concurrency:** approve-vs-edit race; approve-vs-post race; duplicate approval; duplicate submission;
   stale `decision_version` rejected.
-- **Posting:** booked snapshot created; provenance stored; later reference correction does not mutate
-  posted snapshot; later `exchange_rates` edit does not mutate posted snapshot.
-- **Allocation regression:** realized FX byte-identical on a fixed dataset; same-currency rule preserved;
-  reversal preserved; bounced cheque preserved; discount/short-payment branches unaffected.
-- **Security:** cross-company denied; direct client mutation denied; new RPCs `service-role`-only.
-- **Financial zero-regression:** existing posting/allocation/journal semantics preserved (fingerprint
-  before/after).
+- **Posting:** booked snapshot created; provenance stored; in-transaction post-time revalidation (§28A);
+  later reference correction does not mutate posted snapshot; later `exchange_rates` edit does not mutate
+  posted snapshot.
+- **DB-level immutability (§17A):** direct authenticated UPDATE on a posted row's FX fields -> rejected;
+  ordinary service-path UPDATE on posted FX fields -> rejected; approved financial RPC changing unrelated
+  permitted fields -> still functional; posted `invoice_date`/`receipt_date` change -> rejected.
+- **Historical backfill (§11A):** same-currency rows -> `BASE_PARITY`; foreign-currency unprovable rows ->
+  `LEGACY_UNVERIFIED` (snapshot unchanged, null source FKs); no fabricated `CATALOG`/provider provenance.
+- **Referential integrity (§11):** per-source-category FK CHECK; exactly-one-transaction CHECK;
+  cross-company source/transaction association rejected; source currency-pair mismatch rejected; reference
+  `to_currency != base` rejected.
+- **Audit (§29):** full lifecycle reconstruction from the event table; UPDATE/DELETE/direct-INSERT against
+  the event table rejected.
+- **Allocation regression:** **exact deterministic database-value equality and/or scoped financial
+  fingerprints** on a fixed dataset — no change to realized FX, journal amounts, allocation amounts,
+  reversal outcome, bounced-cheque outcome, discount/bank-charge behavior; same-currency rule preserved.
+- **Security:** cross-company denied; direct client mutation denied; new RPCs `service-role`-only;
+  maker-checker derived from server-side identity (no caller-supplied role trust).
+- **Financial zero-regression:** existing posting/allocation/journal semantics preserved (scoped
+  fingerprint before/after).
 
 Separate evidence classes: synthetic test data vs real reference-rate data vs financial before/after
 fingerprints (do not blend).
@@ -638,33 +910,52 @@ fingerprints (do not blend).
 
 ## 34. Mandatory Staging Runtime Matrix
 
-1. role matrix (all capabilities in §26) [R]
-2. catalog rate selection [M]
-3. reference suggestion surfaced (read-only) [M]
-4. governed reference selection [M]
-5. manual override + mandatory reason [M]
-6. deviation band computation (Informational/Minor/Major/Blocked) [M/S]
-7. approval (Minor -> Supervisor) [M]
-8. approval (Major -> Finance Manager) [M]
-9. rejection path [M]
-10. maker-checker (self-approval blocked) [R]
-11. edit-after-approval returns to Pending [R]
-12. posting gate re-verifies approval transactionally [R]
-13. posted snapshot immutable to later reference correction [M/R]
-14. posted snapshot immutable to later catalog edit [M/R]
-15. post-posting correction (reverse-repost / adjustment journal) [M]
-16. audit trail completeness (all §29 events) [M]
-17. tenant isolation / RLS (cross-company denied) [R]
-18. RPC privilege (`service-role`-only) [R]
-19. import compatibility (governance not bypassed; approval queue) [M]
-20. automation compatibility (holds on stale/missing/over-threshold/pending) [M]
-21. allocation realized-FX regression (byte-identical) [R]
-22. reversal / bounced-cheque regression [R]
-23. financial before/after fingerprint (no unintended mutation) [R]
-24. concurrency races (approve/edit/post) [R]
-25. MYR base-currency preflight for reference selection (mirror 9D-B) [M]
+Includes at least the following mandatory cases (B9DC amendment additions explicit):
 
-Key: [M] mandatory real staging proof, [S] safely simulated, [R] runtime regression proof.
+1. truthful `BASE_PARITY` historical backfill [S]
+2. truthful `LEGACY_UNVERIFIED` foreign-currency backfill (snapshot unchanged, null source FKs) [S]
+3. no fabricated `CATALOG` provenance on historical rows [S]
+4. DB-level posted **invoice** FX-field update rejection [S]
+5. DB-level posted **receipt** FX-field update rejection [S]
+6. permitted unrelated financial RPC update still works [S]
+7. same-transaction post-time decision revalidation (§28A) [S]
+8. approve-vs-edit race [S]
+9. edit-vs-post race [S]
+10. stale decision-version rejection [S]
+11. import receipt auto-post HOLD when governance is not eligible [M]
+12. pending-approval HOLD [M]
+13. rejected-decision HOLD [M]
+14. stale-reference HOLD [M]
+15. missing rate/baseline HOLD [M]
+16. audit event completeness / lifecycle reconstruction [M]
+17. append-only audit mutation rejection (UPDATE/DELETE/direct-INSERT) [S]
+18. cross-tenant decision association rejection [S]
+19. cross-tenant / mismatched source-FK rejection [S]
+20. exact allocation/realized-FX financial fingerprints (no change) [S]
+21. role matrix (all capabilities in §26) [S]
+22. catalog rate selection [M]
+23. reference suggestion surfaced (read-only) [M]
+24. governed reference selection [M]
+25. manual override + mandatory reason [M]
+26. deviation band computation (Informational/Minor/Major/Blocked) [S]
+27. approval (Minor -> AR Supervisor) [M]
+28. approval (Major -> Finance Manager) [M]
+29. rejection path [M]
+30. maker-checker (self-approval blocked) [S]
+31. edit-after-approval returns to Pending / invalidates approval [S]
+32. posted snapshot immutable to later reference correction [M/S]
+33. posted snapshot immutable to later catalog edit [M/S]
+34. posted-transaction rate-correction attempt rejected (no in-place mutation; §17/§B9DC-005) [S]
+35. tenant isolation / RLS (cross-company denied) [S]
+36. RPC privilege (`service-role`-only) [S]
+37. MYR base-currency preflight for reference selection (mirror 9D-B) [M]
+
+Evidence classes (kept distinct; do **not** blend):
+- **[M]** mock/synthetic governance behavior;
+- **[S]** staging system/database behavior;
+- **[R]** real provider/reference evidence — **only where genuinely necessary**. Purely governance-behavior
+  tests must **not** use real-provider calls; a controlled reference fixture in `fx_reference_rates`
+  suffices for selection/eligibility tests.
 
 ---
 
@@ -685,10 +976,14 @@ Key: [M] mandatory real staging proof, [S] safely simulated, [R] runtime regress
 
 Evidence file at closure:
 `docs/evidence/SPRINT_BATCH_9D_C_BOOKING_RATE_PROVENANCE_AND_OVERRIDE_GOVERNANCE_IMPLEMENTATION_EVIDENCE.md`
-covering: implementation proof; migration apply proof (live object/constraint verification); role matrix;
-selection/override/approval/rejection; immutability proofs (2 kinds); allocation regression; financial
-before/after fingerprints; import + automation compatibility; concurrency; cleanup; deviations/limitations.
-Separate synthetic / real-reference / financial evidence classes.
+covering: implementation proof; migration apply proof (live object/constraint verification, incl. FKs +
+CHECKs); truthful backfill proof (`BASE_PARITY`/`LEGACY_UNVERIFIED`, no fabricated `CATALOG`); role matrix;
+selection/override/approval/rejection; DB-level posted-FX immutability proof (direct + service UPDATE
+rejected; permitted RPC still works); allocation regression (deterministic value equality / scoped
+fingerprints); financial before/after fingerprints; audit-event lifecycle reconstruction + append-only
+mutation rejection; referential-integrity rejection cases; import + automation compatibility; concurrency
+(post-time revalidation, races, stale version); cleanup; deviations/limitations. Separate synthetic /
+staging-database / real-reference evidence classes (real-provider calls only where genuinely necessary).
 
 ---
 
@@ -699,37 +994,51 @@ Separate synthetic / real-reference / financial evidence classes.
 | C1 | Governance changes silently alter realized FX. | Byte-identical allocation regression is mandatory (§33). |
 | C2 | Ungoverned override path remains reachable (imports/legacy callers). | Route all rate entry through governance; import path explicitly covered (§21). |
 | C3 | Approval race produces inconsistent provenance. | Optimistic version + row locks + transactional post gate (§28). |
-| C4 | Business thresholds unknown. | Safe defaults + `[BUSINESS DECISION REQUIRED]` flags (§9, §14). |
+| C4 | Business thresholds not yet client-signed-off. | Locked safe **configurable** initial defaults (§9, §14); final values are a later policy step, not an implementation blocker. |
 | C5 | Catalog/reference confusion (Layer collapse). | Source model + provenance categories; no auto-promotion (§5, §10). |
 | C6 | Backward compatibility break for existing invoice/receipt creation. | Additive migration; feature flag; catalog default unchanged (§31, §35). |
-| C7 | Posted-record correction misused as in-place mutation. | Only reverse-repost / adjustment journal; snapshots immutable (§17). |
+| C7 | Posted-record correction misused as in-place mutation. | Posted-FX immutability enforced at DB level (§17A); correction attempts rejected; new correction-mutation workflow deferred (§17/B9DC-005). |
+| C8 | TOCTOU between "assert postable" and posting. | Authoritative verification inside the posting transaction after row lock (§28A); separate check-then-post rejected. |
+| C9 | Fabricated historical provenance. | Truthful `BASE_PARITY`/`LEGACY_UNVERIFIED` backfill; no `CATALOG` fabrication; null source FKs (§11A). |
+| C10 | Weak polymorphic references corrupt integrity. | Explicit FKs + per-category CHECK + exactly-one-transaction CHECK + cross-company/pair guards (§11). |
 
 ---
 
 ## 38. Open Decisions
 
-- All `[BUSINESS DECISION REQUIRED]` items in §9 and §14.
-- Whether to split migrations 022/023 or combine (default: split for reviewability).
-- Whether promotion into `exchange_rates` (Option C) is enabled at all in 9D-C (default: off).
-- Whether a shared `fx-booking` Edge Function is warranted vs extending `invoices`/`receipts` (assess at
-  implementation).
-- Exact company-config storage for thresholds (`ar_system_config` extension vs new table).
+**Now LOCKED by this amendment (no longer open):** deviation bands + stale threshold + approver roles +
+import/auto-post posture (§9/§14, as configurable initial defaults); `PROMOTED_CATALOG` OFF (§9/§10);
+migration split 022/023 (§31); explicit FK/CHECK integrity model (§11); DB-level posted-FX immutability
+(§17A); transaction-safe post-time authorization (§28A); append-only event table (§29); post-posting
+correction-mutation deferral (§17/B9DC-005).
 
-None of these change the locked architectural boundaries (§5) or the immutability/zero-regression
-guarantees.
+**Remaining genuinely open (non-architecture, non-security-critical; safe to resolve at implementation):**
+- final client-approved accounting **values** for the deviation bands / stale threshold (defaults are safe
+  and configurable; business sign-off is a later policy step, not a blocker);
+- whether a shared `fx-booking` Edge Function is warranted vs extending `invoices`/`receipts`;
+- exact company-config storage for thresholds (`ar_system_config` extension vs a new config table);
+- event-name string conventions (semantics are fixed in §29).
+
+None of these change the locked architectural boundaries (§5) or the immutability / integrity /
+zero-regression guarantees.
 
 ---
 
 ## 39. Acceptance Criteria
 
 9D-C is complete only when: booking-rate source hierarchy is explicit and enforced; reference selection is
-governed and never automatic; per-transaction provenance is stored; overrides are role-gated with
-mandatory reason, deviation bands, and maker-checker approval; posted snapshots are immutable to later
-catalog/reference changes; post-posting corrections are governed (reverse-repost/adjustment, never
-in-place); concurrency races are prevented; invoice/receipt/import/automation flows all route through
-governance; realized-FX and allocation behavior is byte-identical (regression proven); RLS/tenant
-isolation and `service-role`-only RPC privilege hold; staging matrix (§34) passes; evidence classes are
-not blended; Closure Review passes. No production action occurs.
+governed and never automatic; per-transaction provenance is stored with **explicit FKs + CHECK
+integrity** (§11); historical backfill is **truthful** (`BASE_PARITY`/`LEGACY_UNVERIFIED`, no fabricated
+`CATALOG`, §11A); overrides are role-gated with mandatory reason, **locked deviation bands** (§9/§14), and
+maker-checker approval; posted snapshots are immutable to later catalog/reference changes **and enforced
+at the DB level** (§17A); **post-posting correction mutation is out of scope** (deferred, B9DC-005) and
+correction attempts are rejected; **post-time authorization is transaction-safe** (§28A, no TOCTOU
+check-then-post); concurrency races are prevented; invoice/receipt/import/automation flows all route
+through governance and `POST /allocations/auto` stays `AUTO_ALLOCATION_DISABLED`; realized-FX and
+allocation behavior show **exact deterministic value equality / scoped fingerprints** (regression proven);
+the **append-only governance event table** reconstructs the lifecycle and rejects mutation (§29);
+RLS/tenant isolation and `service-role`-only RPC privilege hold; staging matrix (§34) passes; evidence
+classes are not blended; Closure Review passes. No production action occurs.
 
 ---
 
@@ -739,7 +1048,7 @@ Batch 9D-C must NOT: deploy to production; run a production migration; change th
 scheduler, Vault, or pg_cron/pg_net; perform a production provider call; roll out booking governance to
 production; or mutate production financial data. **Production rollout is owned by Batch 9D-E.** Multi-
 currency UX aggregation is **9D-D**. This plan authorizes only detailed planning; implementation requires
-Codex Batch 9D-C Plan Second Review followed by explicit user implementation approval.
+**Codex Batch 9D-C Plan Amendment Confirmation Review** followed by explicit user implementation approval.
 
 ---
 
