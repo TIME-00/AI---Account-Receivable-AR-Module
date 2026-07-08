@@ -138,7 +138,8 @@ separation is now proven, not assumed.
 
 > **Detailed sub-plan (documentation-only pointer):** the implementation-ready 9D-B plan lives in
 > `docs/plans/BATCH_9D_B_REAL_PROVIDER_INTEGRATION_AND_SCHEDULER_STAGING_PLAN.md` (adapter design,
-> provider-contract verification, scheduler design, file-level change map, 36-item runtime matrix). It is
+> provider-contract verification, scheduler design, file-level change map, expanded mandatory runtime
+> matrix). It is
 > **not yet implemented** and is pending Codex Batch 9D-B Plan Second Review. This master section remains
 > the authoritative scope/order summary.
 

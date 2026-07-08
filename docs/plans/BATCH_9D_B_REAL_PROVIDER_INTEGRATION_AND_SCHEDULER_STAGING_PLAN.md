@@ -937,5 +937,5 @@ rows. **Production provider/scheduler rollout is owned by Batch 9D-E.**
 
 This sub-plan sits under master `§0.4`/`§0.5` (9D-B scope + the 22-item mandatory verification). The
 master plan remains the authoritative phase/order document; this file holds the implementation-ready
-detail and expands the master's 22-item matrix into the 36-item runtime matrix (§24). No master-plan
+detail and expands the master's 22-item matrix into the expanded mandatory runtime matrix (§24). No master-plan
 architecture, order, or DG-1 lock is changed by this file.

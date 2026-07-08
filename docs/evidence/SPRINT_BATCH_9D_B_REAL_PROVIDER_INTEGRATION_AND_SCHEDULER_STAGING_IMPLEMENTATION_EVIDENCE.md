@@ -1,7 +1,27 @@
 # Batch 9D-B Real Provider Integration and Scheduler Staging Implementation Evidence
 
-Status: implementation evidence only. Staging deployment, scheduler activation, production deployment, and
-production provider calls were not performed.
+Status: Batch 9D-B staging runtime verification PASS. This evidence file now consolidates both the earlier
+local implementation phase and the completed staging runtime verification. Staging deployment and staging
+scheduler activation were performed only after explicit user approval for the staging runtime gate. No
+production deployment, no production provider call, no production scheduler activation, and no production
+mutation were performed.
+
+Closure status:
+
+```text
+Local implementation: PASS
+Staging runtime verification: PASS
+Closure Review: PENDING
+Batch 9D-B official closure: PENDING
+```
+
+Current gate:
+
+```text
+Staging Runtime PASS -> Evidence Consolidation -> Codex Closure Review -> Official Closure Decision
+```
+
+Batch 9D-B is not officially closed. Official closure follows Codex Batch 9D-B Closure Review.
 
 ## Baseline
 
@@ -97,9 +117,10 @@ not write `public.exchange_rates`, and does not mutate financial tables.
 - Mojibake scan: PASS.
 - Secret-pattern scan: PASS; matches were safe fake test strings only, no real secret values.
 
-## Pending staging proof
+## Pending staging proof (historical - resolved by the staging runtime verification below)
 
-The following are not claimed as proven by this implementation task:
+The following were not claimed as proven by the earlier local implementation task. Each item was
+subsequently verified in the "Staging runtime verification - 2026-07-08" section below:
 
 - real Frankfurter connectivity;
 - on-the-wire `providers=MAS`;
