@@ -70,7 +70,13 @@ That migration is not a scheduler activation artifact and does not create cron j
 Before activation:
 
 1. Confirm target project is staging, not production.
-2. Confirm migrations 017-020 are applied.
+2. Confirm migrations 017-021 are applied, including
+   `database/021_fx_real_provider_identifier_support.sql`. Migration 021 is required before real MAS
+   provider sync because it widens the FX provider identifier constraints to accept the locked uppercase
+   provider key `MAS`. Migration 021 is FX real provider identifier compatibility support only: it does not
+   configure the scheduler, does not create pg_cron jobs, does not store secrets, does not configure Vault,
+   does not activate the scheduler, does not call Frankfurter, and does not mutate `public.exchange_rates`
+   or any financial tables.
 3. Deploy `fx-rate-sync`.
 4. Configure `FX_SCHEDULER_SECRET` and `FX_SCHEDULER_COMPANY_ID` as runtime secrets.
 5. Store the matching scheduler secret in Supabase Vault.
