@@ -15,10 +15,10 @@
      the validated reference-only foundation now allows a real provider to be integrated (9D-B) **before**
      the booking-rate governance batch (9D-C). See **§0** (the authoritative current-state section).
 - **Predecessor:** Batch 9C — Receipt PDF/Image Import Intake (officially closed at `2e5d86e`).
-- **Next gate:** **Codex Batch 9D-C Plan Amendment Confirmation Review** (see the authoritative
+- **Next gate:** **Codex Batch 9D-C Targeted Amendment Confirmation Re-Review** (see the authoritative
   current-state block in §0.0). Batch 9D-A is CLOSED, DG-1 is FORMALLY APPROVED AND LOCKED, Batch 9D-B is
-  **OFFICIALLY CLOSED**, and Batch 9D-C is in **detailed implementation planning / plan amendment** (not
-  implemented; implementation approval not granted).
+  **OFFICIALLY CLOSED**, and Batch 9D-C **targeted plan amendment is completed** (not implemented;
+  implementation approval not granted).
   - *(Historical, 2026-07-07: the then-remaining flow was Codex DG-1 Lock Confirmation Review → 9D-B
     detailed implementation planning → 9D-B implementation approval → 9D-B implementation; all of these
     have since occurred. Earlier still, the Rev 2 gate was "Codex Batch 9D Plan Amendment Review → user
@@ -56,13 +56,13 @@
 > | Batch 9D-A | **OFFICIALLY CLOSED** |
 > | DG-1 (provider decision) | **FORMALLY APPROVED AND LOCKED** |
 > | Batch 9D-B | **OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS — OFFICIAL CLOSURE`) |
-> | Batch 9D-C | **DETAILED IMPLEMENTATION PLANNING / PLAN AMENDMENT** — sub-plan drafted (§0.6); Codex Plan Second Review returned `AMENDMENT REQUIRED`; amendment applied; NOT implemented |
+> | Batch 9D-C | **TARGETED PLAN AMENDMENT COMPLETED** — sub-plan drafted (§0.6); Codex Amendment Confirmation Review returned `TARGETED AMENDMENT REQUIRED`; targeted fixes applied; NOT implemented |
 > | Batch 9D-D | **NOT STARTED** |
 > | Batch 9D-E | **NOT STARTED** (owns production rollout) |
 >
-> **Current next gate:** **Codex Batch 9D-C Plan Amendment Confirmation Review** -> user implementation
-> approval -> 9D-C implementation. 9D-C implementation approval has **not** been granted and 9D-C
-> implementation has **not** started.
+> **Current next gate:** **Codex Batch 9D-C Targeted Amendment Confirmation Re-Review** -> user
+> implementation approval -> 9D-C implementation. 9D-C implementation approval has **not** been granted and
+> 9D-C implementation has **not** started.
 >
 > The 9D-B staging scheduler **remains ACTIVE** for continued staging observation under approved staging
 > scope. **No production deployment, no production provider call, no production scheduler activation, and
@@ -229,10 +229,10 @@ realized-FX behavior must remain compatible with existing allocation logic.
 > discovery, booking-source model, provenance model, override/approval governance, deviation policy,
 > immutability + governed post-posting correction, allocation/import/automation compatibility, data-model
 > options with a recommended hybrid, API/RPC + RLS + concurrency design, migration direction from `022`,
-> testing + mandatory staging matrix). The Codex Batch 9D-C Plan Second Review returned `AMENDMENT
-> REQUIRED`; the amendment has been applied. It is **not yet implemented** and the next gate is **Codex
-> Batch 9D-C Plan Amendment Confirmation Review**. This master section remains the authoritative
-> scope/order summary.
+> testing + mandatory staging matrix). The Codex Batch 9D-C Plan Amendment Confirmation Review returned
+> `TARGETED AMENDMENT REQUIRED`; the five targeted fixes have been applied. It is **not yet implemented**
+> and the next gate is **Codex Batch 9D-C Targeted Amendment Confirmation Re-Review**. This master section
+> remains the authoritative scope/order summary.
 
 Current approved architecture remains:
 
