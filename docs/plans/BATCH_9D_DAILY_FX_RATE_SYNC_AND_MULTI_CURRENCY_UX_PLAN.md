@@ -44,7 +44,7 @@
 > §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
 > history and is **not** erased.
 
-### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-09 — Batch 9D-B closure-condition correction)
+### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-09 — Batch 9D-B officially closed; 9D-C planning)
 
 > **This block is the single authoritative current-state statement for Batch 9D and supersedes any
 > "9D-B not yet implemented / pending plan review / implementation approval not granted" wording elsewhere
@@ -54,19 +54,18 @@
 > | --- | --- |
 > | Batch 9D-A | **OFFICIALLY CLOSED** |
 > | DG-1 (provider decision) | **FORMALLY APPROVED AND LOCKED** |
-> | Batch 9D-B — implementation | **COMPLETED** |
-> | Batch 9D-B — staging runtime verification | **PASS** |
-> | Batch 9D-B — evidence consolidation | **COMPLETED** |
-> | Batch 9D-B — Closure Review | **PASS WITH CLOSURE CONDITIONS** |
-> | Batch 9D-B — official closure | **PENDING** (awaits Codex Batch 9D-B Closure Re-Review) |
-> | Batch 9D-C | **NOT STARTED** — may begin only after Batch 9D-B official closure |
+> | Batch 9D-B | **OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS — OFFICIAL CLOSURE`) |
+> | Batch 9D-C | **DETAILED IMPLEMENTATION PLANNING** — sub-plan drafted (§0.6); NOT implemented |
+> | Batch 9D-D | **NOT STARTED** |
+> | Batch 9D-E | **NOT STARTED** (owns production rollout) |
 >
-> **Current next gate:** **Codex Batch 9D-B Closure Re-Review.** Batch 9D-B is **not** officially closed.
+> **Current next gate:** **Codex Batch 9D-C Plan Second Review** -> user implementation approval ->
+> 9D-C implementation. 9D-C implementation approval has **not** been granted.
 >
-> Batch 9D-B staging deployment and staging scheduler activation occurred **after explicit user approval**;
-> the staging scheduler **remains ACTIVE** for continued staging observation. **No production deployment,
-> no production provider call, no production scheduler activation, and no production mutation occurred.**
-> Canonical execution order is unchanged: `9D-A (CLOSED) → DG-1 → 9D-B → 9D-C → 9D-D → 9D-E` (§0.2).
+> The 9D-B staging scheduler **remains ACTIVE** for continued staging observation under approved staging
+> scope. **No production deployment, no production provider call, no production scheduler activation, and
+> no production mutation occurred.** Canonical execution order is unchanged:
+> `9D-A (CLOSED) → DG-1 → 9D-B (CLOSED) → 9D-C → 9D-D → 9D-E` (§0.2).
 
 ### 0.1 Batch 9D-A closure status
 
@@ -224,6 +223,14 @@ At minimum, 9D-B staging must verify:
 governance must be explicit; override reason/audit requirements must be explicit; booked transaction
 snapshots remain **immutable after booking** unless a separately approved correction model exists;
 realized-FX behavior must remain compatible with existing allocation logic.
+
+> **Detailed sub-plan (documentation-only pointer):** the implementation-ready 9D-C plan lives in
+> `docs/plans/BATCH_9D_C_BOOKING_RATE_PROVENANCE_AND_OVERRIDE_GOVERNANCE_PLAN.md` (current-system
+> discovery, booking-source model, provenance model, override/approval governance, deviation policy,
+> immutability + governed post-posting correction, allocation/import/automation compatibility, data-model
+> options with a recommended hybrid, API/RPC + RLS + concurrency design, migration direction from `022`,
+> testing + mandatory staging matrix). It is **not yet implemented** and is pending **Codex Batch 9D-C
+> Plan Second Review**. This master section remains the authoritative scope/order summary.
 
 Current approved architecture remains:
 
