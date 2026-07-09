@@ -61,6 +61,13 @@ BEGIN
     OR OLD.fx_decision_id IS DISTINCT FROM NEW.fx_decision_id
     OR OLD.invoice_date IS DISTINCT FROM NEW.invoice_date;
 
+  IF v_changed
+    AND OLD.status = 'Draft'
+    AND NEW.status = 'Draft'
+    AND current_setting('app.fx_governed_mutation', true) IS DISTINCT FROM 'on' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: Draft invoice FX/governance fields may change only through governed mutation RPCs';
+  END IF;
+
   IF v_changed AND (OLD.status <> 'Draft' OR NEW.status <> 'Draft') THEN
     RAISE EXCEPTION 'BR-FX-GOVERNANCE: protected invoice FX/governance fields may change only while Draft remains Draft';
   END IF;
@@ -86,6 +93,13 @@ BEGIN
     OR OLD.fx_source_category IS DISTINCT FROM NEW.fx_source_category
     OR OLD.fx_decision_id IS DISTINCT FROM NEW.fx_decision_id
     OR OLD.receipt_date IS DISTINCT FROM NEW.receipt_date;
+
+  IF v_changed
+    AND OLD.status = 'Draft'
+    AND NEW.status = 'Draft'
+    AND current_setting('app.fx_governed_mutation', true) IS DISTINCT FROM 'on' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: Draft receipt FX/governance fields may change only through governed mutation RPCs';
+  END IF;
 
   IF v_changed AND (OLD.status <> 'Draft' OR NEW.status <> 'Draft') THEN
     RAISE EXCEPTION 'BR-FX-GOVERNANCE: protected receipt FX/governance fields may change only while Draft remains Draft';
@@ -188,6 +202,56 @@ AS $$
   );
 $$;
 
+CREATE OR REPLACE FUNCTION public.fx_recalculate_invoice_draft_totals(
+  p_company_id UUID,
+  p_invoice_id UUID
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_invoice RECORD;
+  v_subtotal NUMERIC(18,2);
+  v_tax_total NUMERIC(18,2);
+  v_total_amount NUMERIC(18,2);
+  v_base_total NUMERIC(18,2);
+BEGIN
+  SELECT *
+    INTO v_invoice
+  FROM public.invoices
+  WHERE id = p_invoice_id
+    AND company_id = p_company_id
+  FOR UPDATE;
+
+  IF v_invoice.id IS NULL THEN
+    RAISE EXCEPTION 'NOT_FOUND: invoice not found';
+  END IF;
+  IF v_invoice.status <> 'Draft' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: invoice totals can only be recalculated while Draft';
+  END IF;
+
+  SELECT COALESCE(SUM(line_amount), 0),
+         COALESCE(SUM(tax_amount), 0)
+    INTO v_subtotal, v_tax_total
+  FROM public.invoice_lines
+  WHERE invoice_id = p_invoice_id;
+
+  v_total_amount := v_subtotal + v_tax_total;
+  v_base_total := ROUND(v_total_amount * v_invoice.exchange_rate, 2);
+
+  PERFORM set_config('app.fx_governed_mutation', 'on', true);
+
+  UPDATE public.invoices
+  SET subtotal = v_subtotal,
+      tax_total = v_tax_total,
+      total_amount = v_total_amount,
+      base_total = v_base_total
+  WHERE id = p_invoice_id;
+END;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- 4. Governance decision creation / versioning RPC
 -- ---------------------------------------------------------------------------
@@ -228,6 +292,8 @@ DECLARE
   v_event_type TEXT;
   v_stale_reference BOOLEAN := false;
 BEGIN
+  PERFORM set_config('app.fx_governed_mutation', 'on', true);
+
   IF p_transaction_type NOT IN ('invoice', 'receipt') THEN
     RAISE EXCEPTION 'BR-FX-GOVERNANCE: transaction_type must be invoice or receipt';
   END IF;
@@ -753,6 +819,234 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.fx_create_governed_invoice_draft(
+  p_company_id UUID,
+  p_actor_user_id UUID,
+  p_invoice JSONB,
+  p_lines JSONB DEFAULT '[]'::jsonb,
+  p_explicit_rate_supplied BOOLEAN DEFAULT false,
+  p_override_reason TEXT DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_invoice_id UUID := gen_random_uuid();
+  v_line JSONB;
+  v_decision_id UUID;
+BEGIN
+  IF jsonb_typeof(p_invoice) <> 'object' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: invoice payload must be an object';
+  END IF;
+  IF jsonb_typeof(COALESCE(p_lines, '[]'::jsonb)) <> 'array' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: invoice lines payload must be an array';
+  END IF;
+
+  PERFORM set_config('app.fx_governed_mutation', 'on', true);
+
+  INSERT INTO public.invoices (
+    id,
+    company_id,
+    invoice_no,
+    doc_type,
+    invoice_date,
+    customer_id,
+    customer_name,
+    currency,
+    exchange_rate,
+    base_currency,
+    subtotal,
+    tax_total,
+    total_amount,
+    base_total,
+    status,
+    reference_no,
+    internal_remarks,
+    invoice_remarks,
+    ref_invoice_id,
+    cn_type,
+    reason_code,
+    reason_desc,
+    created_by,
+    version
+  )
+  VALUES (
+    v_invoice_id,
+    p_company_id,
+    p_invoice->>'invoice_no',
+    COALESCE(p_invoice->>'doc_type', 'Invoice'),
+    (p_invoice->>'invoice_date')::date,
+    (p_invoice->>'customer_id')::uuid,
+    p_invoice->>'customer_name',
+    (p_invoice->>'currency')::char(3),
+    (p_invoice->>'exchange_rate')::numeric,
+    (p_invoice->>'base_currency')::char(3),
+    COALESCE((p_invoice->>'subtotal')::numeric, 0),
+    COALESCE((p_invoice->>'tax_total')::numeric, 0),
+    COALESCE((p_invoice->>'total_amount')::numeric, 0),
+    COALESCE((p_invoice->>'base_total')::numeric, 0),
+    'Draft',
+    NULLIF(p_invoice->>'reference_no', ''),
+    NULLIF(p_invoice->>'internal_remarks', ''),
+    NULLIF(p_invoice->>'invoice_remarks', ''),
+    NULLIF(p_invoice->>'ref_invoice_id', '')::uuid,
+    NULLIF(p_invoice->>'cn_type', ''),
+    NULLIF(p_invoice->>'reason_code', ''),
+    NULLIF(p_invoice->>'reason_desc', ''),
+    p_actor_user_id,
+    1
+  );
+
+  FOR v_line IN
+    SELECT value FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb))
+  LOOP
+    INSERT INTO public.invoice_lines (
+      invoice_id,
+      line_no,
+      description,
+      item_code,
+      product_id,
+      quantity,
+      uom,
+      unit_price,
+      discount_pct,
+      discount_amt,
+      line_amount,
+      tax_code_id,
+      tax_rate,
+      tax_amount,
+      line_total,
+      gl_account_id,
+      cost_center,
+      line_remarks
+    )
+    VALUES (
+      v_invoice_id,
+      (v_line->>'line_no')::int,
+      v_line->>'description',
+      NULLIF(v_line->>'item_code', ''),
+      NULLIF(v_line->>'product_id', '')::uuid,
+      (v_line->>'quantity')::numeric,
+      NULLIF(v_line->>'uom', ''),
+      (v_line->>'unit_price')::numeric,
+      COALESCE((v_line->>'discount_pct')::numeric, 0),
+      COALESCE((v_line->>'discount_amt')::numeric, 0),
+      (v_line->>'line_amount')::numeric,
+      NULLIF(v_line->>'tax_code_id', '')::uuid,
+      COALESCE((v_line->>'tax_rate')::numeric, 0),
+      (v_line->>'tax_amount')::numeric,
+      (v_line->>'line_total')::numeric,
+      NULLIF(v_line->>'gl_account_id', '')::uuid,
+      NULLIF(v_line->>'cost_center', ''),
+      NULLIF(v_line->>'line_remarks', '')
+    );
+  END LOOP;
+
+  v_decision_id := public.fx_record_booking_decision(
+    p_company_id,
+    'invoice',
+    v_invoice_id,
+    p_actor_user_id,
+    p_explicit_rate_supplied,
+    NULL,
+    NULL,
+    p_override_reason,
+    NULL
+  );
+
+  RETURN v_invoice_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_create_governed_receipt_draft(
+  p_company_id UUID,
+  p_actor_user_id UUID,
+  p_receipt JSONB,
+  p_explicit_rate_supplied BOOLEAN DEFAULT false,
+  p_override_reason TEXT DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_receipt_id UUID := gen_random_uuid();
+  v_decision_id UUID;
+BEGIN
+  IF jsonb_typeof(p_receipt) <> 'object' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: receipt payload must be an object';
+  END IF;
+
+  PERFORM set_config('app.fx_governed_mutation', 'on', true);
+
+  INSERT INTO public.receipts (
+    id,
+    company_id,
+    receipt_no,
+    receipt_date,
+    value_date,
+    customer_id,
+    customer_name,
+    payment_method,
+    currency,
+    exchange_rate,
+    base_currency,
+    receipt_amount,
+    base_amount,
+    allocated_amount,
+    unallocated_amount,
+    bank_account_id,
+    bank_account_name,
+    reference_no,
+    cheque_date,
+    status,
+    remarks,
+    created_by
+  )
+  VALUES (
+    v_receipt_id,
+    p_company_id,
+    p_receipt->>'receipt_no',
+    (p_receipt->>'receipt_date')::date,
+    COALESCE(NULLIF(p_receipt->>'value_date', '')::date, (p_receipt->>'receipt_date')::date),
+    (p_receipt->>'customer_id')::uuid,
+    p_receipt->>'customer_name',
+    p_receipt->>'payment_method',
+    (p_receipt->>'currency')::char(3),
+    (p_receipt->>'exchange_rate')::numeric,
+    (p_receipt->>'base_currency')::char(3),
+    (p_receipt->>'receipt_amount')::numeric,
+    (p_receipt->>'base_amount')::numeric,
+    0,
+    (p_receipt->>'receipt_amount')::numeric,
+    (p_receipt->>'bank_account_id')::uuid,
+    p_receipt->>'bank_account_name',
+    NULLIF(p_receipt->>'reference_no', ''),
+    NULLIF(p_receipt->>'cheque_date', '')::date,
+    'Draft',
+    NULLIF(p_receipt->>'remarks', ''),
+    p_actor_user_id
+  );
+
+  v_decision_id := public.fx_record_booking_decision(
+    p_company_id,
+    'receipt',
+    v_receipt_id,
+    p_actor_user_id,
+    p_explicit_rate_supplied,
+    NULL,
+    NULL,
+    p_override_reason,
+    NULL
+  );
+
+  RETURN v_receipt_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.fx_update_governed_invoice_fx(
   p_company_id UUID,
   p_invoice_id UUID,
@@ -791,6 +1085,8 @@ BEGIN
   v_currency := COALESCE(p_currency, v_invoice.currency)::CHAR(3);
   v_invoice_date := COALESCE(p_invoice_date, v_invoice.invoice_date);
   v_rate := COALESCE(p_exchange_rate, v_invoice.exchange_rate)::numeric(18,8);
+
+  PERFORM set_config('app.fx_governed_mutation', 'on', true);
 
   UPDATE public.invoices
   SET currency = v_currency,
@@ -851,6 +1147,8 @@ BEGIN
   v_currency := COALESCE(p_currency, v_receipt.currency)::CHAR(3);
   v_receipt_date := COALESCE(p_receipt_date, v_receipt.receipt_date);
   v_rate := COALESCE(p_exchange_rate, v_receipt.exchange_rate)::numeric(18,8);
+
+  PERFORM set_config('app.fx_governed_mutation', 'on', true);
 
   UPDATE public.receipts
   SET currency = v_currency,
@@ -1307,6 +1605,558 @@ BEFORE UPDATE ON public.receipts
 FOR EACH ROW
 EXECUTE FUNCTION public.fx_guard_receipt_posting_decision();
 
+
+-- ---------------------------------------------------------------------------
+-- 7. Forward-safe posting RPC replacements with early governance guards
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION post_invoice(
+  p_invoice_id  UUID,
+  p_user_id     UUID,
+  p_company_id  UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_inv           RECORD;
+  v_cust          RECORD;
+  v_line          RECORD;
+  v_term          RECORD;
+  v_tc            RECORD;
+  v_period        VARCHAR(7);
+  v_due_date      DATE;
+  v_je_id         UUID;
+  v_je_no         VARCHAR(30);
+  v_ar_acct_id    UUID;
+  v_rev_acct_id   UUID;
+  v_tax_acct_id   UUID;
+  v_ar_acct_code  VARCHAR(20);
+  v_source_type   VARCHAR(3);
+  v_subtotal      NUMERIC(18,2) := 0;
+  v_tax_total     NUMERIC(18,2) := 0;
+  v_total_amount  NUMERIC(18,2) := 0;
+  v_base_total    NUMERIC(18,2) := 0;
+  v_line_count    INT := 0;
+  v_line_no       INT := 0;
+  v_total_debit   NUMERIC(18,2) := 0;
+  v_total_credit  NUMERIC(18,2) := 0;
+  v_failures      TEXT[] := '{}';
+  v_future_limit  INT;
+  v_inv_date      DATE;
+  v_credit_util   NUMERIC(18,2);
+  v_credit_limit  NUMERIC(18,2);
+  v_config_val    TEXT;
+  v_default_code  TEXT;
+BEGIN
+  -- ── Auth ──
+  PERFORM rpc_check_role(p_user_id, p_company_id,
+    ARRAY['AR Clerk','AR Supervisor','Finance Manager']);
+
+  -- ── 1. Lock invoice ──
+  SELECT * INTO v_inv FROM invoices
+    WHERE id = p_invoice_id AND company_id = p_company_id
+    FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'NOT_FOUND: Invoice not found';
+  END IF;
+  IF v_inv.status != 'Draft' THEN
+    RAISE EXCEPTION 'BR-INV-STATUS: Only Draft invoices can be posted. Current: %', v_inv.status;
+  END IF;
+
+  -- ── 2. Must have lines ──
+  -- Batch 9D-C: authoritative booking-rate governance check occurs
+  -- immediately after the invoice row lock and before totals, journal,
+  -- status, or balance mutations.
+  PERFORM public.fx_assert_booking_decision_postable(
+    p_company_id,
+    p_invoice_id,
+    NULL
+  );
+
+  SELECT COUNT(*) INTO v_line_count FROM invoice_lines WHERE invoice_id = p_invoice_id;
+  IF v_line_count = 0 THEN
+    RAISE EXCEPTION 'BR-INV-002: Invoice must have at least 1 line item';
+  END IF;
+
+  -- ── 3. Customer validation ──
+  SELECT * INTO v_cust FROM customers WHERE id = v_inv.customer_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'NOT_FOUND: Customer not found';
+  END IF;
+  IF v_cust.status = 'Blocked' THEN
+    RAISE EXCEPTION 'BR-CUS-002: Customer "%" is Blocked', v_cust.customer_name;
+  END IF;
+  IF v_cust.status = 'Inactive' AND v_inv.doc_type != 'Credit Note' THEN
+    RAISE EXCEPTION 'BR-CUS-001: Customer "%" is Inactive', v_cust.customer_name;
+  END IF;
+  PERFORM rpc_check_customer_access(p_user_id, p_company_id, v_inv.customer_id);
+
+  -- ── 4. Recalculate totals from lines ──
+  SELECT COALESCE(SUM(line_amount), 0),
+         COALESCE(SUM(tax_amount), 0)
+    INTO v_subtotal, v_tax_total
+    FROM invoice_lines WHERE invoice_id = p_invoice_id;
+  v_total_amount := v_subtotal + v_tax_total;
+  v_base_total   := ROUND(v_total_amount * v_inv.exchange_rate, 2);
+
+  PERFORM set_config('app.fx_governed_mutation', 'on', true);
+
+  UPDATE invoices SET
+    subtotal = v_subtotal,
+    tax_total = v_tax_total,
+    total_amount = v_total_amount,
+    base_total = v_base_total
+  WHERE id = p_invoice_id;
+
+  -- ── 5. Credit check (Invoice/DN only) ──
+  IF v_inv.doc_type != 'Credit Note' THEN
+    SELECT credit_limit, credit_utilization
+      INTO v_credit_limit, v_credit_util
+      FROM v_customer_credit_utilization
+      WHERE id = v_inv.customer_id;
+    IF FOUND AND v_credit_limit > 0 AND (v_credit_util + v_total_amount) > v_credit_limit THEN
+      RAISE EXCEPTION 'BR-CM-001: Credit limit exceeded for "%". Utilization: %, Limit: %',
+        v_cust.customer_name, v_credit_util + v_total_amount, v_credit_limit;
+    END IF;
+  END IF;
+
+  -- ── 6. Fiscal period ──
+  v_period := to_char(v_inv.invoice_date, 'YYYY-MM');
+  IF NOT EXISTS (
+    SELECT 1 FROM fiscal_periods
+    WHERE company_id = p_company_id AND period_code = v_period AND status = 'Open'
+  ) THEN
+    RAISE EXCEPTION 'BR-JE-007: Fiscal period % is not open', v_period;
+  END IF;
+
+  -- ── 7. Future date limit ──
+  SELECT config_value INTO v_config_val FROM ar_system_config
+    WHERE company_id = p_company_id AND config_key = 'invoice_future_days_limit';
+  v_future_limit := COALESCE(v_config_val::INT, 7);
+  IF (v_inv.invoice_date - CURRENT_DATE) > v_future_limit THEN
+    RAISE EXCEPTION 'BR-INV-002: Invoice date exceeds allowed future days limit (% days)', v_future_limit;
+  END IF;
+
+  -- ── 8. Tax code effectiveness ──
+  FOR v_line IN SELECT * FROM invoice_lines WHERE invoice_id = p_invoice_id ORDER BY line_no LOOP
+    IF v_line.tax_code_id IS NOT NULL THEN
+      SELECT is_active, effective_from, effective_to INTO v_tc
+        FROM tax_codes WHERE id = v_line.tax_code_id;
+      IF NOT FOUND OR NOT v_tc.is_active THEN
+        v_failures := array_append(v_failures, format('Line %s: Tax code is inactive', v_line.line_no));
+      ELSIF v_inv.invoice_date < v_tc.effective_from
+         OR (v_tc.effective_to IS NOT NULL AND v_inv.invoice_date > v_tc.effective_to) THEN
+        v_failures := array_append(v_failures,
+          format('Line %s: Tax code not effective on %s', v_line.line_no, v_inv.invoice_date));
+      END IF;
+    END IF;
+  END LOOP;
+  IF array_length(v_failures, 1) > 0 THEN
+    RAISE EXCEPTION 'BR-INV-002: Tax validation failed: %', array_to_string(v_failures, '; ');
+  END IF;
+
+  -- ── 9. Calculate due_date ──
+  IF v_cust.payment_term_id IS NOT NULL THEN
+    SELECT term_type, days INTO v_term FROM payment_terms WHERE id = v_cust.payment_term_id;
+    IF FOUND THEN
+      v_due_date := calculate_due_date(v_inv.invoice_date, v_term.term_type, v_term.days);
+    END IF;
+  END IF;
+  IF v_due_date IS NULL AND v_inv.doc_type != 'Credit Note' THEN
+    v_due_date := v_inv.invoice_date + 30;  -- NET30 fallback
+  END IF;
+
+  -- ── 10. Resolve GL accounts ──
+  v_ar_acct_id := v_cust.ar_control_acct_id;
+  IF v_ar_acct_id IS NULL THEN
+    v_ar_acct_id := rpc_get_config_account(
+      p_company_id, 'default_ar_control_acct', '1100-001', 'AR control');
+  END IF;
+
+  v_rev_acct_id := v_cust.revenue_acct_id;
+  IF v_rev_acct_id IS NULL THEN
+    v_rev_acct_id := rpc_get_config_account(
+      p_company_id, 'default_revenue_acct', '4000-001', 'revenue');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM gl_accounts WHERE id = v_ar_acct_id AND company_id = p_company_id AND is_active = TRUE) THEN
+    RAISE EXCEPTION 'CONFIG: AR control account is missing or inactive for %', v_inv.invoice_no;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM gl_accounts WHERE id = v_rev_acct_id AND company_id = p_company_id AND is_active = TRUE) THEN
+    RAISE EXCEPTION 'CONFIG: Revenue account is missing or inactive for %', v_inv.invoice_no;
+  END IF;
+
+  -- Tax account from first line with tax
+  SELECT tc.gl_account_id INTO v_tax_acct_id
+    FROM invoice_lines il
+    JOIN tax_codes tc ON tc.id = il.tax_code_id
+    WHERE il.invoice_id = p_invoice_id AND il.tax_amount > 0 AND tc.gl_account_id IS NOT NULL
+    LIMIT 1;
+
+  IF v_tax_total > 0 AND v_tax_acct_id IS NULL THEN
+    RAISE EXCEPTION 'CONFIG: Missing tax GL account for invoice % with tax amount %',
+      v_inv.invoice_no, v_tax_total;
+  END IF;
+
+  -- AR account code snapshot
+  SELECT account_code INTO v_ar_acct_code FROM gl_accounts WHERE id = v_ar_acct_id;
+
+  -- ── 11. Determine source_type ──
+  v_source_type := CASE v_inv.doc_type
+    WHEN 'Invoice' THEN 'INV'
+    WHEN 'Credit Note' THEN 'CN'
+    WHEN 'Debit Note' THEN 'DN'
+  END;
+
+  -- ── 12. Generate JE ──
+  IF TRUE THEN
+    SELECT get_next_sequence(p_company_id, 'JE', v_source_type) INTO v_je_no;
+
+    -- JE header
+    INSERT INTO journal_entries (
+      company_id, je_no, je_date, posting_period, source_type,
+      source_doc_no, source_doc_id, description,
+      currency, exchange_rate, base_currency,
+      total_debit, total_credit, created_by
+    ) VALUES (
+      p_company_id, v_je_no, v_inv.invoice_date, v_period, v_source_type,
+      v_inv.invoice_no, p_invoice_id,
+      format('%s posting: %s — %s', v_inv.doc_type, v_inv.invoice_no, v_inv.customer_name),
+      v_inv.currency, v_inv.exchange_rate, v_inv.base_currency,
+      v_total_amount, v_total_amount, p_user_id
+    ) RETURNING id INTO v_je_id;
+
+    v_line_no := 0;
+
+    IF v_inv.doc_type IN ('Invoice', 'Debit Note') THEN
+      -- Dr AR Control
+      v_line_no := v_line_no + 10;
+      INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+        debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+      VALUES (v_je_id, v_line_no, v_ar_acct_id,
+        format('AR: %s - %s', v_inv.invoice_no, v_inv.customer_name),
+        v_total_amount, 0,
+        ROUND(v_total_amount * v_inv.exchange_rate, 2), 0,
+        v_inv.currency, v_total_amount);
+      v_total_debit := v_total_amount;
+
+      -- Cr Revenue per line
+      FOR v_line IN
+        SELECT il.gl_account_id AS line_gl, il.line_amount, il.line_no AS lno, il.description AS ldesc
+        FROM invoice_lines il WHERE il.invoice_id = p_invoice_id AND il.line_amount > 0 ORDER BY il.line_no
+      LOOP
+        v_line_no := v_line_no + 10;
+        INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+          debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+        VALUES (v_je_id, v_line_no, COALESCE(v_line.line_gl, v_rev_acct_id),
+          format('Revenue L%s: %s', v_line.lno, v_line.ldesc),
+          0, v_line.line_amount,
+          0, ROUND(v_line.line_amount * v_inv.exchange_rate, 2),
+          v_inv.currency, v_line.line_amount);
+        v_total_credit := v_total_credit + v_line.line_amount;
+      END LOOP;
+
+      -- Cr Tax
+      IF v_tax_total > 0 AND v_tax_acct_id IS NOT NULL THEN
+        v_line_no := v_line_no + 10;
+        INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+          debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+        VALUES (v_je_id, v_line_no, v_tax_acct_id,
+          format('Tax: %s', v_inv.invoice_no),
+          0, v_tax_total,
+          0, ROUND(v_tax_total * v_inv.exchange_rate, 2),
+          v_inv.currency, v_tax_total);
+        v_total_credit := v_total_credit + v_tax_total;
+      END IF;
+
+    ELSE  -- Credit Note: reversed direction
+      -- Dr Revenue
+      v_line_no := v_line_no + 10;
+      INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+        debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+      VALUES (v_je_id, v_line_no, v_rev_acct_id,
+        format('CN Revenue reversal: %s', v_inv.invoice_no),
+        v_subtotal, 0,
+        ROUND(v_subtotal * v_inv.exchange_rate, 2), 0,
+        v_inv.currency, v_subtotal);
+      v_total_debit := v_subtotal;
+
+      -- Dr Tax
+      IF v_tax_total > 0 AND v_tax_acct_id IS NOT NULL THEN
+        v_line_no := v_line_no + 10;
+        INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+          debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+        VALUES (v_je_id, v_line_no, v_tax_acct_id,
+          format('CN Tax reversal: %s', v_inv.invoice_no),
+          v_tax_total, 0,
+          ROUND(v_tax_total * v_inv.exchange_rate, 2), 0,
+          v_inv.currency, v_tax_total);
+        v_total_debit := v_total_debit + v_tax_total;
+      END IF;
+
+      -- Cr AR Control
+      v_line_no := v_line_no + 10;
+      INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+        debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+      VALUES (v_je_id, v_line_no, v_ar_acct_id,
+        format('CN AR: %s - %s', v_inv.invoice_no, v_inv.customer_name),
+        0, v_total_amount,
+        0, ROUND(v_total_amount * v_inv.exchange_rate, 2),
+        v_inv.currency, v_total_amount);
+      v_total_credit := v_total_amount;
+    END IF;
+
+    -- Update JE totals (chk_je_balanced will enforce)
+    UPDATE journal_entries SET total_debit = v_total_debit, total_credit = v_total_credit
+      WHERE id = v_je_id;
+  END IF;
+
+  -- ── 13. Update invoice ──
+  UPDATE invoices SET
+    status = 'Open',
+    outstanding = v_total_amount,
+    due_date = v_due_date,
+    posting_period = v_period,
+    ar_acct = v_ar_acct_code,
+    posted_by = p_user_id,
+    posted_at = NOW(),
+    version = v_inv.version + 1
+  WHERE id = p_invoice_id AND version = v_inv.version;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CONFLICT: Invoice was modified by another user during posting';
+  END IF;
+
+  -- ── 14. Linked CN auto-deduction (BR-CN-003) ──
+  IF v_inv.doc_type = 'Credit Note' AND v_inv.cn_type = 'Linked' AND v_inv.ref_invoice_id IS NOT NULL THEN
+    DECLARE
+      v_ref    RECORD;
+      v_new_os NUMERIC(18,2);
+      v_cum_cn NUMERIC(18,2);
+    BEGIN
+      SELECT * INTO v_ref FROM invoices WHERE id = v_inv.ref_invoice_id FOR UPDATE;
+      IF FOUND THEN
+        -- BR-CN-001: CN amount cannot exceed outstanding
+        IF v_total_amount > v_ref.outstanding THEN
+          RAISE EXCEPTION 'BR-CN-001: CN amount (%) exceeds outstanding (%) of %',
+            v_total_amount, v_ref.outstanding, v_ref.invoice_no;
+        END IF;
+        -- BR-CN-002: cumulative check
+        SELECT COALESCE(SUM(total_amount), 0) INTO v_cum_cn
+          FROM invoices
+          WHERE ref_invoice_id = v_inv.ref_invoice_id
+            AND doc_type = 'Credit Note' AND cn_type = 'Linked'
+            AND status != 'Cancelled' AND id != p_invoice_id;
+        IF (v_cum_cn + v_total_amount) > v_ref.total_amount THEN
+          RAISE EXCEPTION 'BR-CN-002: Cumulative CN (%) exceeds original total (%) for %',
+            v_cum_cn + v_total_amount, v_ref.total_amount, v_ref.invoice_no;
+        END IF;
+
+        v_new_os := ROUND(v_ref.outstanding - v_total_amount, 2);
+        UPDATE invoices SET
+          outstanding = v_new_os,
+          status = CASE
+            WHEN v_new_os <= 0 THEN 'Paid'
+            WHEN v_new_os < v_ref.total_amount THEN 'Partially Paid'
+            ELSE v_ref.status
+          END,
+          version = v_ref.version + 1
+        WHERE id = v_inv.ref_invoice_id AND version = v_ref.version;
+
+        INSERT INTO cn_allocations (cn_id, invoice_id, allocated_amount, allocated_by, status)
+        VALUES (p_invoice_id, v_inv.ref_invoice_id, v_total_amount, p_user_id, 'Active');
+
+        UPDATE invoices SET
+          outstanding = 0,
+          status = 'Paid',
+          version = version + 1
+        WHERE id = p_invoice_id;
+      END IF;
+    END;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'invoice_id', p_invoice_id,
+    'invoice_no', v_inv.invoice_no,
+    'je_no', v_je_no,
+    'status', CASE WHEN v_inv.doc_type = 'Credit Note' AND v_inv.cn_type = 'Linked' THEN 'Paid' ELSE 'Open' END,
+    'due_date', v_due_date,
+    'total_amount', v_total_amount
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION post_invoice(UUID, UUID, UUID) IS
+  'P1 RPC: Atomic invoice posting. Locks invoice row, validates all business rules, '
+  'generates balanced JE, updates status. Handles INV/CN/DN and Linked CN auto-deduction.';
+
+CREATE OR REPLACE FUNCTION post_receipt(
+  p_receipt_id  UUID,
+  p_user_id     UUID,
+  p_company_id  UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_rct          RECORD;
+  v_cust         RECORD;
+  v_bank         RECORD;
+  v_period       VARCHAR(7);
+  v_je_id        UUID;
+  v_je_no        VARCHAR(30);
+  v_ar_acct_id   UUID;
+  v_debit_acct   UUID;
+  v_debit_desc   TEXT;
+  v_config_val   TEXT;
+  v_default_code TEXT;
+BEGIN
+  -- ── Auth ──
+  PERFORM rpc_check_role(p_user_id, p_company_id,
+    ARRAY['AR Clerk','AR Supervisor','Finance Manager']);
+
+  -- ── 1. Lock receipt ──
+  SELECT * INTO v_rct FROM receipts
+    WHERE id = p_receipt_id AND company_id = p_company_id
+    FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'NOT_FOUND: Receipt not found';
+  END IF;
+  IF v_rct.status != 'Draft' THEN
+    RAISE EXCEPTION 'BR-RCT-STATUS: Only Draft receipts can be posted. Current: %', v_rct.status;
+  END IF;
+
+  -- ── 2. Amount ──
+  -- Batch 9D-C: authoritative booking-rate governance check occurs
+  -- immediately after the receipt row lock and before journal, status,
+  -- or balance mutations.
+  PERFORM public.fx_assert_booking_decision_postable(
+    p_company_id,
+    NULL,
+    p_receipt_id
+  );
+
+  IF v_rct.receipt_amount <= 0 THEN
+    RAISE EXCEPTION 'BR-RCT-001: Receipt amount must be greater than 0';
+  END IF;
+
+  -- ── 3. Customer ──
+  SELECT * INTO v_cust FROM customers WHERE id = v_rct.customer_id AND company_id = p_company_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'NOT_FOUND: Customer not found';
+  END IF;
+  IF v_cust.status = 'Blocked' THEN
+    RAISE EXCEPTION 'BR-CUS-002: Customer "%" is Blocked', v_cust.customer_name;
+  END IF;
+  PERFORM rpc_check_customer_access(p_user_id, p_company_id, v_rct.customer_id);
+
+  -- ── 4. Bank account ──
+  SELECT * INTO v_bank FROM bank_accounts WHERE id = v_rct.bank_account_id AND company_id = p_company_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'NOT_FOUND: Bank account not found';
+  END IF;
+  IF NOT v_bank.is_active THEN
+    RAISE EXCEPTION 'BR-RCT-001: Bank account is inactive';
+  END IF;
+
+  -- ── 5. Fiscal period ──
+  v_period := to_char(v_rct.receipt_date, 'YYYY-MM');
+  IF NOT EXISTS (
+    SELECT 1 FROM fiscal_periods
+    WHERE company_id = p_company_id AND period_code = v_period AND status = 'Open'
+  ) THEN
+    RAISE EXCEPTION 'BR-JE-007: Fiscal period % is not open', v_period;
+  END IF;
+
+  -- ── 6. Resolve GL accounts ──
+  v_ar_acct_id := v_cust.ar_control_acct_id;
+  IF v_ar_acct_id IS NULL THEN
+    v_ar_acct_id := rpc_get_config_account(
+      p_company_id, 'default_ar_control_acct', '1100-001', 'AR control');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM gl_accounts WHERE id = v_ar_acct_id AND company_id = p_company_id AND is_active = TRUE) THEN
+    RAISE EXCEPTION 'CONFIG: AR control account is missing or inactive for %', v_rct.receipt_no;
+  END IF;
+
+  IF v_rct.payment_method = 'CHQ' THEN
+    v_debit_acct := rpc_get_config_account(
+      p_company_id, 'default_cheque_acct', '1050-001', 'cheques on hand');
+    v_debit_desc := format('Cheques on Hand: %s', v_rct.receipt_no);
+  ELSE
+    v_debit_acct := v_bank.gl_account_id;
+    IF v_debit_acct IS NULL OR NOT EXISTS (
+      SELECT 1 FROM gl_accounts WHERE id = v_debit_acct AND company_id = p_company_id AND is_active = TRUE
+    ) THEN
+      RAISE EXCEPTION 'CONFIG: Bank GL account is missing or inactive for %', v_rct.receipt_no;
+    END IF;
+    v_debit_desc := format('Bank: %s (%s)', v_rct.receipt_no, v_rct.payment_method);
+  END IF;
+
+  -- ── 7. Generate JE ──
+  IF TRUE THEN
+    SELECT get_next_sequence(p_company_id, 'JE', 'RCT') INTO v_je_no;
+
+    INSERT INTO journal_entries (
+      company_id, je_no, je_date, posting_period, source_type,
+      source_doc_no, source_doc_id, description,
+      currency, exchange_rate, base_currency,
+      total_debit, total_credit, created_by
+    ) VALUES (
+      p_company_id, v_je_no, v_rct.receipt_date, v_period, 'RCT',
+      v_rct.receipt_no, p_receipt_id,
+      format('Receipt posting: %s — %s (%s)', v_rct.receipt_no, v_rct.customer_name, v_rct.payment_method),
+      v_rct.currency, v_rct.exchange_rate, v_rct.base_currency,
+      v_rct.receipt_amount, v_rct.receipt_amount, p_user_id
+    ) RETURNING id INTO v_je_id;
+
+    -- Dr Bank/Cheques
+    INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+      debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+    VALUES (v_je_id, 10, v_debit_acct, v_debit_desc,
+      v_rct.receipt_amount, 0,
+      ROUND(v_rct.receipt_amount * v_rct.exchange_rate, 2), 0,
+      v_rct.currency, v_rct.receipt_amount);
+
+    -- Cr AR Control
+    INSERT INTO journal_entry_lines (je_id, line_no, gl_account_id, description,
+      debit_amount, credit_amount, base_debit, base_credit, currency, original_amount)
+    VALUES (v_je_id, 20, v_ar_acct_id,
+      format('AR receipt: %s - %s', v_rct.receipt_no, v_rct.customer_name),
+      0, v_rct.receipt_amount,
+      0, ROUND(v_rct.receipt_amount * v_rct.exchange_rate, 2),
+      v_rct.currency, v_rct.receipt_amount);
+  END IF;
+
+  -- ── 8. Update receipt status (optimistic lock on status=Draft) ──
+  UPDATE receipts SET
+    status = 'Posted',
+    posting_period = v_period,
+    posted_by = p_user_id,
+    posted_at = NOW()
+  WHERE id = p_receipt_id AND status = 'Draft';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CONFLICT: Receipt has been posted by another user';
+  END IF;
+
+  RETURN jsonb_build_object(
+    'receipt_id', p_receipt_id,
+    'receipt_no', v_rct.receipt_no,
+    'je_no', v_je_no,
+    'status', 'Posted'
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION post_receipt(UUID, UUID, UUID) IS
+  'P1 RPC: Atomic receipt posting. Locks receipt row, validates business rules, '
+  'generates JE (CHQ→Cheques on Hand, others→Bank), prevents double-posting.';
+
 -- ---------------------------------------------------------------------------
 -- 7. Privilege hardening
 -- ---------------------------------------------------------------------------
@@ -1318,9 +2168,12 @@ REVOKE ALL ON FUNCTION public.fx_booking_deviation_pct(NUMERIC, NUMERIC) FROM PU
 REVOKE ALL ON FUNCTION public.fx_booking_approval_status_for_deviation(NUMERIC, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_booking_lifecycle_for_approval(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_booking_actor_has_role(UUID, UUID, TEXT[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_recalculate_invoice_draft_totals(UUID, UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_create_governed_invoice_draft(UUID, UUID, JSONB, JSONB, BOOLEAN, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_create_governed_receipt_draft(UUID, UUID, JSONB, BOOLEAN, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_update_governed_invoice_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_update_governed_receipt_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) FROM PUBLIC;
@@ -1332,6 +2185,9 @@ REVOKE ALL ON FUNCTION public.fx_guard_receipt_posting_decision() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) FROM anon;
 REVOKE ALL ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) FROM anon;
 REVOKE ALL ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_recalculate_invoice_draft_totals(UUID, UUID) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_create_governed_invoice_draft(UUID, UUID, JSONB, JSONB, BOOLEAN, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_create_governed_receipt_draft(UUID, UUID, JSONB, BOOLEAN, TEXT) FROM anon;
 REVOKE ALL ON FUNCTION public.fx_update_governed_invoice_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) FROM anon;
 REVOKE ALL ON FUNCTION public.fx_update_governed_receipt_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) FROM anon;
 REVOKE ALL ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) FROM anon;
@@ -1341,6 +2197,9 @@ REVOKE ALL ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UU
 REVOKE ALL ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) FROM authenticated;
 REVOKE ALL ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) FROM authenticated;
 REVOKE ALL ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_recalculate_invoice_draft_totals(UUID, UUID) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_create_governed_invoice_draft(UUID, UUID, JSONB, JSONB, BOOLEAN, TEXT) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_create_governed_receipt_draft(UUID, UUID, JSONB, BOOLEAN, TEXT) FROM authenticated;
 REVOKE ALL ON FUNCTION public.fx_update_governed_invoice_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) FROM authenticated;
 REVOKE ALL ON FUNCTION public.fx_update_governed_receipt_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) FROM authenticated;
 REVOKE ALL ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) FROM authenticated;
@@ -1350,6 +2209,9 @@ REVOKE ALL ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UU
 GRANT EXECUTE ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_recalculate_invoice_draft_totals(UUID, UUID) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_create_governed_invoice_draft(UUID, UUID, JSONB, JSONB, BOOLEAN, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_create_governed_receipt_draft(UUID, UUID, JSONB, BOOLEAN, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.fx_update_governed_invoice_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.fx_update_governed_receipt_fx(UUID, UUID, UUID, CHAR(3), DATE, NUMERIC, BOOLEAN, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) TO service_role;
@@ -1358,6 +2220,12 @@ GRANT EXECUTE ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID,
 
 COMMENT ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) IS
   'Batch 9D-C service-role RPC to create/supersede current booking-rate decision rows for Draft invoices/receipts.';
+COMMENT ON FUNCTION public.fx_recalculate_invoice_draft_totals(UUID, UUID) IS
+  'Batch 9D-C service-role RPC to recalculate Draft invoice totals under the protected-field guard after line edits.';
+COMMENT ON FUNCTION public.fx_create_governed_invoice_draft(UUID, UUID, JSONB, JSONB, BOOLEAN, TEXT) IS
+  'Batch 9D-C service-role RPC that atomically creates a Draft invoice, invoice lines, initial booking-rate decision, and governance events.';
+COMMENT ON FUNCTION public.fx_create_governed_receipt_draft(UUID, UUID, JSONB, BOOLEAN, TEXT) IS
+  'Batch 9D-C service-role RPC that atomically creates a Draft receipt, initial booking-rate decision, and governance events.';
 COMMENT ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UUID) IS
   'Batch 9D-C internal transaction-safe postability guard. Must run inside the posting transaction after row lock.';
 

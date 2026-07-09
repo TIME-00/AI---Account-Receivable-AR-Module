@@ -133,9 +133,57 @@ export class InvoiceService {
     // Get company base currency
     const company = await fetchById<{ base_currency: string }>(this.client, 'companies', auth.companyId);
 
-    // Insert invoice header
-    const insertData: Record<string, unknown> = {
-      company_id: auth.companyId,
+    const lineRows: Record<string, unknown>[] = [];
+    if (lines && lines.length > 0) {
+      let nextLineNo = 10;
+      for (const line of lines) {
+        let taxRate = 0;
+        if (line.tax_code_id) {
+          taxRate = await this.resolveTaxRateForInvoiceLine(
+            auth.companyId,
+            line.tax_code_id,
+            data.invoice_date,
+          );
+        }
+
+        const calc = calculateLineAmount({
+          quantity: line.quantity,
+          unit_price: line.unit_price,
+          discount_pct: line.discount_pct ?? 0,
+          discount_amt: line.discount_amt ?? 0,
+          tax_rate: taxRate,
+        });
+
+        lineRows.push({
+          line_no: nextLineNo,
+          description: line.description,
+          item_code: line.item_code ?? null,
+          product_id: line.product_id ?? null,
+          quantity: line.quantity,
+          uom: line.uom ?? null,
+          unit_price: line.unit_price,
+          discount_pct: line.discount_pct ?? 0,
+          discount_amt: line.discount_amt ?? 0,
+          line_amount: calc.line_amount,
+          tax_code_id: line.tax_code_id ?? null,
+          tax_rate: taxRate,
+          tax_amount: calc.tax_amount,
+          line_total: calc.line_total,
+          gl_account_id: line.gl_account_id ?? null,
+          cost_center: line.cost_center ?? null,
+          line_remarks: line.line_remarks ?? null,
+        });
+
+        nextLineNo += 10;
+      }
+    }
+
+    const totals = calculateInvoiceTotals(
+      lineRows as Array<{ line_amount: number; tax_amount: number }>,
+      exchangeRate,
+    );
+
+    const invoicePayload: Record<string, unknown> = {
       invoice_no: invoiceNo,
       doc_type: data.doc_type,
       invoice_date: data.invoice_date,
@@ -144,7 +192,10 @@ export class InvoiceService {
       currency: data.currency,
       exchange_rate: exchangeRate,
       base_currency: company.base_currency,
-      status: 'Draft',
+      subtotal: totals.subtotal,
+      tax_total: totals.tax_total,
+      total_amount: totals.total_amount,
+      base_total: totals.base_total,
       reference_no: data.reference_no ?? null,
       internal_remarks: data.internal_remarks ?? null,
       invoice_remarks: data.invoice_remarks ?? null,
@@ -153,63 +204,34 @@ export class InvoiceService {
       cn_type: data.cn_type ?? null,
       reason_code: data.reason_code ?? null,
       reason_desc: data.reason_desc ?? null,
-      // Audit
-      created_by: auth.userId,
-      version: 1,
     };
 
-    const { data: invoice, error } = await this.client
-      .from('invoices')
-      .insert(insertData)
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === '23505') {
-        throw new BusinessError('DUPLICATE_INVOICE', `Invoice number ${invoiceNo} already exists. Please retry.`, 409);
-      }
-      throw new Error(`Failed to create invoice: ${error.message}`);
-    }
-
+    let invoiceId: string;
     try {
-      // Insert lines if provided.
-      let createdLines: InvoiceLine[] = [];
-      if (lines && lines.length > 0) {
-        createdLines = await this.addLines(auth, invoice.id, lines, exchangeRate);
-        if (createdLines.length !== lines.length) {
-          throw new Error(
-            `Invoice line persistence mismatch: expected ${lines.length}, created ${createdLines.length}.`,
-          );
-        }
-      }
-
-      await this.recordBookingDecision(auth, invoice.id, data.exchange_rate !== undefined, data.fx_override_reason);
-
-      // Re-fetch for updated totals.
-      const result = await fetchById<Invoice>(this.client, 'invoices', invoice.id);
-      return { ...result, lines: createdLines };
+      invoiceId = await callRpc<string>(getAdminClient(), 'fx_create_governed_invoice_draft', {
+        p_company_id: auth.companyId,
+        p_actor_user_id: auth.userId,
+        p_invoice: invoicePayload,
+        p_lines: lineRows,
+        p_explicit_rate_supplied: data.exchange_rate !== undefined,
+        p_override_reason: data.fx_override_reason ?? null,
+      });
     } catch (error) {
-      // The import row is linked only after this method returns. Clean up a
-      // partially created draft here so callers cannot mark it Created.
-      const { error: lineCleanupError } = await this.client
-        .from('invoice_lines')
-        .delete()
-        .eq('invoice_id', invoice.id);
-      const { error: invoiceCleanupError } = await this.client
-        .from('invoices')
-        .delete()
-        .eq('id', invoice.id)
-        .eq('status', 'Draft');
-
-      if (lineCleanupError || invoiceCleanupError) {
-        throw new Error(
-          `Invoice creation failed and cleanup was incomplete: ${
-            lineCleanupError?.message ?? invoiceCleanupError?.message
-          }. Original error: ${error instanceof Error ? error.message : 'unknown error'}`,
-        );
+      if (error instanceof Error && error.message.includes('duplicate key')) {
+        throw new BusinessError('DUPLICATE_INVOICE', `Invoice number ${invoiceNo} already exists. Please retry.`, 409);
       }
       throw error;
     }
+
+    const result = await fetchById<Invoice>(this.client, 'invoices', invoiceId);
+    const { data: createdLines, error: linesError } = await this.client
+      .from('invoice_lines')
+      .select('*')
+      .eq('invoice_id', invoiceId)
+      .order('line_no');
+    if (linesError) throw new Error(`Failed to fetch created invoice lines: ${linesError.message}`);
+
+    return { ...result, lines: (createdLines ?? []) as InvoiceLine[] };
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -728,22 +750,12 @@ export class InvoiceService {
    * Recalculate invoice header totals from line items.
    */
   private async recalculateTotals(invoiceId: string, exchangeRate: number): Promise<void> {
-    const { data: lines } = await this.client
-      .from('invoice_lines')
-      .select('line_amount, tax_amount')
-      .eq('invoice_id', invoiceId);
-
-    const totals = calculateInvoiceTotals(lines ?? [], exchangeRate);
-
-    await this.client
-      .from('invoices')
-      .update({
-        subtotal: totals.subtotal,
-        tax_total: totals.tax_total,
-        total_amount: totals.total_amount,
-        base_total: totals.base_total,
-      })
-      .eq('id', invoiceId);
+    void exchangeRate;
+    const invoice = await this.fetchInvoiceOrThrow(invoiceId);
+    await callRpc<void>(getAdminClient(), 'fx_recalculate_invoice_draft_totals', {
+      p_company_id: invoice.company_id,
+      p_invoice_id: invoiceId,
+    });
   }
 
   /**
@@ -838,25 +850,6 @@ export class InvoiceService {
     }
 
     return Number(rate.rate);
-  }
-
-  private async recordBookingDecision(
-    auth: AuthContext,
-    invoiceId: string,
-    explicitRateSupplied: boolean,
-    overrideReason?: string,
-  ): Promise<void> {
-    await callRpc<string>(getAdminClient(), 'fx_record_booking_decision', {
-      p_company_id: auth.companyId,
-      p_transaction_type: 'invoice',
-      p_transaction_id: invoiceId,
-      p_actor_user_id: auth.userId,
-      p_explicit_rate_supplied: explicitRateSupplied,
-      p_source_category: null,
-      p_fx_reference_rate_id: null,
-      p_override_reason: overrideReason ?? null,
-      p_import_origin: null,
-    });
   }
 
   /**

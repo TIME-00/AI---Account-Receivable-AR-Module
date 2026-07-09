@@ -10,6 +10,17 @@ function assertStringIncludes(actual: string, expected: string): void {
   }
 }
 
+function assertOrdered(actual: string, fragments: string[]): void {
+  let previous = -1;
+  for (const fragment of fragments) {
+    const next = actual.indexOf(fragment, previous + 1);
+    if (next === -1) {
+      throw new Error(`Expected ordered fragment not found after index ${previous}: ${fragment}`);
+    }
+    previous = next;
+  }
+}
+
 Deno.test('Batch 9D-C migrations define root lineage and historical bootstrap invariants', async () => {
   const migration022 = await read('../../../database/022_fx_booking_rate_governance.sql');
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
@@ -47,15 +58,22 @@ Deno.test('Batch 9D-C import explicit rate auto-post hold is wired', async () =>
   assertStringIncludes(importsService, "posting_status: 'HeldGovernance'");
 });
 
-Deno.test('Batch 9D-C invoice and receipt services record booking decisions', async () => {
+Deno.test('Batch 9D-C invoice and receipt create paths use atomic governed create RPCs', async () => {
+  const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
   const invoiceService = await read('invoices/service.ts');
   const receiptService = await read('receipts/service.ts');
 
-  for (const service of [invoiceService, receiptService]) {
-    assertStringIncludes(service, 'fx_record_booking_decision');
-    assertStringIncludes(service, 'p_explicit_rate_supplied');
-    assertStringIncludes(service, 'p_override_reason');
-  }
+  assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_create_governed_invoice_draft');
+  assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_create_governed_receipt_draft');
+  assertStringIncludes(migration023, 'INSERT INTO public.invoices');
+  assertStringIncludes(migration023, 'INSERT INTO public.invoice_lines');
+  assertStringIncludes(migration023, 'INSERT INTO public.receipts');
+  assertStringIncludes(migration023, "v_decision_id := public.fx_record_booking_decision");
+
+  assertStringIncludes(invoiceService, "'fx_create_governed_invoice_draft'");
+  assertStringIncludes(receiptService, "'fx_create_governed_receipt_draft'");
+  assert(!invoiceService.includes('Invoice creation failed and cleanup was incomplete'));
+  assert(!receiptService.includes('Receipt booking-rate governance failed and draft cleanup failed'));
 
   assert(invoiceService.includes('data.exchange_rate !== undefined'));
   assert(receiptService.includes('data.exchange_rate !== undefined'));
@@ -68,15 +86,18 @@ Deno.test('Batch 9D-C governed FX mutation RPCs own snapshot and decision change
 
   assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_update_governed_invoice_fx');
   assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_update_governed_receipt_fx');
+  assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_recalculate_invoice_draft_totals');
   assertStringIncludes(migration023, 'FOR UPDATE');
   assertStringIncludes(migration023, 'UPDATE public.invoices');
   assertStringIncludes(migration023, 'UPDATE public.receipts');
   assertStringIncludes(migration023, 'RETURN public.fx_record_booking_decision');
 
   assertStringIncludes(invoiceService, "'fx_update_governed_invoice_fx'");
+  assertStringIncludes(invoiceService, "'fx_recalculate_invoice_draft_totals'");
   assertStringIncludes(receiptService, 'updateDraftReceiptFx');
   assertStringIncludes(receiptService, "'fx_update_governed_receipt_fx'");
-  assertStringIncludes(receiptService, 'Receipt booking-rate governance failed and draft cleanup failed');
+  assertStringIncludes(migration023, "current_setting('app.fx_governed_mutation', true) IS DISTINCT FROM 'on'");
+  assertStringIncludes(migration023, "PERFORM set_config('app.fx_governed_mutation', 'on', true)");
 });
 
 Deno.test('Batch 9D-C approval authorization is database-derived and fail-closed', async () => {
@@ -102,6 +123,21 @@ Deno.test('Batch 9D-C stale reference governance is enforced', async () => {
 
 Deno.test('Batch 9D-C posting guard runs before journal mutation and status transition', async () => {
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+
+  assertOrdered(migration023, [
+    'CREATE OR REPLACE FUNCTION post_invoice',
+    'FOR UPDATE;',
+    'PERFORM public.fx_assert_booking_decision_postable',
+    'UPDATE invoices SET',
+    'INSERT INTO journal_entries',
+  ]);
+
+  assertOrdered(migration023, [
+    'CREATE OR REPLACE FUNCTION post_receipt',
+    'FOR UPDATE;',
+    'PERFORM public.fx_assert_booking_decision_postable',
+    'INSERT INTO journal_entries',
+  ]);
 
   assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_guard_journal_entry_booking_decision');
   assertStringIncludes(migration023, "NEW.source_type IN ('INV', 'CN', 'DN')");

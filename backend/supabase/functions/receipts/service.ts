@@ -96,8 +96,7 @@ export class ReceiptService {
     // Generate receipt number
     const receiptNo = await getNextSequence(this.client, auth.companyId, 'RCT');
 
-    const insertData = {
-      company_id: auth.companyId,
+    const receiptPayload = {
       receipt_no: receiptNo,
       receipt_date: data.receipt_date,
       value_date: data.value_date ?? data.receipt_date,
@@ -115,41 +114,26 @@ export class ReceiptService {
       bank_account_name: `${bankAccount.bank_name} - ${bankAccount.account_no}`,
       reference_no: data.reference_no ?? null,
       cheque_date: data.cheque_date ?? null,
-      status: 'Draft' as const,
       remarks: data.remarks ?? null,
-      created_by: auth.userId,
     };
 
-    const { data: receipt, error } = await this.client
-      .from('receipts')
-      .insert(insertData)
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === '23505') {
-        throw new BusinessError('DUPLICATE_RECEIPT', `Receipt number ${receiptNo} already exists. Please retry.`, 409);
-      }
-      throw new Error(`Failed to create receipt: ${error.message}`);
-    }
-
+    let receiptId: string;
     try {
-      await this.recordBookingDecision(auth, receipt.id, data.exchange_rate !== undefined, data.fx_override_reason);
+      receiptId = await callRpc<string>(getAdminClient(), 'fx_create_governed_receipt_draft', {
+        p_company_id: auth.companyId,
+        p_actor_user_id: auth.userId,
+        p_receipt: receiptPayload,
+        p_explicit_rate_supplied: data.exchange_rate !== undefined,
+        p_override_reason: data.fx_override_reason ?? null,
+      });
     } catch (error) {
-      const { error: cleanupError } = await this.client
-        .from('receipts')
-        .delete()
-        .eq('id', receipt.id)
-        .eq('status', 'Draft');
-      if (cleanupError) {
-        throw new Error(
-          `Receipt booking-rate governance failed and draft cleanup failed: ${cleanupError.message}`,
-        );
+      if (error instanceof Error && error.message.includes('duplicate key')) {
+        throw new BusinessError('DUPLICATE_RECEIPT', `Receipt number ${receiptNo} already exists. Please retry.`, 409);
       }
       throw error;
     }
 
-    return receipt as Receipt;
+    return await fetchById<Receipt>(this.client, 'receipts', receiptId);
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -542,25 +526,6 @@ export class ReceiptService {
       );
     }
     return Number(rate.rate);
-  }
-
-  private async recordBookingDecision(
-    auth: AuthContext,
-    receiptId: string,
-    explicitRateSupplied: boolean,
-    overrideReason?: string,
-  ): Promise<void> {
-    await callRpc<string>(getAdminClient(), 'fx_record_booking_decision', {
-      p_company_id: auth.companyId,
-      p_transaction_type: 'receipt',
-      p_transaction_id: receiptId,
-      p_actor_user_id: auth.userId,
-      p_explicit_rate_supplied: explicitRateSupplied,
-      p_source_category: null,
-      p_fx_reference_rate_id: null,
-      p_override_reason: overrideReason ?? null,
-      p_import_origin: null,
-    });
   }
 
   async updateDraftReceiptFx(

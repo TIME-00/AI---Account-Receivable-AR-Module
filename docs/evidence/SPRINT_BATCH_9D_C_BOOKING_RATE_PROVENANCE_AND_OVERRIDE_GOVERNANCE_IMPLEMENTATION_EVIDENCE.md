@@ -6,6 +6,8 @@ Local implementation: **COMPLETED**
 
 Technical Review remediation: **COMPLETED LOCALLY**
 
+Second narrow Technical Re-Review remediation: **COMPLETED LOCALLY**
+
 Staging migration apply: **NOT PERFORMED**
 
 Staging deployment: **NOT PERFORMED**
@@ -28,6 +30,13 @@ Technical Review remediation baseline:
 ```text
 branch: main
 HEAD/origin: eb925606d1462c13917e8ccc6dd512a2f7b5e063
+```
+
+Second narrow remediation baseline:
+
+```text
+branch: main
+HEAD/origin: 1fc103cb13aa74432347bf989143cbf2d98bd0b2
 ```
 
 ## Database Artifacts
@@ -61,15 +70,20 @@ Creates/remediates:
 
 - append-only event mutation-prevention trigger
 - invoice and receipt protected FX/governance immutability triggers
+- Draft protected FX/governance field guard requiring the trusted governed RPC context
 - governed decision creation/versioning RPC
+- atomic governed invoice Draft create RPC
+- atomic governed receipt Draft create RPC
 - governed invoice Draft FX mutation RPC
 - governed receipt Draft FX mutation RPC
+- guarded Draft invoice total-recalculation RPC for legitimate invoice-line edits
 - DB-side actor role membership helper using `user_roles`
 - approval/rejection RPCs with database-derived role checks
 - 7-calendar-day stale-reference handling
 - postability guard rejecting stale, missing-baseline, invalid, superseded, rejected, pending, and legacy-unverified decisions
-- early journal-entry posting guard before `INV`/`CN`/`DN`/`RCT` journal insertion
-- final status-transition posting guards as defense-in-depth
+- direct forward-safe `post_invoice` replacement that calls `fx_assert_booking_decision_postable` immediately after invoice row lock/status validation and before totals/base-total/journal/status/balance mutations
+- direct forward-safe `post_receipt` replacement that calls `fx_assert_booking_decision_postable` immediately after receipt row lock/status validation and before journal/status mutations
+- journal-entry and final status-transition posting guards retained as defense-in-depth
 - service-role-only privilege hardening
 
 ## Service Integration
@@ -83,9 +97,10 @@ Updated:
 
 Coverage:
 
-- invoice create records a booking-rate decision;
-- if decision creation fails during invoice create, the created Draft invoice/lines are cleaned up;
+- invoice create now uses `fx_create_governed_invoice_draft`, which atomically owns header insert, line insert, initial booking-rate decision creation, transaction pointer assignment, and governance events in one PostgreSQL function transaction;
+- create failure rolls back invoice header, invoice lines, decision rows, pointer assignment, and events through the database transaction boundary; cleanup compensation is no longer the consistency mechanism;
 - material Draft FX edits use `fx_update_governed_invoice_fx`, which owns protected snapshot mutation and decision supersession in one database RPC;
+- Draft invoice line edits recalculate protected invoice totals through `fx_recalculate_invoice_draft_totals` under the trusted protected-field guard;
 - non-FX Draft edits remain normal service updates.
 
 ### Receipts
@@ -97,10 +112,11 @@ Updated:
 
 Coverage:
 
-- receipt create records a booking-rate decision;
-- if decision creation fails during receipt create, the created Draft receipt is cleaned up;
+- receipt create now uses `fx_create_governed_receipt_draft`, which atomically owns receipt insert, initial booking-rate decision creation, transaction pointer assignment, and governance events in one PostgreSQL function transaction;
+- create failure rolls back receipt, decision rows, pointer assignment, and events through the database transaction boundary; cleanup compensation is no longer the consistency mechanism;
 - `updateDraftReceiptFx` provides a governed backend receipt Draft FX mutation path using `fx_update_governed_receipt_fx`;
-- there is still no public receipt Draft edit route in the current API surface.
+- there is still no public receipt Draft edit route in the current API surface;
+- direct Draft receipt protected-field updates are rejected unless executed within the trusted governed mutation RPC context.
 
 ### Imports / Intake
 
@@ -110,8 +126,8 @@ Updated:
 
 Coverage:
 
-- invoice CSV/XLSX import creates invoices through `InvoiceService.createInvoice`;
-- receipt CSV/XLSX import creates receipts through `ReceiptService.createReceipt`;
+- invoice CSV/XLSX import creates invoices through `InvoiceService.createInvoice`, which routes to `fx_create_governed_invoice_draft`;
+- receipt CSV/XLSX import creates receipts through `ReceiptService.createReceipt`, which routes to `fx_create_governed_receipt_draft`;
 - receipt auto-post holds explicit imported FX rates as governed `MANUAL_OVERRIDE`;
 - PDF/Image intake approval remains draft-only review metadata and does not create/post financial records;
 - review queue approval remains metadata/retry workflow; financial creation occurs through the governed execute path.
@@ -169,12 +185,14 @@ Result after remediation:
 Covered:
 
 - root lineage and historical bootstrap invariants;
-- immutability predicate;
+- immutability predicate and trusted governed mutation guard;
 - explicit imported FX auto-post hold;
+- atomic governed invoice/receipt create RPC wiring;
 - governed invoice/receipt FX mutation RPC wiring;
 - DB-derived approval role checks;
 - stale reference governance;
-- early posting guard before journal insertion;
+- direct postability guard ordering inside forward-safe `post_invoice` / `post_receipt` replacements, before posting mutations;
+- journal-entry/status guard defense-in-depth;
 - audit event emission vocabulary.
 
 ### Existing Batch 9D-A/B FX regression tests
@@ -196,6 +214,7 @@ Result after remediation:
 
 - Migrations `022` and `023` were not applied to staging or any remote database.
 - SQL compile/runtime behavior still requires an explicitly authorized staging migration/runtime gate.
+- Local Batch 9D-C tests are structural/source-order checks, not a substitute for staging SQL runtime proof.
 - No live provider call was made.
 - No staging financial baseline or runtime zero-mutation proof was captured in this local implementation gate.
 - No frontend UX implementation was included; Batch 9D-D remains separate.
