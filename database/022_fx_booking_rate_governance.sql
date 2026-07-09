@@ -306,7 +306,43 @@ CREATE INDEX IF NOT EXISTS idx_invoices_fx_source ON public.invoices(company_id,
 CREATE INDEX IF NOT EXISTS idx_receipts_fx_source ON public.receipts(company_id, fx_source_category);
 
 -- ---------------------------------------------------------------------------
--- 4. Integrity trigger for decision rows
+-- 4. Transaction pointer foreign keys
+-- ---------------------------------------------------------------------------
+-- These FKs must be installed before historical backfill DML. PostgreSQL keeps
+-- deferred trigger events pending after backfill inserts/updates; adding FKs
+-- that reference fx_booking_rate_decisions after those writes can fail with
+-- SQLSTATE 55006 ("cannot ALTER TABLE ... because it has pending trigger
+-- events").
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'fk_invoices_fx_decision'
+      AND conrelid = 'public.invoices'::regclass
+  ) THEN
+    ALTER TABLE public.invoices
+      ADD CONSTRAINT fk_invoices_fx_decision
+      FOREIGN KEY (fx_decision_id)
+      REFERENCES public.fx_booking_rate_decisions(id)
+      DEFERRABLE INITIALLY DEFERRED;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'fk_receipts_fx_decision'
+      AND conrelid = 'public.receipts'::regclass
+  ) THEN
+    ALTER TABLE public.receipts
+      ADD CONSTRAINT fk_receipts_fx_decision
+      FOREIGN KEY (fx_decision_id)
+      REFERENCES public.fx_booking_rate_decisions(id)
+      DEFERRABLE INITIALLY DEFERRED;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 5. Integrity trigger for decision rows
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.fx_validate_booking_rate_decision()
@@ -470,7 +506,44 @@ FOR EACH ROW
 EXECUTE FUNCTION public.fx_validate_booking_rate_decision();
 
 -- ---------------------------------------------------------------------------
--- 5. Historical bootstrap backfill
+-- 6. RLS and privileges
+-- ---------------------------------------------------------------------------
+-- Enable RLS and define privileges before backfill writes so no later ALTER
+-- TABLE operation touches the DML-affected governance tables while deferred
+-- trigger events are pending.
+
+ALTER TABLE public.fx_booking_rate_decisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.fx_booking_rate_decision_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS fx_brd_select ON public.fx_booking_rate_decisions;
+CREATE POLICY fx_brd_select ON public.fx_booking_rate_decisions
+FOR SELECT
+USING (public.rls_has_company_access(company_id));
+
+DROP POLICY IF EXISTS fx_brde_select ON public.fx_booking_rate_decision_events;
+CREATE POLICY fx_brde_select ON public.fx_booking_rate_decision_events
+FOR SELECT
+USING (public.rls_has_company_access(company_id));
+
+REVOKE ALL ON public.fx_booking_rate_decisions FROM PUBLIC;
+REVOKE ALL ON public.fx_booking_rate_decision_events FROM PUBLIC;
+REVOKE ALL ON public.fx_booking_rate_decisions FROM anon;
+REVOKE ALL ON public.fx_booking_rate_decision_events FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.fx_booking_rate_decisions FROM authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.fx_booking_rate_decision_events FROM authenticated;
+GRANT SELECT ON public.fx_booking_rate_decisions TO authenticated;
+GRANT SELECT ON public.fx_booking_rate_decision_events TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.fx_booking_rate_decisions TO service_role;
+GRANT SELECT, INSERT ON public.fx_booking_rate_decision_events TO service_role;
+
+-- Trigger function is internal.
+REVOKE ALL ON FUNCTION public.fx_validate_booking_rate_decision() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_validate_booking_rate_decision() FROM anon;
+REVOKE ALL ON FUNCTION public.fx_validate_booking_rate_decision() FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.fx_validate_booking_rate_decision() TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7. Historical bootstrap backfill
 -- ---------------------------------------------------------------------------
 
 WITH invoice_bootstrap AS (
@@ -677,34 +750,6 @@ SELECT
   jsonb_build_object('bootstrap', true, 'transaction_type', 'receipt')
 FROM update_receipts;
 
--- Add transaction -> decision FKs after bootstrap linkage is populated.
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'fk_invoices_fx_decision'
-      AND conrelid = 'public.invoices'::regclass
-  ) THEN
-    ALTER TABLE public.invoices
-      ADD CONSTRAINT fk_invoices_fx_decision
-      FOREIGN KEY (fx_decision_id)
-      REFERENCES public.fx_booking_rate_decisions(id)
-      DEFERRABLE INITIALLY DEFERRED;
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'fk_receipts_fx_decision'
-      AND conrelid = 'public.receipts'::regclass
-  ) THEN
-    ALTER TABLE public.receipts
-      ADD CONSTRAINT fk_receipts_fx_decision
-      FOREIGN KEY (fx_decision_id)
-      REFERENCES public.fx_booking_rate_decisions(id)
-      DEFERRABLE INITIALLY DEFERRED;
-  END IF;
-END $$;
-
 -- Backfill invariants.
 DO $$
 DECLARE
@@ -743,39 +788,5 @@ BEGIN
       v_invoice_gap, v_receipt_gap, v_invoice_mismatch, v_receipt_mismatch;
   END IF;
 END $$;
-
--- ---------------------------------------------------------------------------
--- 6. RLS and privileges
--- ---------------------------------------------------------------------------
-
-ALTER TABLE public.fx_booking_rate_decisions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.fx_booking_rate_decision_events ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS fx_brd_select ON public.fx_booking_rate_decisions;
-CREATE POLICY fx_brd_select ON public.fx_booking_rate_decisions
-FOR SELECT
-USING (public.rls_has_company_access(company_id));
-
-DROP POLICY IF EXISTS fx_brde_select ON public.fx_booking_rate_decision_events;
-CREATE POLICY fx_brde_select ON public.fx_booking_rate_decision_events
-FOR SELECT
-USING (public.rls_has_company_access(company_id));
-
-REVOKE ALL ON public.fx_booking_rate_decisions FROM PUBLIC;
-REVOKE ALL ON public.fx_booking_rate_decision_events FROM PUBLIC;
-REVOKE ALL ON public.fx_booking_rate_decisions FROM anon;
-REVOKE ALL ON public.fx_booking_rate_decision_events FROM anon;
-REVOKE INSERT, UPDATE, DELETE ON public.fx_booking_rate_decisions FROM authenticated;
-REVOKE INSERT, UPDATE, DELETE ON public.fx_booking_rate_decision_events FROM authenticated;
-GRANT SELECT ON public.fx_booking_rate_decisions TO authenticated;
-GRANT SELECT ON public.fx_booking_rate_decision_events TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.fx_booking_rate_decisions TO service_role;
-GRANT SELECT, INSERT ON public.fx_booking_rate_decision_events TO service_role;
-
--- Trigger function is internal.
-REVOKE ALL ON FUNCTION public.fx_validate_booking_rate_decision() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.fx_validate_booking_rate_decision() FROM anon;
-REVOKE ALL ON FUNCTION public.fx_validate_booking_rate_decision() FROM authenticated;
-GRANT EXECUTE ON FUNCTION public.fx_validate_booking_rate_decision() TO service_role;
 
 COMMIT;

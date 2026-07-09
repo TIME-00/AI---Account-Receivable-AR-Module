@@ -40,6 +40,22 @@ Deno.test('Batch 9D-C migrations define root lineage and historical bootstrap in
   assertStringIncludes(migration023, 'fx_guard_receipt_posting_decision');
 });
 
+Deno.test('Batch 9D-C migration 022 installs incompatible ALTERs before backfill DML', async () => {
+  const migration022 = await read('../../../database/022_fx_booking_rate_governance.sql');
+
+  assertOrdered(migration022, [
+    'ADD CONSTRAINT fk_invoices_fx_decision',
+    'ADD CONSTRAINT fk_receipts_fx_decision',
+    'ALTER TABLE public.fx_booking_rate_decisions ENABLE ROW LEVEL SECURITY',
+    'ALTER TABLE public.fx_booking_rate_decision_events ENABLE ROW LEVEL SECURITY',
+    '-- 7. Historical bootstrap backfill',
+    'INSERT INTO public.fx_booking_rate_decisions',
+    'UPDATE public.invoices i',
+    'INSERT INTO public.fx_booking_rate_decision_events',
+    'UPDATE public.receipts r',
+  ]);
+});
+
 Deno.test('Batch 9D-C immutability predicate rejects protected changes outside Draft-to-Draft', async () => {
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
 

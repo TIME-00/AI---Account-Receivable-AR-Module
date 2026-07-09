@@ -8,7 +8,9 @@ Technical Review remediation: **COMPLETED LOCALLY**
 
 Second narrow Technical Re-Review remediation: **COMPLETED LOCALLY**
 
-Staging migration apply: **NOT PERFORMED**
+First authorized staging migration 022 attempt: **FAILED AND STOPPED**
+
+Targeted migration 022 ordering remediation: **COMPLETED LOCALLY**
 
 Staging deployment: **NOT PERFORMED**
 
@@ -38,6 +40,67 @@ Second narrow remediation baseline:
 branch: main
 HEAD/origin: 1fc103cb13aa74432347bf989143cbf2d98bd0b2
 ```
+
+Targeted migration 022 ordering-fix baseline:
+
+```text
+branch: main
+HEAD/origin: 2de54552da240c592536ea611dda28fc39fd3478
+```
+
+## Staging Migration 022 Failure and Local Remediation
+
+The first authorized Batch 9D-C staging execution targeted only:
+
+```text
+staging project: gcdsdyegwjdcskpukqlq
+file: database/022_fx_booking_rate_governance.sql
+```
+
+The attempt failed before migration 023, Edge deployment, runtime test-data
+creation, or runtime verification:
+
+```text
+ERROR: 55006:
+cannot ALTER TABLE "fx_booking_rate_decisions"
+because it has pending trigger events
+```
+
+Confirmed post-failure staging state from the execution evidence:
+
+```text
+022 visible post-failure state: rolled back; Batch 9D-C objects absent
+023: not attempted
+Edge deployments: not performed
+runtime tests: not started
+test data created: 0
+financial fingerprint drift: none detected
+Batch 9D-B scheduler drift: none detected
+production action: none
+```
+
+Root cause:
+
+- migration 022 inserted bootstrap rows into `fx_booking_rate_decisions`;
+- it updated `invoices.fx_decision_id` / `receipts.fx_decision_id`;
+- it inserted `LegacyBackfilled` event rows;
+- it then attempted to add transaction-pointer foreign keys referencing
+  `fx_booking_rate_decisions`;
+- PostgreSQL rejected the later incompatible `ALTER TABLE` because deferred
+  trigger events were pending on the affected relation inside the same
+  migration transaction.
+
+Local fix:
+
+- transaction-pointer foreign keys are now installed before historical
+  backfill DML;
+- RLS enablement and privilege setup for the governance tables now also occur
+  before historical backfill DML;
+- historical classification, bootstrap decision linkage, root/version
+  semantics, `LegacyBackfilled` events, and invariant checks are unchanged.
+
+This evidence records the local remediation only. It does not claim staging
+migration PASS or staging runtime PASS.
 
 ## Database Artifacts
 
@@ -179,7 +242,7 @@ deno test --no-lock --allow-read=../../.. --config deno.json fx_booking_governan
 Result after remediation:
 
 ```text
-9 passed / 0 failed
+10 passed / 0 failed
 ```
 
 Covered:
@@ -192,6 +255,7 @@ Covered:
 - DB-derived approval role checks;
 - stale reference governance;
 - direct postability guard ordering inside forward-safe `post_invoice` / `post_receipt` replacements, before posting mutations;
+- migration 022 ordering so transaction-pointer FKs and RLS/privilege ALTERs occur before historical backfill DML;
 - journal-entry/status guard defense-in-depth;
 - audit event emission vocabulary.
 
@@ -212,17 +276,20 @@ Result after remediation:
 
 ## Local Limitations
 
-- Migrations `022` and `023` were not applied to staging or any remote database.
-- SQL compile/runtime behavior still requires an explicitly authorized staging migration/runtime gate.
+- First staging attempt of migration `022` failed safely with SQLSTATE `55006` and rolled back visible Batch 9D-C objects.
+- Migration `023` was not attempted.
+- No staging re-attempt has been performed after the local migration-ordering fix.
+- SQL compile/runtime behavior of the corrected migration still requires an explicitly authorized staging migration/runtime gate after targeted re-review.
 - Local Batch 9D-C tests are structural/source-order checks, not a substitute for staging SQL runtime proof.
 - No live provider call was made.
-- No staging financial baseline or runtime zero-mutation proof was captured in this local implementation gate.
+- The failed staging attempt captured no financial fingerprint drift, but no Batch 9D-C runtime zero-mutation proof was executed.
 - No frontend UX implementation was included; Batch 9D-D remains separate.
 
 ## Safety Boundary
 
 ```text
-staging migration applied: NO
+staging migration re-attempt after fix: NO
+023 apply: NO
 staging deployment: NO
 staging financial data mutation: NO
 scheduler change: NO
@@ -235,4 +302,4 @@ POST /allocations/auto: still AUTO_ALLOCATION_DISABLED
 
 `Codex Batch 9D-C Technical Re-Review`
 
-No staging deployment, migration apply, scheduler change, provider call, or production action has been performed.
+No staging migration re-attempt, deployment, scheduler change, provider call, or production action has been performed after this local fix.
