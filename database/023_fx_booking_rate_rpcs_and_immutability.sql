@@ -1,0 +1,1118 @@
+-- ============================================================================
+-- Batch 9D-C: Booking Rate Provenance and Override Governance
+-- Migration 023: Immutability triggers, append-only event protection,
+-- governed RPCs, and transactional posting guard.
+--
+-- This migration does not change posting math. It installs the governance
+-- authorization boundary that must pass before the existing posting status
+-- transition can complete.
+-- ============================================================================
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1. Append-only event protection
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fx_prevent_booking_rate_event_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RAISE EXCEPTION 'BR-FX-GOVERNANCE: booking-rate decision events are append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_fx_brde_prevent_update
+  ON public.fx_booking_rate_decision_events;
+CREATE TRIGGER trg_fx_brde_prevent_update
+BEFORE UPDATE ON public.fx_booking_rate_decision_events
+FOR EACH ROW
+EXECUTE FUNCTION public.fx_prevent_booking_rate_event_mutation();
+
+DROP TRIGGER IF EXISTS trg_fx_brde_prevent_delete
+  ON public.fx_booking_rate_decision_events;
+CREATE TRIGGER trg_fx_brde_prevent_delete
+BEFORE DELETE ON public.fx_booking_rate_decision_events
+FOR EACH ROW
+EXECUTE FUNCTION public.fx_prevent_booking_rate_event_mutation();
+
+-- ---------------------------------------------------------------------------
+-- 2. Posted FX/governance immutability
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fx_prevent_invoice_booked_fx_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_changed BOOLEAN;
+BEGIN
+  v_changed :=
+    OLD.currency IS DISTINCT FROM NEW.currency
+    OR OLD.exchange_rate IS DISTINCT FROM NEW.exchange_rate
+    OR OLD.base_currency IS DISTINCT FROM NEW.base_currency
+    OR OLD.base_total IS DISTINCT FROM NEW.base_total
+    OR OLD.fx_source_category IS DISTINCT FROM NEW.fx_source_category
+    OR OLD.fx_decision_id IS DISTINCT FROM NEW.fx_decision_id
+    OR OLD.invoice_date IS DISTINCT FROM NEW.invoice_date;
+
+  IF v_changed AND (OLD.status <> 'Draft' OR NEW.status <> 'Draft') THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: protected invoice FX/governance fields may change only while Draft remains Draft';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_prevent_receipt_booked_fx_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_changed BOOLEAN;
+BEGIN
+  v_changed :=
+    OLD.currency IS DISTINCT FROM NEW.currency
+    OR OLD.exchange_rate IS DISTINCT FROM NEW.exchange_rate
+    OR OLD.base_currency IS DISTINCT FROM NEW.base_currency
+    OR OLD.base_amount IS DISTINCT FROM NEW.base_amount
+    OR OLD.fx_source_category IS DISTINCT FROM NEW.fx_source_category
+    OR OLD.fx_decision_id IS DISTINCT FROM NEW.fx_decision_id
+    OR OLD.receipt_date IS DISTINCT FROM NEW.receipt_date;
+
+  IF v_changed AND (OLD.status <> 'Draft' OR NEW.status <> 'Draft') THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: protected receipt FX/governance fields may change only while Draft remains Draft';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_fx_prevent_invoice_booked_fx_mutation
+  ON public.invoices;
+CREATE TRIGGER trg_fx_prevent_invoice_booked_fx_mutation
+BEFORE UPDATE ON public.invoices
+FOR EACH ROW
+EXECUTE FUNCTION public.fx_prevent_invoice_booked_fx_mutation();
+
+DROP TRIGGER IF EXISTS trg_fx_prevent_receipt_booked_fx_mutation
+  ON public.receipts;
+CREATE TRIGGER trg_fx_prevent_receipt_booked_fx_mutation
+BEFORE UPDATE ON public.receipts
+FOR EACH ROW
+EXECUTE FUNCTION public.fx_prevent_receipt_booked_fx_mutation();
+
+-- ---------------------------------------------------------------------------
+-- 3. Internal utilities
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fx_booking_deviation_pct(
+  p_booked_rate NUMERIC,
+  p_baseline_rate NUMERIC
+)
+RETURNS NUMERIC
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE
+    WHEN p_baseline_rate IS NULL OR p_baseline_rate = 0 THEN NULL
+    ELSE ROUND((ABS(p_booked_rate - p_baseline_rate) / p_baseline_rate) * 100, 8)
+  END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_booking_approval_status_for_deviation(
+  p_deviation_pct NUMERIC,
+  p_source_category TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+  IF p_source_category IN ('BASE_PARITY', 'CATALOG') THEN
+    RETURN 'NotRequired';
+  END IF;
+
+  IF p_deviation_pct IS NULL THEN
+    RETURN 'Pending';
+  ELSIF p_deviation_pct <= 0.50 THEN
+    RETURN 'NotRequired';
+  ELSIF p_deviation_pct <= 5.00 THEN
+    RETURN 'Pending';
+  ELSE
+    RETURN 'Rejected';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_booking_lifecycle_for_approval(
+  p_approval_status TEXT
+)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE p_approval_status
+    WHEN 'NotRequired' THEN 'Draft'
+    WHEN 'Approved' THEN 'Approved'
+    WHEN 'Rejected' THEN 'Rejected'
+    ELSE 'Pending'
+  END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 4. Governance decision creation / versioning RPC
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fx_record_booking_decision(
+  p_company_id UUID,
+  p_transaction_type TEXT,
+  p_transaction_id UUID,
+  p_actor_user_id UUID,
+  p_explicit_rate_supplied BOOLEAN DEFAULT false,
+  p_source_category TEXT DEFAULT NULL,
+  p_fx_reference_rate_id UUID DEFAULT NULL,
+  p_override_reason TEXT DEFAULT NULL,
+  p_import_origin JSONB DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_tx RECORD;
+  v_company RECORD;
+  v_existing RECORD;
+  v_new_id UUID := gen_random_uuid();
+  v_root_id UUID;
+  v_version INTEGER := 1;
+  v_source_category TEXT;
+  v_exchange RECORD;
+  v_reference RECORD;
+  v_baseline_kind TEXT := 'NONE';
+  v_baseline_rate NUMERIC(18,8) := NULL;
+  v_baseline_exchange_rate_id UUID := NULL;
+  v_baseline_fx_reference_rate_id UUID := NULL;
+  v_deviation NUMERIC(18,8) := NULL;
+  v_approval_status TEXT;
+  v_lifecycle_status TEXT;
+  v_event_type TEXT;
+BEGIN
+  IF p_transaction_type NOT IN ('invoice', 'receipt') THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: transaction_type must be invoice or receipt';
+  END IF;
+
+  SELECT *
+    INTO v_company
+  FROM public.companies
+  WHERE id = p_company_id;
+
+  IF v_company.id IS NULL THEN
+    RAISE EXCEPTION 'NOT_FOUND: company % not found', p_company_id;
+  END IF;
+
+  IF p_transaction_type = 'invoice' THEN
+    SELECT
+      i.id,
+      i.company_id,
+      i.customer_id,
+      i.currency::CHAR(3) AS currency,
+      i.base_currency::CHAR(3) AS base_currency,
+      i.exchange_rate::numeric(18,8) AS exchange_rate,
+      i.invoice_date AS transaction_date,
+      i.status,
+      i.fx_decision_id,
+      i.fx_source_category
+      INTO v_tx
+    FROM public.invoices i
+    WHERE i.id = p_transaction_id
+    FOR UPDATE;
+  ELSE
+    SELECT
+      r.id,
+      r.company_id,
+      r.customer_id,
+      r.currency::CHAR(3) AS currency,
+      r.base_currency::CHAR(3) AS base_currency,
+      r.exchange_rate::numeric(18,8) AS exchange_rate,
+      r.receipt_date AS transaction_date,
+      r.status,
+      r.fx_decision_id,
+      r.fx_source_category
+      INTO v_tx
+    FROM public.receipts r
+    WHERE r.id = p_transaction_id
+    FOR UPDATE;
+  END IF;
+
+  IF v_tx.id IS NULL OR v_tx.company_id <> p_company_id THEN
+    RAISE EXCEPTION 'NOT_FOUND: transaction not found in company scope';
+  END IF;
+  IF v_tx.status <> 'Draft' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: booking decision can only be changed while Draft';
+  END IF;
+  IF v_tx.base_currency <> v_company.base_currency THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: transaction base currency mismatch';
+  END IF;
+
+  IF p_source_category IS NOT NULL THEN
+    v_source_category := p_source_category;
+  ELSIF v_tx.currency = v_tx.base_currency THEN
+    IF ROUND(v_tx.exchange_rate, 8) = 1.00000000 THEN
+      v_source_category := 'BASE_PARITY';
+    ELSE
+      RAISE EXCEPTION 'BR-FX-GOVERNANCE: same-currency explicit non-parity rate requires HOLD/anomaly handling';
+    END IF;
+  ELSIF p_explicit_rate_supplied THEN
+    v_source_category := 'MANUAL_OVERRIDE';
+  ELSE
+    v_source_category := 'CATALOG';
+  END IF;
+
+  IF v_source_category NOT IN ('BASE_PARITY', 'CATALOG', 'REFERENCE_SELECTED', 'MANUAL_OVERRIDE') THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: invalid new booking source category %', v_source_category;
+  END IF;
+
+  IF v_source_category = 'REFERENCE_SELECTED' THEN
+    IF p_fx_reference_rate_id IS NULL THEN
+      RAISE EXCEPTION 'BR-FX-GOVERNANCE: reference selection requires fx_reference_rate_id';
+    END IF;
+
+    SELECT *
+      INTO v_reference
+    FROM public.fx_reference_rates
+    WHERE id = p_fx_reference_rate_id
+    FOR UPDATE;
+
+    IF v_reference.id IS NULL
+      OR v_reference.company_id <> p_company_id
+      OR v_reference.from_currency <> v_tx.currency
+      OR v_reference.to_currency <> v_tx.base_currency
+      OR v_reference.effective_date > v_tx.transaction_date
+      OR v_reference.status <> 'Active' THEN
+      RAISE EXCEPTION 'BR-FX-GOVERNANCE: invalid reference selection';
+    END IF;
+
+    v_tx.exchange_rate := v_reference.rate::numeric(18,8);
+    v_baseline_kind := 'REFERENCE';
+    v_baseline_rate := v_reference.rate::numeric(18,8);
+    v_baseline_fx_reference_rate_id := v_reference.id;
+
+    IF p_transaction_type = 'invoice' THEN
+      UPDATE public.invoices
+      SET exchange_rate = v_tx.exchange_rate,
+          base_total = ROUND(total_amount * v_tx.exchange_rate, 2)
+      WHERE id = p_transaction_id;
+    ELSE
+      UPDATE public.receipts
+      SET exchange_rate = v_tx.exchange_rate,
+          base_amount = ROUND(receipt_amount * v_tx.exchange_rate, 2)
+      WHERE id = p_transaction_id;
+    END IF;
+  END IF;
+
+  IF v_source_category = 'BASE_PARITY' THEN
+    IF v_tx.currency <> v_tx.base_currency OR ROUND(v_tx.exchange_rate, 8) <> 1.00000000 THEN
+      RAISE EXCEPTION 'BR-FX-GOVERNANCE: BASE_PARITY requires same-currency rate 1.0';
+    END IF;
+    v_baseline_kind := 'BASE_PARITY';
+    v_baseline_rate := 1.00000000;
+  ELSIF v_source_category IN ('CATALOG', 'MANUAL_OVERRIDE') THEN
+    SELECT *
+      INTO v_exchange
+    FROM public.exchange_rates
+    WHERE company_id = p_company_id
+      AND from_currency = v_tx.currency
+      AND to_currency = v_tx.base_currency
+      AND effective_date <= v_tx.transaction_date
+    ORDER BY effective_date DESC
+    LIMIT 1;
+
+    IF v_source_category = 'CATALOG' THEN
+      IF v_exchange.id IS NULL THEN
+        RAISE EXCEPTION 'BR-FX-GOVERNANCE: catalog rate missing';
+      END IF;
+      IF ROUND(v_exchange.rate::numeric, 8) <> ROUND(v_tx.exchange_rate, 8) THEN
+        RAISE EXCEPTION 'BR-FX-GOVERNANCE: transaction rate does not match catalog source';
+      END IF;
+      v_baseline_kind := 'CATALOG';
+      v_baseline_rate := v_exchange.rate::numeric(18,8);
+      v_baseline_exchange_rate_id := v_exchange.id;
+    ELSIF v_source_category = 'MANUAL_OVERRIDE' THEN
+      IF p_override_reason IS NULL OR length(trim(p_override_reason)) < 5 THEN
+        RAISE EXCEPTION 'BR-FX-GOVERNANCE: manual override reason is required';
+      END IF;
+      IF v_exchange.id IS NOT NULL THEN
+        v_baseline_kind := 'CATALOG';
+        v_baseline_rate := v_exchange.rate::numeric(18,8);
+        v_baseline_exchange_rate_id := v_exchange.id;
+      ELSE
+        v_baseline_kind := 'MISSING';
+      END IF;
+    END IF;
+  END IF;
+
+  v_deviation := public.fx_booking_deviation_pct(v_tx.exchange_rate, v_baseline_rate);
+  v_approval_status := public.fx_booking_approval_status_for_deviation(v_deviation, v_source_category);
+  v_lifecycle_status := public.fx_booking_lifecycle_for_approval(v_approval_status);
+
+  IF v_approval_status = 'Rejected' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: booked rate deviation exceeds blocked threshold';
+  END IF;
+
+  IF p_transaction_type = 'invoice' THEN
+    SELECT *
+      INTO v_existing
+    FROM public.fx_booking_rate_decisions
+    WHERE id = v_tx.fx_decision_id
+    FOR UPDATE;
+  ELSE
+    SELECT *
+      INTO v_existing
+    FROM public.fx_booking_rate_decisions
+    WHERE id = v_tx.fx_decision_id
+    FOR UPDATE;
+  END IF;
+
+  IF v_existing.id IS NOT NULL THEN
+    IF v_existing.lifecycle_status = 'Posted' THEN
+      RAISE EXCEPTION 'BR-FX-GOVERNANCE: posted transaction decision cannot be changed';
+    END IF;
+
+    UPDATE public.fx_booking_rate_decisions
+    SET lifecycle_status = 'Superseded',
+        updated_at = now()
+    WHERE id = v_existing.id;
+
+    INSERT INTO public.fx_booking_rate_decision_events (
+      company_id,
+      invoice_id,
+      receipt_id,
+      decision_id,
+      decision_version,
+      event_type,
+      actor_user_id,
+      prior_approval_status,
+      new_approval_status,
+      maker_user_id,
+      checker_user_id,
+      source_category,
+      selected_rate,
+      final_rate,
+      metadata
+    )
+    VALUES (
+      v_existing.company_id,
+      v_existing.invoice_id,
+      v_existing.receipt_id,
+      v_existing.id,
+      v_existing.decision_version,
+      'DecisionSuperseded',
+      p_actor_user_id,
+      v_existing.approval_status,
+      v_existing.approval_status,
+      v_existing.maker_user_id,
+      v_existing.checker_user_id,
+      v_existing.source_category,
+      v_existing.booked_rate,
+      v_existing.booked_rate,
+      jsonb_build_object('new_decision_id', v_new_id)
+    );
+
+    v_root_id := v_existing.root_decision_id;
+    v_version := v_existing.decision_version + 1;
+  ELSE
+    v_root_id := v_new_id;
+    v_version := 1;
+  END IF;
+
+  INSERT INTO public.fx_booking_rate_decisions (
+    id,
+    company_id,
+    invoice_id,
+    receipt_id,
+    root_decision_id,
+    decision_version,
+    supersedes_decision_id,
+    source_category,
+    exchange_rate_id,
+    fx_reference_rate_id,
+    baseline_kind,
+    baseline_rate,
+    baseline_exchange_rate_id,
+    baseline_fx_reference_rate_id,
+    from_currency,
+    to_currency,
+    transaction_date,
+    booked_rate,
+    suggested_rate,
+    deviation_pct,
+    approval_status,
+    lifecycle_status,
+    maker_user_id,
+    selected_by,
+    selected_at,
+    override_reason,
+    import_origin,
+    metadata,
+    created_by
+  )
+  VALUES (
+    v_new_id,
+    p_company_id,
+    CASE WHEN p_transaction_type = 'invoice' THEN p_transaction_id ELSE NULL END,
+    CASE WHEN p_transaction_type = 'receipt' THEN p_transaction_id ELSE NULL END,
+    v_root_id,
+    v_version,
+    CASE WHEN v_existing.id IS NOT NULL THEN v_existing.id ELSE NULL END,
+    v_source_category,
+    CASE WHEN v_source_category = 'CATALOG' THEN v_exchange.id ELSE NULL END,
+    CASE WHEN v_source_category = 'REFERENCE_SELECTED' THEN v_reference.id ELSE NULL END,
+    v_baseline_kind,
+    v_baseline_rate,
+    v_baseline_exchange_rate_id,
+    v_baseline_fx_reference_rate_id,
+    v_tx.currency,
+    v_tx.base_currency,
+    v_tx.transaction_date,
+    v_tx.exchange_rate,
+    v_baseline_rate,
+    v_deviation,
+    v_approval_status,
+    v_lifecycle_status,
+    p_actor_user_id,
+    p_actor_user_id,
+    now(),
+    p_override_reason,
+    p_import_origin,
+    jsonb_build_object('explicit_rate_supplied', p_explicit_rate_supplied),
+    p_actor_user_id
+  );
+
+  IF p_transaction_type = 'invoice' THEN
+    UPDATE public.invoices
+    SET fx_decision_id = v_new_id,
+        fx_source_category = v_source_category
+    WHERE id = p_transaction_id;
+  ELSE
+    UPDATE public.receipts
+    SET fx_decision_id = v_new_id,
+        fx_source_category = v_source_category
+    WHERE id = p_transaction_id;
+  END IF;
+
+  v_event_type := CASE
+    WHEN v_source_category = 'CATALOG' THEN 'CatalogSelected'
+    WHEN v_source_category = 'MANUAL_OVERRIDE' THEN 'OverrideSubmitted'
+    ELSE 'DecisionCreated'
+  END;
+
+  INSERT INTO public.fx_booking_rate_decision_events (
+    company_id,
+    invoice_id,
+    receipt_id,
+    decision_id,
+    decision_version,
+    event_type,
+    actor_user_id,
+    prior_approval_status,
+    new_approval_status,
+    reason,
+    maker_user_id,
+    source_category,
+    exchange_rate_id,
+    fx_reference_rate_id,
+    baseline_kind,
+    baseline_exchange_rate_id,
+    baseline_fx_reference_rate_id,
+    selected_rate,
+    final_rate,
+    metadata
+  )
+  VALUES (
+    p_company_id,
+    CASE WHEN p_transaction_type = 'invoice' THEN p_transaction_id ELSE NULL END,
+    CASE WHEN p_transaction_type = 'receipt' THEN p_transaction_id ELSE NULL END,
+    v_new_id,
+    v_version,
+    v_event_type,
+    p_actor_user_id,
+    NULL,
+    v_approval_status,
+    p_override_reason,
+    p_actor_user_id,
+    v_source_category,
+    CASE WHEN v_source_category = 'CATALOG' THEN v_exchange.id ELSE NULL END,
+    CASE WHEN v_source_category = 'REFERENCE_SELECTED' THEN v_reference.id ELSE NULL END,
+    v_baseline_kind,
+    v_baseline_exchange_rate_id,
+    v_baseline_fx_reference_rate_id,
+    v_tx.exchange_rate,
+    v_tx.exchange_rate,
+    jsonb_build_object('explicit_rate_supplied', p_explicit_rate_supplied)
+  );
+
+  IF v_approval_status = 'Pending' THEN
+    INSERT INTO public.fx_booking_rate_decision_events (
+      company_id,
+      invoice_id,
+      receipt_id,
+      decision_id,
+      decision_version,
+      event_type,
+      actor_user_id,
+      prior_approval_status,
+      new_approval_status,
+      reason,
+      maker_user_id,
+      source_category,
+      selected_rate,
+      final_rate
+    )
+    VALUES (
+      p_company_id,
+      CASE WHEN p_transaction_type = 'invoice' THEN p_transaction_id ELSE NULL END,
+      CASE WHEN p_transaction_type = 'receipt' THEN p_transaction_id ELSE NULL END,
+      v_new_id,
+      v_version,
+      'ApprovalRequired',
+      p_actor_user_id,
+      NULL,
+      v_approval_status,
+      p_override_reason,
+      p_actor_user_id,
+      v_source_category,
+      v_tx.exchange_rate,
+      v_tx.exchange_rate
+    );
+  END IF;
+
+  RETURN v_new_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_submit_override(
+  p_company_id UUID,
+  p_transaction_type TEXT,
+  p_transaction_id UUID,
+  p_actor_user_id UUID,
+  p_override_reason TEXT
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN public.fx_record_booking_decision(
+    p_company_id,
+    p_transaction_type,
+    p_transaction_id,
+    p_actor_user_id,
+    true,
+    'MANUAL_OVERRIDE',
+    NULL,
+    p_override_reason,
+    NULL
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_select_reference_booking_rate(
+  p_company_id UUID,
+  p_transaction_type TEXT,
+  p_transaction_id UUID,
+  p_actor_user_id UUID,
+  p_fx_reference_rate_id UUID
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN public.fx_record_booking_decision(
+    p_company_id,
+    p_transaction_type,
+    p_transaction_id,
+    p_actor_user_id,
+    false,
+    'REFERENCE_SELECTED',
+    p_fx_reference_rate_id,
+    NULL,
+    NULL
+  );
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 5. Approval / rejection RPCs
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fx_approve_booking_decision(
+  p_decision_id UUID,
+  p_actor_user_id UUID,
+  p_company_id UUID,
+  p_actor_role TEXT
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_decision RECORD;
+BEGIN
+  SELECT *
+    INTO v_decision
+  FROM public.fx_booking_rate_decisions
+  WHERE id = p_decision_id
+  FOR UPDATE;
+
+  IF v_decision.id IS NULL OR v_decision.company_id <> p_company_id THEN
+    RAISE EXCEPTION 'NOT_FOUND: booking decision not found';
+  END IF;
+  IF v_decision.approval_status <> 'Pending' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: decision is not pending approval';
+  END IF;
+  IF v_decision.maker_user_id = p_actor_user_id THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: maker cannot approve own decision';
+  END IF;
+  IF v_decision.deviation_pct > 2.00 AND p_actor_role <> 'Finance Manager' THEN
+    RAISE EXCEPTION 'AUTH: Finance Manager approval required';
+  END IF;
+  IF v_decision.deviation_pct <= 2.00 AND p_actor_role NOT IN ('AR Supervisor', 'Finance Manager') THEN
+    RAISE EXCEPTION 'AUTH: AR Supervisor approval required';
+  END IF;
+  IF p_actor_role IN ('System Admin', 'Auditor') THEN
+    RAISE EXCEPTION 'AUTH: role cannot approve financial booking-rate decisions';
+  END IF;
+
+  UPDATE public.fx_booking_rate_decisions
+  SET approval_status = 'Approved',
+      lifecycle_status = 'Approved',
+      checker_user_id = p_actor_user_id,
+      approved_by = p_actor_user_id,
+      approved_at = now(),
+      updated_at = now()
+  WHERE id = p_decision_id;
+
+  INSERT INTO public.fx_booking_rate_decision_events (
+    company_id,
+    invoice_id,
+    receipt_id,
+    decision_id,
+    decision_version,
+    event_type,
+    actor_user_id,
+    actor_role,
+    prior_approval_status,
+    new_approval_status,
+    maker_user_id,
+    checker_user_id,
+    source_category,
+    selected_rate,
+    final_rate
+  )
+  VALUES (
+    v_decision.company_id,
+    v_decision.invoice_id,
+    v_decision.receipt_id,
+    v_decision.id,
+    v_decision.decision_version,
+    'Approved',
+    p_actor_user_id,
+    p_actor_role,
+    v_decision.approval_status,
+    'Approved',
+    v_decision.maker_user_id,
+    p_actor_user_id,
+    v_decision.source_category,
+    v_decision.booked_rate,
+    v_decision.booked_rate
+  );
+
+  RETURN p_decision_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_reject_booking_decision(
+  p_decision_id UUID,
+  p_actor_user_id UUID,
+  p_company_id UUID,
+  p_actor_role TEXT,
+  p_rejection_reason TEXT
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_decision RECORD;
+BEGIN
+  SELECT *
+    INTO v_decision
+  FROM public.fx_booking_rate_decisions
+  WHERE id = p_decision_id
+  FOR UPDATE;
+
+  IF v_decision.id IS NULL OR v_decision.company_id <> p_company_id THEN
+    RAISE EXCEPTION 'NOT_FOUND: booking decision not found';
+  END IF;
+  IF p_actor_role IN ('System Admin', 'Auditor') THEN
+    RAISE EXCEPTION 'AUTH: role cannot reject financial booking-rate decisions';
+  END IF;
+
+  UPDATE public.fx_booking_rate_decisions
+  SET approval_status = 'Rejected',
+      lifecycle_status = 'Rejected',
+      checker_user_id = p_actor_user_id,
+      rejected_by = p_actor_user_id,
+      rejected_at = now(),
+      rejection_reason = p_rejection_reason,
+      updated_at = now()
+  WHERE id = p_decision_id;
+
+  INSERT INTO public.fx_booking_rate_decision_events (
+    company_id,
+    invoice_id,
+    receipt_id,
+    decision_id,
+    decision_version,
+    event_type,
+    actor_user_id,
+    actor_role,
+    prior_approval_status,
+    new_approval_status,
+    reason,
+    maker_user_id,
+    checker_user_id,
+    source_category,
+    selected_rate,
+    final_rate
+  )
+  VALUES (
+    v_decision.company_id,
+    v_decision.invoice_id,
+    v_decision.receipt_id,
+    v_decision.id,
+    v_decision.decision_version,
+    'Rejected',
+    p_actor_user_id,
+    p_actor_role,
+    v_decision.approval_status,
+    'Rejected',
+    p_rejection_reason,
+    v_decision.maker_user_id,
+    p_actor_user_id,
+    v_decision.source_category,
+    v_decision.booked_rate,
+    v_decision.booked_rate
+  );
+
+  RETURN p_decision_id;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 6. Transaction-safe postability assertion
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.fx_assert_booking_decision_postable(
+  p_company_id UUID,
+  p_invoice_id UUID DEFAULT NULL,
+  p_receipt_id UUID DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_tx RECORD;
+  v_decision RECORD;
+  v_current_count INTEGER;
+BEGIN
+  IF (p_invoice_id IS NULL AND p_receipt_id IS NULL)
+    OR (p_invoice_id IS NOT NULL AND p_receipt_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: exactly one transaction id is required';
+  END IF;
+
+  IF p_invoice_id IS NOT NULL THEN
+    SELECT
+      id,
+      company_id,
+      currency::CHAR(3) AS currency,
+      base_currency::CHAR(3) AS base_currency,
+      exchange_rate::numeric(18,8) AS exchange_rate,
+      invoice_date AS transaction_date,
+      fx_source_category,
+      fx_decision_id
+      INTO v_tx
+    FROM public.invoices
+    WHERE id = p_invoice_id
+    FOR UPDATE;
+  ELSE
+    SELECT
+      id,
+      company_id,
+      currency::CHAR(3) AS currency,
+      base_currency::CHAR(3) AS base_currency,
+      exchange_rate::numeric(18,8) AS exchange_rate,
+      receipt_date AS transaction_date,
+      fx_source_category,
+      fx_decision_id
+      INTO v_tx
+    FROM public.receipts
+    WHERE id = p_receipt_id
+    FOR UPDATE;
+  END IF;
+
+  IF v_tx.id IS NULL OR v_tx.company_id <> p_company_id THEN
+    RAISE EXCEPTION 'NOT_FOUND: transaction not found for booking-rate postability';
+  END IF;
+  IF v_tx.fx_decision_id IS NULL OR v_tx.fx_source_category IS NULL THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: missing booking-rate decision';
+  END IF;
+
+  SELECT *
+    INTO v_decision
+  FROM public.fx_booking_rate_decisions
+  WHERE id = v_tx.fx_decision_id
+  FOR UPDATE;
+
+  IF v_decision.id IS NULL THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: linked booking-rate decision not found';
+  END IF;
+  IF v_decision.company_id <> p_company_id THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: decision company mismatch';
+  END IF;
+  IF p_invoice_id IS NOT NULL AND (v_decision.invoice_id <> p_invoice_id OR v_decision.receipt_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: decision transaction mismatch';
+  END IF;
+  IF p_receipt_id IS NOT NULL AND (v_decision.receipt_id <> p_receipt_id OR v_decision.invoice_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: decision transaction mismatch';
+  END IF;
+
+  SELECT count(*)
+    INTO v_current_count
+  FROM public.fx_booking_rate_decisions d
+  WHERE d.root_decision_id = v_decision.root_decision_id
+    AND d.lifecycle_status <> 'Superseded'
+    AND (
+      (p_invoice_id IS NOT NULL AND d.invoice_id = p_invoice_id)
+      OR (p_receipt_id IS NOT NULL AND d.receipt_id = p_receipt_id)
+    );
+
+  IF v_current_count <> 1 THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: invalid current decision chain';
+  END IF;
+  IF v_decision.lifecycle_status = 'Superseded' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: superseded decision cannot post';
+  END IF;
+  IF v_decision.source_category = 'LEGACY_UNVERIFIED' THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: LEGACY_UNVERIFIED decision is not postable';
+  END IF;
+  IF v_decision.approval_status NOT IN ('NotRequired', 'Approved') THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: booking-rate decision is not approved for posting';
+  END IF;
+  IF v_decision.approval_status = 'Approved'
+    AND (v_decision.checker_user_id IS NULL OR v_decision.checker_user_id = v_decision.maker_user_id) THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: maker-checker approval invalid';
+  END IF;
+  IF v_decision.source_category <> v_tx.fx_source_category
+    OR v_decision.from_currency <> v_tx.currency
+    OR v_decision.to_currency <> v_tx.base_currency
+    OR v_decision.transaction_date <> v_tx.transaction_date
+    OR ROUND(v_decision.booked_rate, 8) <> ROUND(v_tx.exchange_rate, 8) THEN
+    RAISE EXCEPTION 'BR-FX-GOVERNANCE: decision snapshot mismatch';
+  END IF;
+
+  RETURN v_decision.id;
+END;
+$$;
+
+-- Status transition guards ensure the postability check happens in the same
+-- database transaction as the posting status update, even if a caller attempts
+-- to bypass the Edge preflight.
+CREATE OR REPLACE FUNCTION public.fx_guard_invoice_posting_decision()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_decision_id UUID;
+BEGIN
+  IF OLD.status = 'Draft' AND NEW.status <> 'Draft' THEN
+    v_decision_id := public.fx_assert_booking_decision_postable(
+      NEW.company_id,
+      NEW.id,
+      NULL
+    );
+
+    UPDATE public.fx_booking_rate_decisions
+    SET lifecycle_status = 'Posted',
+        posted = true,
+        posted_at = COALESCE(NEW.posted_at, now()),
+        updated_at = now()
+    WHERE id = v_decision_id;
+
+    INSERT INTO public.fx_booking_rate_decision_events (
+      company_id,
+      invoice_id,
+      decision_id,
+      decision_version,
+      event_type,
+      actor_user_id,
+      prior_approval_status,
+      new_approval_status,
+      source_category,
+      selected_rate,
+      final_rate
+    )
+    SELECT
+      d.company_id,
+      d.invoice_id,
+      d.id,
+      d.decision_version,
+      'Posted',
+      NEW.posted_by,
+      d.approval_status,
+      d.approval_status,
+      d.source_category,
+      d.booked_rate,
+      d.booked_rate
+    FROM public.fx_booking_rate_decisions d
+    WHERE d.id = v_decision_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fx_guard_receipt_posting_decision()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_decision_id UUID;
+BEGIN
+  IF OLD.status = 'Draft' AND NEW.status <> 'Draft' THEN
+    v_decision_id := public.fx_assert_booking_decision_postable(
+      NEW.company_id,
+      NULL,
+      NEW.id
+    );
+
+    UPDATE public.fx_booking_rate_decisions
+    SET lifecycle_status = 'Posted',
+        posted = true,
+        posted_at = COALESCE(NEW.posted_at, now()),
+        updated_at = now()
+    WHERE id = v_decision_id;
+
+    INSERT INTO public.fx_booking_rate_decision_events (
+      company_id,
+      receipt_id,
+      decision_id,
+      decision_version,
+      event_type,
+      actor_user_id,
+      prior_approval_status,
+      new_approval_status,
+      source_category,
+      selected_rate,
+      final_rate
+    )
+    SELECT
+      d.company_id,
+      d.receipt_id,
+      d.id,
+      d.decision_version,
+      'Posted',
+      NEW.posted_by,
+      d.approval_status,
+      d.approval_status,
+      d.source_category,
+      d.booked_rate,
+      d.booked_rate
+    FROM public.fx_booking_rate_decisions d
+    WHERE d.id = v_decision_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_fx_guard_invoice_posting_decision
+  ON public.invoices;
+CREATE TRIGGER trg_fx_guard_invoice_posting_decision
+BEFORE UPDATE ON public.invoices
+FOR EACH ROW
+EXECUTE FUNCTION public.fx_guard_invoice_posting_decision();
+
+DROP TRIGGER IF EXISTS trg_fx_guard_receipt_posting_decision
+  ON public.receipts;
+CREATE TRIGGER trg_fx_guard_receipt_posting_decision
+BEFORE UPDATE ON public.receipts
+FOR EACH ROW
+EXECUTE FUNCTION public.fx_guard_receipt_posting_decision();
+
+-- ---------------------------------------------------------------------------
+-- 7. Privilege hardening
+-- ---------------------------------------------------------------------------
+
+REVOKE ALL ON FUNCTION public.fx_prevent_booking_rate_event_mutation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_prevent_invoice_booked_fx_mutation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_prevent_receipt_booked_fx_mutation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_booking_deviation_pct(NUMERIC, NUMERIC) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_booking_approval_status_for_deviation(NUMERIC, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_booking_lifecycle_for_approval(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_reject_booking_decision(UUID, UUID, UUID, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_guard_invoice_posting_decision() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.fx_guard_receipt_posting_decision() FROM PUBLIC;
+
+REVOKE ALL ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_reject_booking_decision(UUID, UUID, UUID, TEXT, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UUID) FROM anon;
+
+REVOKE ALL ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_reject_booking_decision(UUID, UUID, UUID, TEXT, TEXT) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UUID) FROM authenticated;
+
+GRANT EXECUTE ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_submit_override(UUID, TEXT, UUID, UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_select_reference_booking_rate(UUID, TEXT, UUID, UUID, UUID) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_approve_booking_decision(UUID, UUID, UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_reject_booking_decision(UUID, UUID, UUID, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UUID) TO service_role;
+
+COMMENT ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) IS
+  'Batch 9D-C service-role RPC to create/supersede current booking-rate decision rows for Draft invoices/receipts.';
+COMMENT ON FUNCTION public.fx_assert_booking_decision_postable(UUID, UUID, UUID) IS
+  'Batch 9D-C internal transaction-safe postability guard. Must run inside the posting transaction after row lock.';
+
+COMMIT;

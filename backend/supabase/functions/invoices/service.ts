@@ -183,6 +183,8 @@ export class InvoiceService {
         }
       }
 
+      await this.recordBookingDecision(auth, invoice.id, data.exchange_rate !== undefined, data.fx_override_reason);
+
       // Re-fetch for updated totals.
       const result = await fetchById<Invoice>(this.client, 'invoices', invoice.id);
       return { ...result, lines: createdLines };
@@ -632,8 +634,18 @@ export class InvoiceService {
     if (data.reference_no !== undefined) updatePayload.reference_no = data.reference_no;
     if (data.internal_remarks !== undefined) updatePayload.internal_remarks = data.internal_remarks;
     if (data.invoice_remarks !== undefined) updatePayload.invoice_remarks = data.invoice_remarks;
+    const nextCurrency = data.currency ?? invoice.currency;
+    const nextDate = data.invoice_date ?? invoice.invoice_date;
+    const fxMaterialChange = data.currency !== undefined
+      || data.invoice_date !== undefined
+      || data.exchange_rate !== undefined;
+
     if (data.currency !== undefined) updatePayload.currency = data.currency;
-    if (data.exchange_rate !== undefined) updatePayload.exchange_rate = data.exchange_rate;
+    if (data.exchange_rate !== undefined) {
+      updatePayload.exchange_rate = data.exchange_rate;
+    } else if (data.currency !== undefined || data.invoice_date !== undefined) {
+      updatePayload.exchange_rate = await this.resolveExchangeRate(auth.companyId, nextCurrency, nextDate);
+    }
     if (data.reason_code !== undefined) updatePayload.reason_code = data.reason_code;
     if (data.reason_desc !== undefined) updatePayload.reason_desc = data.reason_desc;
 
@@ -647,6 +659,19 @@ export class InvoiceService {
       .single();
 
     if (error) throw new Error(`Failed to update invoice: ${error.message}`);
+
+    if (fxMaterialChange) {
+      const rate = Number(updatePayload.exchange_rate ?? updated.exchange_rate);
+      await this.recalculateTotals(invoiceId, rate);
+      await this.recordBookingDecision(
+        auth,
+        invoiceId,
+        data.exchange_rate !== undefined,
+        data.fx_override_reason,
+      );
+      return await this.fetchInvoiceOrThrow(invoiceId);
+    }
+
     return updated as Invoice;
   }
 
@@ -798,6 +823,25 @@ export class InvoiceService {
     }
 
     return Number(rate.rate);
+  }
+
+  private async recordBookingDecision(
+    auth: AuthContext,
+    invoiceId: string,
+    explicitRateSupplied: boolean,
+    overrideReason?: string,
+  ): Promise<void> {
+    await callRpc<string>(getAdminClient(), 'fx_record_booking_decision', {
+      p_company_id: auth.companyId,
+      p_transaction_type: 'invoice',
+      p_transaction_id: invoiceId,
+      p_actor_user_id: auth.userId,
+      p_explicit_rate_supplied: explicitRateSupplied,
+      p_source_category: null,
+      p_fx_reference_rate_id: null,
+      p_override_reason: overrideReason ?? null,
+      p_import_origin: null,
+    });
   }
 
   /**

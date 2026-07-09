@@ -245,6 +245,8 @@ export interface Invoice {
   currency: string;
   exchange_rate: number;
   base_currency: string;
+  fx_source_category: string | null;
+  fx_decision_id: string | null;
   subtotal: number;
   tax_total: number;
   total_amount: number;
@@ -312,6 +314,8 @@ export interface Receipt {
   currency: string;
   exchange_rate: number;
   base_currency: string;
+  fx_source_category: string | null;
+  fx_decision_id: string | null;
   receipt_amount: number;
   base_amount: number;
   allocated_amount: number;

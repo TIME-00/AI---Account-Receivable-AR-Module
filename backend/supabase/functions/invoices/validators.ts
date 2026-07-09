@@ -36,6 +36,7 @@ export interface CreateInvoiceInput {
   customer_id: string;
   currency: string;
   exchange_rate?: number;
+  fx_override_reason?: string;
   reference_no?: string;
   internal_remarks?: string;
   invoice_remarks?: string;
@@ -97,6 +98,16 @@ export function validateCreateInvoice(body: Record<string, unknown>): CreateInvo
   // Optional fields
   if (body.exchange_rate !== undefined) {
     result.exchange_rate = requirePositiveNumber(body.exchange_rate, 'exchange_rate');
+  }
+  if (body.fx_override_reason !== undefined) {
+    result.fx_override_reason = requireString(body.fx_override_reason, 'fx_override_reason');
+    if (result.fx_override_reason.trim().length < 5) {
+      throw new ValidationError(
+        'fx_override_reason must be at least 5 characters.',
+        { field: 'fx_override_reason' },
+      );
+    }
+    validateMaxLength(result.fx_override_reason, 500, 'fx_override_reason');
   }
 
   result.reference_no = optionalString(body.reference_no) ?? undefined;

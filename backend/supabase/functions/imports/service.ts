@@ -1030,21 +1030,41 @@ export class ImportService {
           rowPatch.receipt_id = created.id;
 
           if (autoPost) {
-            try {
-              await this.receiptService.postReceipt(auth, created.id);
-              postedCount += 1;
-              rowStatus = 'Posted';
-              mappedData = {
-                ...mappedData,
-                posting_status: 'Posted',
-              };
-            } catch (postError) {
+            const explicitRateSupplied = receiptInput.exchange_rate !== undefined;
+            const { data: company } = await this.client
+              .from('companies')
+              .select('base_currency')
+              .eq('id', auth.companyId)
+              .single();
+            const explicitSameCurrencyParity = explicitRateSupplied
+              && receiptInput.currency === company?.base_currency
+              && Number(receiptInput.exchange_rate) === 1;
+
+            if (explicitRateSupplied && !explicitSameCurrencyParity) {
               rowStatus = 'Created';
               mappedData = {
                 ...mappedData,
-                posting_status: 'Error',
-                posting_error: this.errorMessage(postError),
+                posting_status: 'HeldGovernance',
+                posting_error:
+                  'Explicit imported FX rate is governed as MANUAL_OVERRIDE and requires review before posting.',
               };
+            } else {
+              try {
+                await this.receiptService.postReceipt(auth, created.id);
+                postedCount += 1;
+                rowStatus = 'Posted';
+                mappedData = {
+                  ...mappedData,
+                  posting_status: 'Posted',
+                };
+              } catch (postError) {
+                rowStatus = 'Created';
+                mappedData = {
+                  ...mappedData,
+                  posting_status: 'Error',
+                  posting_error: this.errorMessage(postError),
+                };
+              }
             }
 
             if (rowStatus === 'Posted') {

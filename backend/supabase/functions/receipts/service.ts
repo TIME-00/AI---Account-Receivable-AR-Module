@@ -133,6 +133,8 @@ export class ReceiptService {
       throw new Error(`Failed to create receipt: ${error.message}`);
     }
 
+    await this.recordBookingDecision(auth, receipt.id, data.exchange_rate !== undefined, data.fx_override_reason);
+
     return receipt as Receipt;
   }
 
@@ -526,5 +528,24 @@ export class ReceiptService {
       );
     }
     return Number(rate.rate);
+  }
+
+  private async recordBookingDecision(
+    auth: AuthContext,
+    receiptId: string,
+    explicitRateSupplied: boolean,
+    overrideReason?: string,
+  ): Promise<void> {
+    await callRpc<string>(getAdminClient(), 'fx_record_booking_decision', {
+      p_company_id: auth.companyId,
+      p_transaction_type: 'receipt',
+      p_transaction_id: receiptId,
+      p_actor_user_id: auth.userId,
+      p_explicit_rate_supplied: explicitRateSupplied,
+      p_source_category: null,
+      p_fx_reference_rate_id: null,
+      p_override_reason: overrideReason ?? null,
+      p_import_origin: null,
+    });
   }
 }
