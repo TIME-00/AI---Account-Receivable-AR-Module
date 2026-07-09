@@ -649,6 +649,33 @@ export class InvoiceService {
     if (data.reason_code !== undefined) updatePayload.reason_code = data.reason_code;
     if (data.reason_desc !== undefined) updatePayload.reason_desc = data.reason_desc;
 
+    if (fxMaterialChange) {
+      const governedRate = Number(updatePayload.exchange_rate ?? invoice.exchange_rate);
+      await callRpc<string>(getAdminClient(), 'fx_update_governed_invoice_fx', {
+        p_company_id: auth.companyId,
+        p_invoice_id: invoiceId,
+        p_actor_user_id: auth.userId,
+        p_currency: nextCurrency,
+        p_invoice_date: nextDate,
+        p_exchange_rate: governedRate,
+        p_explicit_rate_supplied: data.exchange_rate !== undefined,
+        p_override_reason: data.fx_override_reason ?? null,
+      });
+
+      const nonProtectedPayload = { ...updatePayload };
+      delete nonProtectedPayload.currency;
+      delete nonProtectedPayload.invoice_date;
+      delete nonProtectedPayload.exchange_rate;
+      if (Object.keys(nonProtectedPayload).length > 0) {
+        const { error: nonProtectedError } = await this.client
+          .from('invoices')
+          .update(nonProtectedPayload)
+          .eq('id', invoiceId);
+        if (nonProtectedError) throw new Error(`Failed to update invoice: ${nonProtectedError.message}`);
+      }
+      return await this.fetchInvoiceOrThrow(invoiceId);
+    }
+
     if (Object.keys(updatePayload).length === 0) return invoice;
 
     const { data: updated, error } = await this.client
@@ -659,18 +686,6 @@ export class InvoiceService {
       .single();
 
     if (error) throw new Error(`Failed to update invoice: ${error.message}`);
-
-    if (fxMaterialChange) {
-      const rate = Number(updatePayload.exchange_rate ?? updated.exchange_rate);
-      await this.recalculateTotals(invoiceId, rate);
-      await this.recordBookingDecision(
-        auth,
-        invoiceId,
-        data.exchange_rate !== undefined,
-        data.fx_override_reason,
-      );
-      return await this.fetchInvoiceOrThrow(invoiceId);
-    }
 
     return updated as Invoice;
   }

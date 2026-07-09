@@ -60,3 +60,71 @@ Deno.test('Batch 9D-C invoice and receipt services record booking decisions', as
   assert(invoiceService.includes('data.exchange_rate !== undefined'));
   assert(receiptService.includes('data.exchange_rate !== undefined'));
 });
+
+Deno.test('Batch 9D-C governed FX mutation RPCs own snapshot and decision changes', async () => {
+  const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+  const invoiceService = await read('invoices/service.ts');
+  const receiptService = await read('receipts/service.ts');
+
+  assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_update_governed_invoice_fx');
+  assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_update_governed_receipt_fx');
+  assertStringIncludes(migration023, 'FOR UPDATE');
+  assertStringIncludes(migration023, 'UPDATE public.invoices');
+  assertStringIncludes(migration023, 'UPDATE public.receipts');
+  assertStringIncludes(migration023, 'RETURN public.fx_record_booking_decision');
+
+  assertStringIncludes(invoiceService, "'fx_update_governed_invoice_fx'");
+  assertStringIncludes(receiptService, 'updateDraftReceiptFx');
+  assertStringIncludes(receiptService, "'fx_update_governed_receipt_fx'");
+  assertStringIncludes(receiptService, 'Receipt booking-rate governance failed and draft cleanup failed');
+});
+
+Deno.test('Batch 9D-C approval authorization is database-derived and fail-closed', async () => {
+  const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+
+  assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_booking_actor_has_role');
+  assertStringIncludes(migration023, 'FROM public.user_roles ur');
+  assertStringIncludes(migration023, 'ur.user_id = p_actor_user_id');
+  assertStringIncludes(migration023, 'ur.company_id = p_company_id');
+  assertStringIncludes(migration023, 'ur.is_active = true');
+  assertStringIncludes(migration023, 'missing deviation baseline cannot be approved');
+  assertStringIncludes(migration023, "ARRAY['AR Supervisor', 'Finance Manager']");
+  assertStringIncludes(migration023, "ARRAY['Finance Manager']");
+});
+
+Deno.test('Batch 9D-C stale reference governance is enforced', async () => {
+  const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+
+  assertStringIncludes(migration023, 'v_stale_reference := (v_tx.transaction_date - v_reference.effective_date) > 7');
+  assertStringIncludes(migration023, 'stale_reference');
+  assertStringIncludes(migration023, 'stale reference decision is not postable');
+});
+
+Deno.test('Batch 9D-C posting guard runs before journal mutation and status transition', async () => {
+  const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+
+  assertStringIncludes(migration023, 'CREATE OR REPLACE FUNCTION public.fx_guard_journal_entry_booking_decision');
+  assertStringIncludes(migration023, "NEW.source_type IN ('INV', 'CN', 'DN')");
+  assertStringIncludes(migration023, "NEW.source_type = 'RCT'");
+  assertStringIncludes(migration023, 'BEFORE INSERT ON public.journal_entries');
+  assertStringIncludes(migration023, 'fx_guard_invoice_posting_decision');
+  assertStringIncludes(migration023, 'fx_guard_receipt_posting_decision');
+});
+
+Deno.test('Batch 9D-C audit event vocabulary is emitted by implemented flows', async () => {
+  const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+
+  for (const eventType of [
+    'BaselineResolved',
+    'CatalogSelected',
+    'ReferenceSelected',
+    'OverrideSubmitted',
+    'ApprovalRequired',
+    'Approved',
+    'Rejected',
+    'DecisionSuperseded',
+    'Posted',
+  ]) {
+    assertStringIncludes(migration023, `'${eventType}'`);
+  }
+});

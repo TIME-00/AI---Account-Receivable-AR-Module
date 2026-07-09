@@ -133,7 +133,21 @@ export class ReceiptService {
       throw new Error(`Failed to create receipt: ${error.message}`);
     }
 
-    await this.recordBookingDecision(auth, receipt.id, data.exchange_rate !== undefined, data.fx_override_reason);
+    try {
+      await this.recordBookingDecision(auth, receipt.id, data.exchange_rate !== undefined, data.fx_override_reason);
+    } catch (error) {
+      const { error: cleanupError } = await this.client
+        .from('receipts')
+        .delete()
+        .eq('id', receipt.id)
+        .eq('status', 'Draft');
+      if (cleanupError) {
+        throw new Error(
+          `Receipt booking-rate governance failed and draft cleanup failed: ${cleanupError.message}`,
+        );
+      }
+      throw error;
+    }
 
     return receipt as Receipt;
   }
@@ -547,5 +561,46 @@ export class ReceiptService {
       p_override_reason: overrideReason ?? null,
       p_import_origin: null,
     });
+  }
+
+  async updateDraftReceiptFx(
+    auth: AuthContext,
+    receiptId: string,
+    input: {
+      currency?: string;
+      receipt_date?: string;
+      exchange_rate?: number;
+      fx_override_reason?: string;
+    },
+  ): Promise<Receipt> {
+    requireRole(auth, 'AR Clerk');
+    validateUUID(receiptId, 'id');
+    const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
+    if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
+    if (receipt.status !== 'Draft') {
+      throw new ValidationError('Only Draft receipts can have governed FX edits.', {
+        receipt_id: receiptId,
+        status: receipt.status,
+      });
+    }
+    await requireCustomerAccess(auth, receipt.customer_id);
+    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
+
+    const nextCurrency = input.currency ?? receipt.currency;
+    const nextDate = input.receipt_date ?? receipt.receipt_date;
+    const nextRate = input.exchange_rate ?? await this.resolveExchangeRate(auth.companyId, nextCurrency, nextDate);
+
+    await callRpc<string>(getAdminClient(), 'fx_update_governed_receipt_fx', {
+      p_company_id: auth.companyId,
+      p_receipt_id: receiptId,
+      p_actor_user_id: auth.userId,
+      p_currency: nextCurrency,
+      p_receipt_date: nextDate,
+      p_exchange_rate: nextRate,
+      p_explicit_rate_supplied: input.exchange_rate !== undefined,
+      p_override_reason: input.fx_override_reason ?? null,
+    });
+
+    return await fetchById<Receipt>(this.client, 'receipts', receiptId);
   }
 }
