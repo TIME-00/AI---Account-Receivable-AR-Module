@@ -149,6 +149,75 @@ Deno.test('Batch 9D-C migration 025 narrows supersession validation without broa
   assert(functionReplacementCount === 1, 'migration 025 should replace only fx_validate_booking_rate_decision');
 });
 
+Deno.test('Batch 9D-C migration 026 preserves trusted import-origin provenance', async () => {
+  const migration026 = await read('../../../database/026_fx_booking_decision_import_origin_provenance_fix.sql');
+  const importsService = await read('imports/service.ts');
+  const invoiceService = await read('invoices/service.ts');
+  const receiptService = await read('receipts/service.ts');
+
+  assertStringIncludes(migration026, 'CREATE OR REPLACE FUNCTION public.fx_preserve_import_origin_on_supersession()');
+  assertStringIncludes(migration026, 'SECURITY DEFINER');
+  assertStringIncludes(migration026, 'SET search_path = public');
+  assertStringIncludes(migration026, 'NEW.import_origin IS NULL AND NEW.supersedes_decision_id IS NOT NULL');
+  assertStringIncludes(migration026, 'NEW.import_origin := v_prior_import_origin');
+  assertStringIncludes(migration026, 'CREATE TRIGGER trg_fx_brd_preserve_import_origin');
+  assertStringIncludes(migration026, 'BEFORE INSERT ON public.fx_booking_rate_decisions');
+
+  assertStringIncludes(migration026, 'CREATE OR REPLACE FUNCTION public.fx_create_governed_invoice_draft(');
+  assertStringIncludes(migration026, 'p_import_origin JSONB');
+  assertStringIncludes(migration026, 'p_lines JSONB DEFAULT');
+  assertStringIncludes(migration026, 'CREATE OR REPLACE FUNCTION public.fx_create_governed_receipt_draft(');
+  assertStringIncludes(migration026, 'IF p_import_origin IS NOT NULL AND jsonb_typeof(p_import_origin) <> \'object\'');
+  assertStringIncludes(migration026, 'p_import_origin');
+  assertStringIncludes(migration026, 'GRANT EXECUTE ON FUNCTION public.fx_create_governed_invoice_draft(UUID, UUID, JSONB, JSONB, JSONB, BOOLEAN, TEXT) TO service_role');
+  assertStringIncludes(migration026, 'GRANT EXECUTE ON FUNCTION public.fx_create_governed_receipt_draft(UUID, UUID, JSONB, JSONB, BOOLEAN, TEXT) TO service_role');
+
+  assert(!migration026.includes('LegacyBackfilled'), 'migration 026 must not rerun historical backfill');
+  assert(!migration026.includes('UPDATE public.invoices i'), 'migration 026 must not rewrite existing invoice pointers');
+  assert(!migration026.includes('UPDATE public.receipts r'), 'migration 026 must not rewrite existing receipt pointers');
+  assert(!migration026.includes('post_invoice'), 'migration 026 must not replace posting functions');
+  assert(!migration026.includes('post_receipt'), 'migration 026 must not replace posting functions');
+
+  const createFunctionCount = migration026.match(/CREATE OR REPLACE FUNCTION public\./g)?.length ?? 0;
+  assert(createFunctionCount === 3, 'migration 026 should replace only import-origin helper and import-aware create overloads');
+
+  assertStringIncludes(importsService, 'function importOriginPayload(batch: ImportBatch, row: ImportRow)');
+  for (const trustedField of [
+    "source: 'csv_xlsx_import'",
+    'batch_id: batch.id',
+    'row_id: row.id',
+    'row_number: row.row_number',
+    'batch_name: batch.batch_name',
+    'import_type: batch.import_type',
+    'file_type: batch.file_type',
+    'file_name: batch.file_name',
+    'file_path: batch.file_path',
+  ]) {
+    assertStringIncludes(importsService, trustedField);
+  }
+
+  assertOrdered(importsService, [
+    'const importOrigin = importOriginPayload(batch, row);',
+    'created = await this.invoiceService.createInvoice(auth, header, lines, { importOrigin });',
+  ]);
+  assertOrdered(importsService, [
+    'const importOrigin = importOriginPayload(batch, row);',
+    'created = await this.receiptService.createReceipt(auth, receiptInput, { importOrigin });',
+  ]);
+
+  assertStringIncludes(invoiceService, 'export interface CreateInvoiceOptions');
+  assertStringIncludes(invoiceService, 'importOrigin?: Record<string, unknown>');
+  assertStringIncludes(invoiceService, 'options: CreateInvoiceOptions = {}');
+  assertStringIncludes(invoiceService, 'if (options.importOrigin !== undefined)');
+  assertStringIncludes(invoiceService, 'rpcArgs.p_import_origin = options.importOrigin');
+
+  assertStringIncludes(receiptService, 'export interface CreateReceiptOptions');
+  assertStringIncludes(receiptService, 'importOrigin?: Record<string, unknown>');
+  assertStringIncludes(receiptService, 'options: CreateReceiptOptions = {}');
+  assertStringIncludes(receiptService, 'if (options.importOrigin !== undefined)');
+  assertStringIncludes(receiptService, 'rpcArgs.p_import_origin = options.importOrigin');
+});
+
 Deno.test('Batch 9D-C immutability predicate rejects protected changes outside Draft-to-Draft', async () => {
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
 
@@ -191,7 +260,7 @@ Deno.test('Batch 9D-C imports preserve explicit FX governance fields into create
     'mappedData = {',
     '...row.mapped_data',
     'const header = validateCreateInvoice(mappedData)',
-    'created = await this.invoiceService.createInvoice(auth, header, lines)',
+    'created = await this.invoiceService.createInvoice(auth, header, lines, { importOrigin })',
   ]);
 
   assertOrdered(importsService, [
@@ -199,7 +268,7 @@ Deno.test('Batch 9D-C imports preserve explicit FX governance fields into create
     'mappedData = {',
     '...row.mapped_data',
     'const receiptInput = validateCreateReceipt(mappedData)',
-    'created = await this.receiptService.createReceipt(auth, receiptInput)',
+    'created = await this.receiptService.createReceipt(auth, receiptInput, { importOrigin })',
   ]);
 });
 

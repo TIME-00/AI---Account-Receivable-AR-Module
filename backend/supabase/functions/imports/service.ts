@@ -299,6 +299,20 @@ function importFxGovernanceFields(raw: Record<string, unknown>): {
   return fields;
 }
 
+function importOriginPayload(batch: ImportBatch, row: ImportRow): Record<string, unknown> {
+  return {
+    source: 'csv_xlsx_import',
+    batch_id: batch.id,
+    row_id: row.id,
+    row_number: row.row_number,
+    batch_name: batch.batch_name,
+    import_type: batch.import_type,
+    file_type: batch.file_type,
+    file_name: batch.file_name,
+    file_path: batch.file_path,
+  };
+}
+
 function rowError(field: string, message: string): Record<string, unknown> {
   return { field, message };
 }
@@ -1008,6 +1022,7 @@ export class ImportService {
 
       try {
         const resolved = await this.resolveOrCreateImportCustomer(auth, row.raw_data, resolvedCustomers);
+        const importOrigin = importOriginPayload(batch, row);
         if (resolved.created) {
           createdCustomerIds.add(resolved.customer.id);
         } else if (!createdCustomerIds.has(resolved.customer.id)) {
@@ -1029,7 +1044,7 @@ export class ImportService {
           await this.assertNoDuplicateReference(auth.companyId, resolved.customer.id, asString(mappedData, 'reference_no'));
           const header = validateCreateInvoice(mappedData);
           const lines = validateInvoiceLines(row.mapped_data.lines);
-          created = await this.invoiceService.createInvoice(auth, header, lines);
+          created = await this.invoiceService.createInvoice(auth, header, lines, { importOrigin });
           rowPatch.invoice_id = created.id;
         } else {
           const bankAccount = await this.resolveBankAccount(auth.companyId, row.raw_data);
@@ -1058,7 +1073,7 @@ export class ImportService {
             continue;
           }
 
-          created = await this.receiptService.createReceipt(auth, receiptInput);
+          created = await this.receiptService.createReceipt(auth, receiptInput, { importOrigin });
           rowPatch.receipt_id = created.id;
 
           if (autoPost) {

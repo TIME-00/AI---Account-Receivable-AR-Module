@@ -41,6 +41,10 @@ import { JournalEntryService } from '../journal-entries/service.ts';
 import type { CreateReceiptInput, PostReceiptInput, CancelReceiptInput, BounceReceiptInput } from './validators.ts';
 import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
 
+export interface CreateReceiptOptions {
+  importOrigin?: Record<string, unknown>;
+}
+
 // ─── Receipt Service ────────────────────────────────────────────────────────
 
 export class ReceiptService {
@@ -63,6 +67,7 @@ export class ReceiptService {
   async createReceipt(
     auth: AuthContext,
     data: CreateReceiptInput,
+    options: CreateReceiptOptions = {},
   ): Promise<Receipt> {
     requireRole(auth, 'AR Clerk');
     await requireCustomerAccess(auth, data.customer_id);
@@ -119,13 +124,17 @@ export class ReceiptService {
 
     let receiptId: string;
     try {
-      receiptId = await callRpc<string>(getAdminClient(), 'fx_create_governed_receipt_draft', {
+      const rpcArgs: Record<string, unknown> = {
         p_company_id: auth.companyId,
         p_actor_user_id: auth.userId,
         p_receipt: receiptPayload,
         p_explicit_rate_supplied: data.exchange_rate !== undefined,
         p_override_reason: data.fx_override_reason ?? null,
-      });
+      };
+      if (options.importOrigin !== undefined) {
+        rpcArgs.p_import_origin = options.importOrigin;
+      }
+      receiptId = await callRpc<string>(getAdminClient(), 'fx_create_governed_receipt_draft', rpcArgs);
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key')) {
         throw new BusinessError('DUPLICATE_RECEIPT', `Receipt number ${receiptNo} already exists. Please retry.`, 409);

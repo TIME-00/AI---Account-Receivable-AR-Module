@@ -38,6 +38,10 @@ import { JournalEntryService } from '../journal-entries/service.ts';
 import { CustomerService } from '../customers/service.ts';
 import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
 
+export interface CreateInvoiceOptions {
+  importOrigin?: Record<string, unknown>;
+}
+
 // ─── Invoice Service ────────────────────────────────────────────────────────
 
 export class InvoiceService {
@@ -91,6 +95,7 @@ export class InvoiceService {
     auth: AuthContext,
     data: CreateInvoiceInput,
     lines?: CreateInvoiceLineInput[],
+    options: CreateInvoiceOptions = {},
   ): Promise<Invoice & { lines: InvoiceLine[] }> {
     requireRole(auth, 'AR Clerk');
     await requireCustomerAccess(auth, data.customer_id);
@@ -208,14 +213,18 @@ export class InvoiceService {
 
     let invoiceId: string;
     try {
-      invoiceId = await callRpc<string>(getAdminClient(), 'fx_create_governed_invoice_draft', {
+      const rpcArgs: Record<string, unknown> = {
         p_company_id: auth.companyId,
         p_actor_user_id: auth.userId,
         p_invoice: invoicePayload,
         p_lines: lineRows,
         p_explicit_rate_supplied: data.exchange_rate !== undefined,
         p_override_reason: data.fx_override_reason ?? null,
-      });
+      };
+      if (options.importOrigin !== undefined) {
+        rpcArgs.p_import_origin = options.importOrigin;
+      }
+      invoiceId = await callRpc<string>(getAdminClient(), 'fx_create_governed_invoice_draft', rpcArgs);
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key')) {
         throw new BusinessError('DUPLICATE_INVOICE', `Invoice number ${invoiceNo} already exists. Please retry.`, 409);

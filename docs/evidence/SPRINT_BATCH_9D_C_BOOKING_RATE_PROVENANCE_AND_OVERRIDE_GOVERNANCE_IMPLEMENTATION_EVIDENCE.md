@@ -34,6 +34,8 @@ RT-16 Import Matrix: **FAILED AT EXPLICIT FOREIGN IMPORTED FX**
 
 Targeted import-governance remediation: **COMPLETED LOCALLY**
 
+Targeted import-origin provenance remediation: **COMPLETED LOCALLY**
+
 Production action: **NOT PERFORMED**
 
 ## Baseline
@@ -85,6 +87,13 @@ Targeted import-governance fix baseline:
 ```text
 branch: main
 HEAD/origin: 06bff1cfca1dd2917d72de8aa87f115bdd0c4322
+```
+
+Targeted import-origin provenance fix baseline:
+
+```text
+branch: main
+HEAD/origin: 229280058f8781c4b9fdda7b1b79367401fcd7c2
 ```
 
 ## Staging RT-16 Import Governance Failure and Local Remediation
@@ -168,6 +177,87 @@ Local remediation:
 
 No staging cleanup was performed after the RT-16E failure because the controlled
 records remain failure evidence.
+
+## Import-Origin Provenance Gap and Local Remediation
+
+The targeted import-governance mapping fix commit:
+
+```text
+229280058f8781c4b9fdda7b1b79367401fcd7c2
+fix(imports): preserve explicit FX governance fields
+```
+
+was source-reviewed as closing the explicit FX field-loss defect:
+
+```text
+exchange_rate: preserved from raw_data into mapped_data
+fx_override_reason: preserved from raw_data into mapped_data
+invoice normal/review-required paths: source review PASS
+receipt normal/review-required paths: source review PASS
+spread-order overwrite risk: none found
+receipt explicit non-parity FX HeldGovernance path: reachable
+missing override reason: fail closed
+invalid / non-positive explicit rate: fail closed
+```
+
+The same review identified a remaining provenance gap:
+
+```text
+fx_booking_rate_decisions.import_origin was not directly populated by CSV/XLSX
+governed create paths.
+```
+
+Relational traceability was already present through:
+
+```text
+import_batches.id
+  -> import_rows.batch_id
+  -> import_rows.invoice_id / receipt_id
+  -> transaction.fx_decision_id
+  -> fx_booking_rate_decisions.id
+```
+
+However, direct governance provenance was missing because:
+
+- `fx_record_booking_decision(... p_import_origin ...)` already writes
+  `p_import_origin` into `fx_booking_rate_decisions.import_origin`;
+- the already-applied governed create RPCs
+  `fx_create_governed_invoice_draft(...)` and
+  `fx_create_governed_receipt_draft(...)` did not expose an import-origin
+  parameter and passed `NULL` to `fx_record_booking_decision`;
+- CSV/XLSX import execution therefore could not directly populate decision
+  import-origin metadata even though batch/row relational traceability existed.
+
+Local import-origin remediation:
+
+- `backend/supabase/functions/imports/service.ts` now constructs a trusted
+  server-side import-origin payload from the loaded import batch and row
+  context. It does not trust spreadsheet/user-provided `import_origin` fields.
+- The payload includes batch id, row id, row number, batch name, import type,
+  file type, file name, file path/source reference, and a fixed
+  `csv_xlsx_import` source marker.
+- `InvoiceService.createInvoice(...)` and `ReceiptService.createReceipt(...)`
+  now accept an optional internal `importOrigin` option; non-import callers
+  remain source-compatible and continue to omit import provenance.
+- Import execution passes the trusted payload into the service create calls for
+  both invoices and receipts.
+- Forward migration
+  `database/026_fx_booking_decision_import_origin_provenance_fix.sql` adds
+  import-aware governed create overloads that pass `p_import_origin` through to
+  `fx_record_booking_decision`.
+- Migration `026` also installs a narrow BEFORE INSERT trigger helper that
+  preserves the previous decision version's `import_origin` when an imported
+  Draft transaction later creates a superseding booking decision and no new
+  import-origin payload is supplied.
+
+Staging status for this remediation:
+
+```text
+imports Edge deployment: NOT YET PERFORMED
+migration 026 staging apply: NOT YET PERFORMED
+RT-16 rerun after provenance remediation: NOT YET PERFORMED
+Batch 9D-C closure: NOT CLAIMED
+```
 
 ## Staging Migration 022 Failure and Local Remediation
 
@@ -583,7 +673,7 @@ deno test --no-lock --allow-read=../../.. --config deno.json fx_booking_governan
 Result after remediation:
 
 ```text
-13 passed / 0 failed
+14 passed / 0 failed
 ```
 
 Covered:
@@ -593,6 +683,8 @@ Covered:
 - explicit imported FX auto-post hold;
 - explicit imported FX field preservation from CSV/XLSX raw rows through
   mapped invoice/receipt create inputs;
+- trusted import-origin provenance propagation from import batch/row context
+  through invoice/receipt create services into import-aware governed create RPCs;
 - atomic governed invoice/receipt create RPC wiring;
 - governed invoice/receipt FX mutation RPC wiring;
 - DB-derived approval role checks;
@@ -601,6 +693,8 @@ Covered:
 - migration 022 ordering so transaction-pointer FKs and RLS/privilege ALTERs occur before historical backfill DML;
 - migration 024 optional source provenance hardening for `fx_record_booking_decision`;
 - migration 025 narrow lifecycle-only supersession validation for historical decision versions;
+- migration 026 import-aware governed create overloads and import-origin
+  supersession preservation;
 - journal-entry/status guard defense-in-depth;
 - audit event emission vocabulary.
 
@@ -632,8 +726,11 @@ Result after remediation:
 - RT-16 stopped at explicit foreign imported FX because import mapping dropped
   `exchange_rate` and `fx_override_reason`, causing catalog substitution and
   unattended posting.
-- Local import-governance remediation has been completed but has not yet been
-  technically re-reviewed or deployed to staging.
+- Local import-governance remediation has been completed and source-reviewed.
+- The same targeted review identified direct governance `import_origin`
+  provenance as missing for CSV/XLSX create paths. Local import-origin
+  provenance remediation is now completed but has not yet been technically
+  re-reviewed, applied to staging, or deployed to staging.
 - Local Batch 9D-C tests are structural/source-order checks, not a substitute for staging SQL runtime proof.
 - No live provider call was made.
 - The RT-05 runtime stop preserved controlled Batch 9D-C branch-smoke evidence records and captured no pre-existing financial fingerprint drift.
@@ -647,6 +744,11 @@ Edge redeployment during local import-governance fix: NO
 migration apply during local import-governance fix: NO
 new staging test data during local import-governance fix: NO
 preserved RT-16E failure evidence deleted: NO
+staging mutation during local import-origin provenance fix: NO
+Edge redeployment during local import-origin provenance fix: NO
+remote SQL during local import-origin provenance fix: NO
+new staging data during local import-origin provenance fix: NO
+failure evidence deleted during local import-origin provenance fix: NO
 staging financial data mutation: NO
 scheduler change: NO
 Vault change: NO
@@ -657,7 +759,7 @@ POST /allocations/auto: still AUTO_ALLOCATION_DISABLED
 
 ## Next Gate
 
-`Codex targeted import-governance fix Technical Re-Review`
+`Codex targeted import-origin provenance Technical Re-Review`
 
-Do not deploy the corrected `imports` Edge Function to staging until that
-targeted re-review passes.
+Do not apply corrective migration `026` or deploy the corrected `imports` Edge
+Function to staging until that targeted re-review passes.
