@@ -267,6 +267,38 @@ function hasImportValue(row: Record<string, unknown>, key: string): boolean {
   return asString(row, key) !== '';
 }
 
+function importFxGovernanceFields(raw: Record<string, unknown>): {
+  exchange_rate?: number;
+  fx_override_reason?: string;
+} {
+  const fields: { exchange_rate?: number; fx_override_reason?: string } = {};
+
+  if (hasImportValue(raw, 'exchange_rate')) {
+    fields.exchange_rate = parseNumber(asString(raw, 'exchange_rate'), 'exchange_rate');
+    if (fields.exchange_rate <= 0) {
+      throw new ValidationError('Field "exchange_rate" must be greater than 0.', {
+        field: 'exchange_rate',
+        value: asString(raw, 'exchange_rate'),
+      });
+    }
+  }
+  if (hasImportValue(raw, 'fx_override_reason')) {
+    fields.fx_override_reason = asString(raw, 'fx_override_reason');
+    if (fields.fx_override_reason.trim().length < 5) {
+      throw new ValidationError('fx_override_reason must be at least 5 characters.', {
+        field: 'fx_override_reason',
+      });
+    }
+    if (fields.fx_override_reason.length > 500) {
+      throw new ValidationError('Field "fx_override_reason" exceeds maximum length of 500.', {
+        field: 'fx_override_reason',
+      });
+    }
+  }
+
+  return fields;
+}
+
 function rowError(field: string, message: string): Record<string, unknown> {
   return { field, message };
 }
@@ -1923,6 +1955,7 @@ export class ImportService {
       const unitPrice = parseNumber(asString(raw, 'unit_price'), 'unit_price');
       const referenceNo = asString(raw, 'reference_no') || undefined;
       const taxCodeId = await this.resolveTaxCode(auth.companyId, raw);
+      const fxGovernanceFields = importFxGovernanceFields(raw);
 
       if (classification.action === 'Review Required') {
         const currency = (rawCurrency || 'MYR').toUpperCase();
@@ -1942,6 +1975,7 @@ export class ImportService {
           customer_input: null,
           customer_resolution: this.toCustomerResolutionDetails(classification),
           currency,
+          ...fxGovernanceFields,
           reference_no: referenceNo,
           internal_remarks: 'Created by Sprint F4 import draft-only flow',
           invoice_remarks: asString(raw, 'invoice_remarks') || undefined,
@@ -1977,6 +2011,7 @@ export class ImportService {
         customer_input: customerInput,
         customer_resolution: this.toCustomerResolutionDetails(classification),
         currency,
+        ...fxGovernanceFields,
         reference_no: referenceNo,
         internal_remarks: 'Created by Sprint F4 import draft-only flow',
         invoice_remarks: asString(raw, 'invoice_remarks') || undefined,
@@ -2028,6 +2063,7 @@ export class ImportService {
         || 'MYR'
       ).toUpperCase();
       const receiptAmount = parseNumber(asString(raw, 'amount'), 'amount');
+      const fxGovernanceFields = importFxGovernanceFields(raw);
       const referenceNo = asString(raw, 'receipt_reference') || undefined;
       const chequeDate = asString(raw, 'cheque_date') || undefined;
       const valueDate = asString(raw, 'value_date') || undefined;
@@ -2056,6 +2092,7 @@ export class ImportService {
           customer_resolution: this.toCustomerResolutionDetails(classification),
           payment_method: asString(raw, 'payment_method'),
           currency,
+          ...fxGovernanceFields,
           receipt_amount: receiptAmount,
           bank_account_id: bankAccount.bank_account_id,
           bank_account_resolution: bankAccount,
@@ -2134,6 +2171,7 @@ export class ImportService {
         customer_resolution: this.toCustomerResolutionDetails(classification),
         payment_method: asString(raw, 'payment_method'),
         currency: resolvedCurrency,
+        ...fxGovernanceFields,
         receipt_amount: receiptAmount,
         bank_account_id: bankAccount.bank_account_id,
         bank_account_resolution: bankAccount,

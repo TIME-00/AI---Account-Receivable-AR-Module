@@ -167,6 +167,42 @@ Deno.test('Batch 9D-C import explicit rate auto-post hold is wired', async () =>
   assertStringIncludes(importsService, "posting_status: 'HeldGovernance'");
 });
 
+Deno.test('Batch 9D-C imports preserve explicit FX governance fields into create inputs', async () => {
+  const importsService = await read('imports/service.ts');
+
+  assertStringIncludes(importsService, 'function importFxGovernanceFields');
+  assertStringIncludes(importsService, "hasImportValue(raw, 'exchange_rate')");
+  assertStringIncludes(importsService, "fields.exchange_rate = parseNumber(asString(raw, 'exchange_rate'), 'exchange_rate')");
+  assertStringIncludes(importsService, 'fields.exchange_rate <= 0');
+  assertStringIncludes(importsService, "hasImportValue(raw, 'fx_override_reason')");
+  assertStringIncludes(importsService, "fields.fx_override_reason = asString(raw, 'fx_override_reason')");
+
+  const helperAssignments = importsService.match(/const fxGovernanceFields = importFxGovernanceFields\(raw\);/g)?.length ?? 0;
+  assert(helperAssignments === 2, 'invoice and receipt validation must both derive import FX governance fields');
+
+  const mappedDataSpreads = importsService.match(/\.\.\.fxGovernanceFields/g)?.length ?? 0;
+  assert(
+    mappedDataSpreads >= 4,
+    'invoice and receipt mapped_data, including review-required branches, must preserve explicit FX governance fields',
+  );
+
+  assertOrdered(importsService, [
+    'if (batch.import_type === \'invoice\')',
+    'mappedData = {',
+    '...row.mapped_data',
+    'const header = validateCreateInvoice(mappedData)',
+    'created = await this.invoiceService.createInvoice(auth, header, lines)',
+  ]);
+
+  assertOrdered(importsService, [
+    '} else {',
+    'mappedData = {',
+    '...row.mapped_data',
+    'const receiptInput = validateCreateReceipt(mappedData)',
+    'created = await this.receiptService.createReceipt(auth, receiptInput)',
+  ]);
+});
+
 Deno.test('Batch 9D-C invoice and receipt create paths use atomic governed create RPCs', async () => {
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
   const invoiceService = await read('invoices/service.ts');

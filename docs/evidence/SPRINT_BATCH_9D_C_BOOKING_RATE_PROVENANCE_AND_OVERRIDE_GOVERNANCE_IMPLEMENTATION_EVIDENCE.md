@@ -14,7 +14,7 @@ Targeted migration 022 ordering remediation: **COMPLETED LOCALLY**
 
 Resumed staging migration/deployment execution: **COMPLETED THROUGH EDGE DEPLOYMENT**
 
-Staging runtime verification: **STOPPED AT RT-05**
+Staging runtime verification: **STOPPED AT RT-16E**
 
 Targeted runtime remediation: **COMPLETED LOCALLY**
 
@@ -22,7 +22,17 @@ Forward corrective migration 024 staging apply: **APPLIED + VERIFIED PASS**
 
 Targeted decision-versioning remediation: **COMPLETED LOCALLY**
 
-Forward corrective migration 025 staging apply: **NOT YET PERFORMED**
+Forward corrective migration 025 staging apply: **APPLIED + VERIFIED PASS**
+
+Focused RT-05 Invoice Versioning: **PASS**
+
+Focused RT-06 Receipt Versioning: **PASS**
+
+RT-01 through RT-15: **PASS**
+
+RT-16 Import Matrix: **FAILED AT EXPLICIT FOREIGN IMPORTED FX**
+
+Targeted import-governance remediation: **COMPLETED LOCALLY**
 
 Production action: **NOT PERFORMED**
 
@@ -69,6 +79,95 @@ Targeted decision-versioning fix baseline:
 branch: main
 HEAD/origin: 2e333eba706cb107427c881d17018aad07195ef3
 ```
+
+Targeted import-governance fix baseline:
+
+```text
+branch: main
+HEAD/origin: 06bff1cfca1dd2917d72de8aa87f115bdd0c4322
+```
+
+## Staging RT-16 Import Governance Failure and Local Remediation
+
+The resumed authorized Batch 9D-C staging runtime verification had already
+verified:
+
+```text
+migrations 022-025: APPLIED + VERIFIED PASS
+Focused RT-05 Invoice Versioning: PASS
+Focused RT-06 Receipt Versioning: PASS
+RT-01 through RT-15: PASS
+RT-19 Auto-Allocation Disabled: PASS
+```
+
+RT-16 then stopped on explicit foreign imported FX governance:
+
+```text
+RT-16A Invoice CSV BASE_PARITY: PASS
+RT-16B Invoice XLSX CATALOG: NOT EXECUTED - local fixture-generation issue
+RT-16C Receipt CSV BASE_PARITY: PASS
+RT-16D Receipt XLSX CATALOG: NOT EXECUTED - local fixture-generation issue
+RT-16E Explicit Foreign Imported FX: FAIL
+RT-16F Missing Governed Rate: PASS
+RT-16G Stale Reference: NOT EXECUTED - stopped after RT-16E failure
+RT-17: NOT EXECUTED
+RT-18 remaining flows: NOT EXECUTED in this continuation
+cleanup: NOT PERFORMED
+```
+
+Exact RT-16E staging input:
+
+```text
+currency: USD
+exchange_rate: 1.42
+fx_override_reason: B9DC explicit imported rate
+```
+
+Actual RT-16E staging result:
+
+```text
+import batch: eec33350-5fa0-4afc-820f-88e88e3d38d3
+import row: c0c47ccf-5b95-4c73-ad76-4ee2eef02e4d
+receipt: e54c89bd-43cd-4ba6-8b4f-6069c84fa0a7
+decision: 8bc6d0ee-1b24-4e10-8b20-12e32ae76e5d
+decision source: CATALOG
+catalog rate used: 1.35
+approval_status: NotRequired
+receipt status: Posted
+import row posting_status: Posted
+```
+
+Source root cause confirmed locally:
+
+- `validateCreateInvoice(...)` and `validateCreateReceipt(...)` already accept
+  `exchange_rate` and `fx_override_reason`.
+- `executeImport(...)` already builds invoice/receipt create inputs from
+  `mapped_data`.
+- receipt import auto-post already contains a downstream
+  `explicitRateSupplied` / `HeldGovernance` guard.
+- normal CSV/XLSX import validation omitted `exchange_rate` and
+  `fx_override_reason` when transforming `raw_data` into `mapped_data`, so
+  `receiptInput.exchange_rate` / `invoiceInput.exchange_rate` were undefined
+  during execute.
+- the downstream explicit-rate hold was therefore unreachable for normal
+  explicit-rate imports, allowing catalog substitution and unattended posting.
+
+Local remediation:
+
+- `backend/supabase/functions/imports/service.ts` now maps optional
+  `exchange_rate` and `fx_override_reason` from import `raw_data` into both
+  invoice and receipt `mapped_data`, including review-required branches.
+- supplied `exchange_rate` is parsed as numeric and must be positive.
+- supplied `fx_override_reason` is preserved and length-checked consistently
+  with the create validators.
+- execute input construction remains unchanged: `validateCreateInvoice` and
+  `validateCreateReceipt` receive the mapped values and pass them to the
+  existing governed create paths.
+- receipt import auto-post hold logic remains the existing downstream
+  `HeldGovernance` boundary.
+
+No staging cleanup was performed after the RT-16E failure because the controlled
+records remain failure evidence.
 
 ## Staging Migration 022 Failure and Local Remediation
 
@@ -484,7 +583,7 @@ deno test --no-lock --allow-read=../../.. --config deno.json fx_booking_governan
 Result after remediation:
 
 ```text
-12 passed / 0 failed
+13 passed / 0 failed
 ```
 
 Covered:
@@ -492,6 +591,8 @@ Covered:
 - root lineage and historical bootstrap invariants;
 - immutability predicate and trusted governed mutation guard;
 - explicit imported FX auto-post hold;
+- explicit imported FX field preservation from CSV/XLSX raw rows through
+  mapped invoice/receipt create inputs;
 - atomic governed invoice/receipt create RPC wiring;
 - governed invoice/receipt FX mutation RPC wiring;
 - DB-derived approval role checks;
@@ -525,8 +626,14 @@ Result after remediation:
 - A later authorized staging execution successfully applied and verified corrective migration `024`.
 - Branch smoke tests BR-01 through BR-06 passed after `024`.
 - Staging runtime verification then stopped at RT-05 with `BR-FX-GOVERNANCE: invoice decision currency mismatch`.
-- Corrective migration `025` has not yet been applied to staging.
-- SQL compile/runtime behavior of corrective migration `025` still requires a targeted technical re-review and explicit resumed staging execution.
+- Corrective migration `025` was later applied and verified on staging.
+- Focused invoice and receipt decision-versioning checks passed after `025`.
+- RT-01 through RT-15 passed; RT-19 passed.
+- RT-16 stopped at explicit foreign imported FX because import mapping dropped
+  `exchange_rate` and `fx_override_reason`, causing catalog substitution and
+  unattended posting.
+- Local import-governance remediation has been completed but has not yet been
+  technically re-reviewed or deployed to staging.
 - Local Batch 9D-C tests are structural/source-order checks, not a substitute for staging SQL runtime proof.
 - No live provider call was made.
 - The RT-05 runtime stop preserved controlled Batch 9D-C branch-smoke evidence records and captured no pre-existing financial fingerprint drift.
@@ -535,13 +642,11 @@ Result after remediation:
 ## Safety Boundary
 
 ```text
-staging corrective migration 025 apply: NO
-022 rerun during local decision-versioning fix: NO
-023 rerun during local decision-versioning fix: NO
-024 rerun during local decision-versioning fix: NO
-Edge redeployment during local decision-versioning fix: NO
-new staging test data during local decision-versioning fix: NO
-preserved staging failure evidence deleted: NO
+staging mutation during local import-governance fix: NO
+Edge redeployment during local import-governance fix: NO
+migration apply during local import-governance fix: NO
+new staging test data during local import-governance fix: NO
+preserved RT-16E failure evidence deleted: NO
 staging financial data mutation: NO
 scheduler change: NO
 Vault change: NO
@@ -552,6 +657,7 @@ POST /allocations/auto: still AUTO_ALLOCATION_DISABLED
 
 ## Next Gate
 
-`Codex targeted decision-versioning fix Technical Re-Review`
+`Codex targeted import-governance fix Technical Re-Review`
 
-Do not apply corrective migration 025 to staging until that targeted re-review passes.
+Do not deploy the corrected `imports` Edge Function to staging until that
+targeted re-review passes.
