@@ -14,11 +14,15 @@ Targeted migration 022 ordering remediation: **COMPLETED LOCALLY**
 
 Resumed staging migration/deployment execution: **COMPLETED THROUGH EDGE DEPLOYMENT**
 
-Staging runtime verification: **STOPPED AT RT-01**
+Staging runtime verification: **STOPPED AT RT-05**
 
 Targeted runtime remediation: **COMPLETED LOCALLY**
 
-Forward corrective migration 024 staging apply: **NOT YET PERFORMED**
+Forward corrective migration 024 staging apply: **APPLIED + VERIFIED PASS**
+
+Targeted decision-versioning remediation: **COMPLETED LOCALLY**
+
+Forward corrective migration 025 staging apply: **NOT YET PERFORMED**
 
 Production action: **NOT PERFORMED**
 
@@ -57,6 +61,13 @@ Targeted runtime-fix baseline:
 ```text
 branch: main
 HEAD/origin: d6d212cfceacf8769ed05e5471266d81a418d96a
+```
+
+Targeted decision-versioning fix baseline:
+
+```text
+branch: main
+HEAD/origin: 2e333eba706cb107427c881d17018aad07195ef3
 ```
 
 ## Staging Migration 022 Failure and Local Remediation
@@ -179,6 +190,108 @@ This evidence records the local runtime remediation only. It does not claim
 corrective migration 024 has been applied to staging, staging runtime PASS, or
 Batch 9D-C closure.
 
+## Resumed Staging Execution RT-05 Stop and Local Decision-Versioning Remediation
+
+The resumed authorized staging execution applied and verified corrective
+migration 024 on staging:
+
+```text
+staging project: gcdsdyegwjdcskpukqlq
+commit: 2e333eba706cb107427c881d17018aad07195ef3
+024: APPLIED + VERIFIED PASS
+```
+
+Effective post-024 function verification:
+
+```text
+fx_record_booking_decision:
+  scalar source provenance variables present: YES
+  unsafe v_exchange/v_reference CASE expressions absent: YES
+  SECURITY DEFINER retained: YES
+  search_path = public retained: YES
+  PUBLIC/anon/authenticated execute: revoked
+  service_role execute: granted
+```
+
+Branch smoke checkpoint:
+
+```text
+BR-01 BASE_PARITY Invoice: PASS
+BR-02 BASE_PARITY Receipt: PASS
+BR-03 CATALOG: PASS
+BR-04 REFERENCE_SELECTED: PASS
+BR-05 MANUAL_OVERRIDE: PASS
+BR-06 Decision/Event Provenance: PASS
+```
+
+Runtime matrix status after 024:
+
+```text
+RT-01 first staging attempt under applied 023:
+FAIL - old unassigned v_exchange RECORD defect
+
+RT-01 post-024 rerun path:
+PASS before RT-05 stop, with independent committed BR-01 proof
+
+RT-02:
+PASS inside aborted runtime block; requires clean final rerun for durable evidence
+
+RT-03:
+PASS before RT-05 stop, with independent committed BR-02 proof
+
+RT-04:
+PASS inside aborted runtime block; requires clean final rerun for durable evidence
+
+RT-05:
+FAIL
+
+exact error:
+BR-FX-GOVERNANCE: invoice decision currency mismatch
+
+RT-06 through RT-19:
+NOT EXECUTED - STOPPED AFTER RT-05 FAILURE
+```
+
+RT-05 root cause:
+
+- `fx_update_governed_invoice_fx` mutates the Draft invoice currency/rate;
+- `fx_record_booking_decision` then updates the prior current decision row to
+  `lifecycle_status = 'Superseded'`;
+- `trg_fx_validate_booking_rate_decision` fires on the old decision row
+  UPDATE;
+- `fx_validate_booking_rate_decision()` validates the historical old decision
+  currency pair against the newly edited current invoice snapshot;
+- the old decision pair no longer matches the new Draft invoice pair, so the
+  trigger raises `BR-FX-GOVERNANCE: invoice decision currency mismatch`.
+
+Local decision-versioning fix:
+
+- `database/025_fx_booking_decision_supersession_validation_fix.sql`
+  forward-replaces only `public.fx_validate_booking_rate_decision()`;
+- INSERT and material decision UPDATE validation remain fully enforced against
+  the linked transaction;
+- lifecycle-only transitions to `Superseded` are allowed to skip current
+  transaction currency/rate pair matching only after explicit checks prove all
+  material decision fields are unchanged;
+- the exception is symmetric for invoice and receipt decisions;
+- the migration reasserts the existing service-role-only privilege boundary;
+- no historical decisions, transaction snapshots, scheduler objects, Vault
+  entries, provider configuration, Edge Functions, or production resources are
+  mutated by the local fix.
+
+Current staging safety state from the stopped run:
+
+```text
+pre-existing financial drift: NONE DETECTED
+Batch 9D-B scheduler: UNCHANGED AND ACTIVE
+production action: NONE
+preserved Batch 9D-C failure evidence: NOT CLEANED
+```
+
+This evidence records the local decision-versioning remediation only. It does
+not claim corrective migration 025 has been applied to staging, staging runtime
+PASS, or Batch 9D-C closure.
+
 ## Database Artifacts
 
 ### `database/022_fx_booking_rate_governance.sql`
@@ -246,6 +359,35 @@ Does not contain:
 
 - historical backfill DML
 - transaction snapshot mutation outside the governed function behavior
+- scheduler/Vault/provider changes
+- production changes
+
+### `database/025_fx_booking_decision_supersession_validation_fix.sql`
+
+Forward corrective migration after staging runtime RT-05.
+
+Contains:
+
+- `CREATE OR REPLACE FUNCTION public.fx_validate_booking_rate_decision()`
+- exact existing return type / PL/pgSQL / `SECURITY DEFINER` /
+  `SET search_path = public`
+- narrow lifecycle-only `Superseded` handling for historical decision versions
+- explicit material-field immutability checks before the lifecycle-only
+  exception is enabled
+- invoice and receipt transaction-existence/company checks retained
+- current/new decision transaction currency validation retained for INSERT and
+  material UPDATE paths
+- source, baseline, root/version/lineage, and BASE_PARITY validations retained
+- privilege reassertion:
+  - revoke PUBLIC / anon / authenticated
+  - grant execute to service_role
+
+Does not contain:
+
+- historical backfill DML
+- existing decision correction DML
+- transaction snapshot rewrite
+- journal mutation
 - scheduler/Vault/provider changes
 - production changes
 
@@ -342,7 +484,7 @@ deno test --no-lock --allow-read=../../.. --config deno.json fx_booking_governan
 Result after remediation:
 
 ```text
-11 passed / 0 failed
+12 passed / 0 failed
 ```
 
 Covered:
@@ -357,6 +499,7 @@ Covered:
 - direct postability guard ordering inside forward-safe `post_invoice` / `post_receipt` replacements, before posting mutations;
 - migration 022 ordering so transaction-pointer FKs and RLS/privilege ALTERs occur before historical backfill DML;
 - migration 024 optional source provenance hardening for `fx_record_booking_decision`;
+- migration 025 narrow lifecycle-only supersession validation for historical decision versions;
 - journal-entry/status guard defense-in-depth;
 - audit event emission vocabulary.
 
@@ -379,23 +522,29 @@ Result after remediation:
 
 - First staging attempt of migration `022` failed safely with SQLSTATE `55006` and rolled back visible Batch 9D-C objects.
 - A later authorized staging execution successfully applied and verified `022`, successfully applied and verified `023`, and deployed the required staging Edge Functions.
-- Staging runtime verification stopped at RT-01 with SQLSTATE `55000` in `fx_record_booking_decision`.
-- Corrective migration `024` has not yet been applied to staging.
-- SQL compile/runtime behavior of corrective migration `024` still requires a targeted technical re-review and explicit resumed staging execution.
+- A later authorized staging execution successfully applied and verified corrective migration `024`.
+- Branch smoke tests BR-01 through BR-06 passed after `024`.
+- Staging runtime verification then stopped at RT-05 with `BR-FX-GOVERNANCE: invoice decision currency mismatch`.
+- Corrective migration `025` has not yet been applied to staging.
+- SQL compile/runtime behavior of corrective migration `025` still requires a targeted technical re-review and explicit resumed staging execution.
 - Local Batch 9D-C tests are structural/source-order checks, not a substitute for staging SQL runtime proof.
 - No live provider call was made.
-- The runtime stop captured no committed Batch 9D-C test rows and no pre-existing financial fingerprint drift.
+- The RT-05 runtime stop preserved controlled Batch 9D-C branch-smoke evidence records and captured no pre-existing financial fingerprint drift.
 - No frontend UX implementation was included; Batch 9D-D remains separate.
 
 ## Safety Boundary
 
 ```text
-staging corrective migration 024 apply: NO
-022 rerun during local runtime fix: NO
-023 rerun during local runtime fix: NO
-Edge redeployment during local runtime fix: NO
+staging corrective migration 025 apply: NO
+022 rerun during local decision-versioning fix: NO
+023 rerun during local decision-versioning fix: NO
+024 rerun during local decision-versioning fix: NO
+Edge redeployment during local decision-versioning fix: NO
+new staging test data during local decision-versioning fix: NO
+preserved staging failure evidence deleted: NO
 staging financial data mutation: NO
 scheduler change: NO
+Vault change: NO
 provider call: NO
 production action: NO
 POST /allocations/auto: still AUTO_ALLOCATION_DISABLED
@@ -403,6 +552,6 @@ POST /allocations/auto: still AUTO_ALLOCATION_DISABLED
 
 ## Next Gate
 
-`Codex targeted runtime-fix Technical Re-Review`
+`Codex targeted decision-versioning fix Technical Re-Review`
 
-Do not apply corrective migration 024 to staging until that targeted re-review passes.
+Do not apply corrective migration 025 to staging until that targeted re-review passes.

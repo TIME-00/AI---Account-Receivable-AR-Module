@@ -91,6 +91,64 @@ Deno.test('Batch 9D-C migration 024 hardens optional source provenance records',
   assert(functionReplacementCount === 1, 'migration 024 should replace only fx_record_booking_decision');
 });
 
+Deno.test('Batch 9D-C migration 025 narrows supersession validation without broad bypass', async () => {
+  const migration025 = await read('../../../database/025_fx_booking_decision_supersession_validation_fix.sql');
+
+  assertStringIncludes(migration025, 'CREATE OR REPLACE FUNCTION public.fx_validate_booking_rate_decision()');
+  assertStringIncludes(migration025, 'SECURITY DEFINER');
+  assertStringIncludes(migration025, 'SET search_path = public');
+  assertStringIncludes(migration025, "AND NEW.lifecycle_status = 'Superseded'");
+  assertStringIncludes(migration025, "OLD.lifecycle_status NOT IN ('Draft', 'Pending', 'Approved', 'Rejected')");
+  assertStringIncludes(migration025, 'Superseded transition may only change lifecycle_status and updated_at');
+  assertStringIncludes(migration025, 'v_lifecycle_only_supersession BOOLEAN := false');
+  assertStringIncludes(migration025, 'v_lifecycle_only_supersession := true');
+
+  for (const protectedField of [
+    'OLD.id IS DISTINCT FROM NEW.id',
+    'OLD.company_id IS DISTINCT FROM NEW.company_id',
+    'OLD.invoice_id IS DISTINCT FROM NEW.invoice_id',
+    'OLD.receipt_id IS DISTINCT FROM NEW.receipt_id',
+    'OLD.root_decision_id IS DISTINCT FROM NEW.root_decision_id',
+    'OLD.decision_version IS DISTINCT FROM NEW.decision_version',
+    'OLD.supersedes_decision_id IS DISTINCT FROM NEW.supersedes_decision_id',
+    'OLD.source_category IS DISTINCT FROM NEW.source_category',
+    'OLD.exchange_rate_id IS DISTINCT FROM NEW.exchange_rate_id',
+    'OLD.fx_reference_rate_id IS DISTINCT FROM NEW.fx_reference_rate_id',
+    'OLD.baseline_kind IS DISTINCT FROM NEW.baseline_kind',
+    'OLD.baseline_rate IS DISTINCT FROM NEW.baseline_rate',
+    'OLD.baseline_exchange_rate_id IS DISTINCT FROM NEW.baseline_exchange_rate_id',
+    'OLD.baseline_fx_reference_rate_id IS DISTINCT FROM NEW.baseline_fx_reference_rate_id',
+    'OLD.from_currency IS DISTINCT FROM NEW.from_currency',
+    'OLD.to_currency IS DISTINCT FROM NEW.to_currency',
+    'OLD.transaction_date IS DISTINCT FROM NEW.transaction_date',
+    'OLD.booked_rate IS DISTINCT FROM NEW.booked_rate',
+    'OLD.deviation_pct IS DISTINCT FROM NEW.deviation_pct',
+    'OLD.approval_status IS DISTINCT FROM NEW.approval_status',
+    'OLD.checker_user_id IS DISTINCT FROM NEW.checker_user_id',
+    'OLD.approved_by IS DISTINCT FROM NEW.approved_by',
+    'OLD.approved_at IS DISTINCT FROM NEW.approved_at',
+    'OLD.import_origin IS DISTINCT FROM NEW.import_origin',
+    'OLD.metadata IS DISTINCT FROM NEW.metadata',
+  ]) {
+    assertStringIncludes(migration025, protectedField);
+  }
+
+  assertStringIncludes(migration025, 'IF NOT v_lifecycle_only_supersession');
+  assertStringIncludes(migration025, 'BR-FX-GOVERNANCE: invoice decision currency mismatch');
+  assertStringIncludes(migration025, 'BR-FX-GOVERNANCE: receipt decision currency mismatch');
+  assertStringIncludes(migration025, 'BR-FX-GOVERNANCE: invalid catalog source');
+  assertStringIncludes(migration025, 'BR-FX-GOVERNANCE: invalid reference source');
+  assertStringIncludes(migration025, 'BR-FX-GOVERNANCE: invalid supersession lineage');
+  assertStringIncludes(migration025, 'BR-FX-GOVERNANCE: BASE_PARITY requires booked_rate = 1.0');
+
+  assert(!migration025.includes("IF NEW.lifecycle_status = 'Superseded' THEN\n    RETURN NEW;"));
+  assert(!migration025.includes("IF NEW.lifecycle_status = 'Superseded' THEN\r\n    RETURN NEW;"));
+  assert(!/^\s*(INSERT|UPDATE|DELETE)\s+/m.test(migration025), 'migration 025 must not contain top-level transaction data DML');
+
+  const functionReplacementCount = migration025.match(/CREATE OR REPLACE FUNCTION public\./g)?.length ?? 0;
+  assert(functionReplacementCount === 1, 'migration 025 should replace only fx_validate_booking_rate_decision');
+});
+
 Deno.test('Batch 9D-C immutability predicate rejects protected changes outside Draft-to-Draft', async () => {
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
 
