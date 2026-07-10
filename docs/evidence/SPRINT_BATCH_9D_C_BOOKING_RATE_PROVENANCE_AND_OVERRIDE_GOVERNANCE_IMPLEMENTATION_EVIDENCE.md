@@ -12,9 +12,13 @@ First authorized staging migration 022 attempt: **FAILED AND STOPPED**
 
 Targeted migration 022 ordering remediation: **COMPLETED LOCALLY**
 
-Staging deployment: **NOT PERFORMED**
+Resumed staging migration/deployment execution: **COMPLETED THROUGH EDGE DEPLOYMENT**
 
-Staging runtime verification: **PENDING SEPARATE AUTHORIZATION**
+Staging runtime verification: **STOPPED AT RT-01**
+
+Targeted runtime remediation: **COMPLETED LOCALLY**
+
+Forward corrective migration 024 staging apply: **NOT YET PERFORMED**
 
 Production action: **NOT PERFORMED**
 
@@ -46,6 +50,13 @@ Targeted migration 022 ordering-fix baseline:
 ```text
 branch: main
 HEAD/origin: 2de54552da240c592536ea611dda28fc39fd3478
+```
+
+Targeted runtime-fix baseline:
+
+```text
+branch: main
+HEAD/origin: d6d212cfceacf8769ed05e5471266d81a418d96a
 ```
 
 ## Staging Migration 022 Failure and Local Remediation
@@ -102,6 +113,72 @@ Local fix:
 This evidence records the local remediation only. It does not claim staging
 migration PASS or staging runtime PASS.
 
+## Resumed Staging Execution RT-01 Stop and Local Runtime Remediation
+
+The resumed authorized staging execution targeted only:
+
+```text
+staging project: gcdsdyegwjdcskpukqlq
+commit: d6d212cfceacf8769ed05e5471266d81a418d96a
+```
+
+Observed staging progress before the runtime stop:
+
+```text
+022 second authorized attempt: SUCCESS
+022 historical backfill: VERIFIED
+invoice counts: 35 in-scope / 35 bootstrap decisions / 35 non-null decision pointers
+receipt counts: 13 in-scope / 13 bootstrap decisions / 13 non-null decision pointers
+mismatches: 0
+023: SUCCESS
+required staging Edge Functions: DEPLOYED
+  - invoices
+  - receipts
+  - credit-notes
+  - debit-notes
+  - imports
+```
+
+Runtime matrix stop:
+
+```text
+RT-01: FAIL
+exact runtime error: 55000 record "v_exchange" is not assigned yet
+observed path: BASE_PARITY invoice create -> fx_create_governed_invoice_draft -> fx_record_booking_decision
+RT-02 through RT-19: NOT EXECUTED due stop condition
+committed Batch 9D-C runtime test rows: 0
+pre-existing financial drift: none detected
+Batch 9D-B scheduler: unchanged and active
+production action: none
+```
+
+Root cause:
+
+- `fx_record_booking_decision` used optional generic `RECORD` variables
+  `v_exchange` and `v_reference`;
+- BASE_PARITY does not assign `v_exchange`;
+- the decision/event INSERT expressions still evaluated
+  `CASE WHEN v_source_category = 'CATALOG' THEN v_exchange.id ELSE NULL END`;
+- PostgreSQL must know the tuple structure to dereference `v_exchange.id`,
+  so the BASE_PARITY branch failed with SQLSTATE `55000`.
+
+Local runtime fix:
+
+- `database/024_fx_booking_decision_runtime_fix.sql` forward-replaces only
+  `public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB)`;
+- final source provenance FKs now use scalar UUID variables initialized to
+  `NULL` and assigned only after source record resolution;
+- BASE_PARITY no longer requires any optional source record dereference;
+- the symmetric REFERENCE_SELECTED optional-record CASE expression is also
+  removed;
+- the migration reasserts the existing service-role-only privilege boundary;
+- no data, historical decisions, transaction snapshots, scheduler objects, or
+  Edge Functions are mutated by the local fix.
+
+This evidence records the local runtime remediation only. It does not claim
+corrective migration 024 has been applied to staging, staging runtime PASS, or
+Batch 9D-C closure.
+
 ## Database Artifacts
 
 ### `database/022_fx_booking_rate_governance.sql`
@@ -148,6 +225,29 @@ Creates/remediates:
 - direct forward-safe `post_receipt` replacement that calls `fx_assert_booking_decision_postable` immediately after receipt row lock/status validation and before journal/status mutations
 - journal-entry and final status-transition posting guards retained as defense-in-depth
 - service-role-only privilege hardening
+
+### `database/024_fx_booking_decision_runtime_fix.sql`
+
+Forward corrective migration after staging runtime RT-01.
+
+Contains:
+
+- `CREATE OR REPLACE FUNCTION public.fx_record_booking_decision(...)`
+- exact existing signature preservation
+- exact return type / PL/pgSQL / `SECURITY DEFINER` / `SET search_path = public`
+- scalar final-source provenance variables:
+  - `v_source_exchange_rate_id`
+  - `v_source_fx_reference_rate_id`
+- privilege reassertion:
+  - revoke PUBLIC / anon / authenticated
+  - grant execute to service_role
+
+Does not contain:
+
+- historical backfill DML
+- transaction snapshot mutation outside the governed function behavior
+- scheduler/Vault/provider changes
+- production changes
 
 ## Service Integration
 
@@ -242,7 +342,7 @@ deno test --no-lock --allow-read=../../.. --config deno.json fx_booking_governan
 Result after remediation:
 
 ```text
-10 passed / 0 failed
+11 passed / 0 failed
 ```
 
 Covered:
@@ -256,6 +356,7 @@ Covered:
 - stale reference governance;
 - direct postability guard ordering inside forward-safe `post_invoice` / `post_receipt` replacements, before posting mutations;
 - migration 022 ordering so transaction-pointer FKs and RLS/privilege ALTERs occur before historical backfill DML;
+- migration 024 optional source provenance hardening for `fx_record_booking_decision`;
 - journal-entry/status guard defense-in-depth;
 - audit event emission vocabulary.
 
@@ -277,20 +378,22 @@ Result after remediation:
 ## Local Limitations
 
 - First staging attempt of migration `022` failed safely with SQLSTATE `55006` and rolled back visible Batch 9D-C objects.
-- Migration `023` was not attempted.
-- No staging re-attempt has been performed after the local migration-ordering fix.
-- SQL compile/runtime behavior of the corrected migration still requires an explicitly authorized staging migration/runtime gate after targeted re-review.
+- A later authorized staging execution successfully applied and verified `022`, successfully applied and verified `023`, and deployed the required staging Edge Functions.
+- Staging runtime verification stopped at RT-01 with SQLSTATE `55000` in `fx_record_booking_decision`.
+- Corrective migration `024` has not yet been applied to staging.
+- SQL compile/runtime behavior of corrective migration `024` still requires a targeted technical re-review and explicit resumed staging execution.
 - Local Batch 9D-C tests are structural/source-order checks, not a substitute for staging SQL runtime proof.
 - No live provider call was made.
-- The failed staging attempt captured no financial fingerprint drift, but no Batch 9D-C runtime zero-mutation proof was executed.
+- The runtime stop captured no committed Batch 9D-C test rows and no pre-existing financial fingerprint drift.
 - No frontend UX implementation was included; Batch 9D-D remains separate.
 
 ## Safety Boundary
 
 ```text
-staging migration re-attempt after fix: NO
-023 apply: NO
-staging deployment: NO
+staging corrective migration 024 apply: NO
+022 rerun during local runtime fix: NO
+023 rerun during local runtime fix: NO
+Edge redeployment during local runtime fix: NO
 staging financial data mutation: NO
 scheduler change: NO
 provider call: NO
@@ -300,6 +403,6 @@ POST /allocations/auto: still AUTO_ALLOCATION_DISABLED
 
 ## Next Gate
 
-`Codex Batch 9D-C Technical Re-Review`
+`Codex targeted runtime-fix Technical Re-Review`
 
-No staging migration re-attempt, deployment, scheduler change, provider call, or production action has been performed after this local fix.
+Do not apply corrective migration 024 to staging until that targeted re-review passes.

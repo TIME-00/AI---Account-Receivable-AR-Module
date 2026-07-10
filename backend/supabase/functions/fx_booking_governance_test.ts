@@ -56,6 +56,41 @@ Deno.test('Batch 9D-C migration 022 installs incompatible ALTERs before backfill
   ]);
 });
 
+Deno.test('Batch 9D-C migration 024 hardens optional source provenance records', async () => {
+  const migration024 = await read('../../../database/024_fx_booking_decision_runtime_fix.sql');
+
+  assertStringIncludes(migration024, 'CREATE OR REPLACE FUNCTION public.fx_record_booking_decision(');
+  assertStringIncludes(migration024, 'p_company_id UUID');
+  assertStringIncludes(migration024, 'p_transaction_type TEXT');
+  assertStringIncludes(migration024, 'p_transaction_id UUID');
+  assertStringIncludes(migration024, 'p_actor_user_id UUID');
+  assertStringIncludes(migration024, 'p_explicit_rate_supplied BOOLEAN DEFAULT false');
+  assertStringIncludes(migration024, 'p_source_category TEXT DEFAULT NULL');
+  assertStringIncludes(migration024, 'p_fx_reference_rate_id UUID DEFAULT NULL');
+  assertStringIncludes(migration024, 'p_override_reason TEXT DEFAULT NULL');
+  assertStringIncludes(migration024, 'p_import_origin JSONB DEFAULT NULL');
+  assertStringIncludes(migration024, 'SECURITY DEFINER');
+  assertStringIncludes(migration024, 'SET search_path = public');
+
+  assertStringIncludes(migration024, 'v_source_exchange_rate_id UUID := NULL');
+  assertStringIncludes(migration024, 'v_source_fx_reference_rate_id UUID := NULL');
+  assertStringIncludes(migration024, 'v_source_exchange_rate_id := v_exchange.id');
+  assertStringIncludes(migration024, 'v_source_fx_reference_rate_id := v_reference.id');
+  assertStringIncludes(migration024, 'GRANT EXECUTE ON FUNCTION public.fx_record_booking_decision(UUID, TEXT, UUID, UUID, BOOLEAN, TEXT, UUID, TEXT, JSONB) TO service_role');
+
+  assert(
+    !migration024.includes("CASE WHEN v_source_category = 'CATALOG' THEN v_exchange.id ELSE NULL"),
+    'migration 024 must not dereference optional v_exchange RECORD in CATALOG CASE expressions',
+  );
+  assert(
+    !migration024.includes("CASE WHEN v_source_category = 'REFERENCE_SELECTED' THEN v_reference.id ELSE NULL"),
+    'migration 024 must not dereference optional v_reference RECORD in REFERENCE_SELECTED CASE expressions',
+  );
+
+  const functionReplacementCount = migration024.match(/CREATE OR REPLACE FUNCTION public\./g)?.length ?? 0;
+  assert(functionReplacementCount === 1, 'migration 024 should replace only fx_record_booking_decision');
+});
+
 Deno.test('Batch 9D-C immutability predicate rejects protected changes outside Draft-to-Draft', async () => {
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
 
