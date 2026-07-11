@@ -1,42 +1,46 @@
 # Batch 9D-C - Booking Rate Provenance and Override Governance - Implementation Evidence
 
-## Status
+## Status (CONSOLIDATED - authoritative)
 
-Local implementation: **COMPLETED**
+> This Status block and the consolidated section immediately below are the **current authoritative state**
+> of Batch 9D-C after completed staging runtime verification. The detailed chronological remediation
+> sections later in this document are retained as **historical record** for Closure Review; where an
+> earlier interim section says an item was "NOT YET PERFORMED" or names an interim next gate, it describes
+> the state at that point in time and is **superseded** by this consolidated status.
 
-Technical Review remediation: **COMPLETED LOCALLY**
+```text
+Batch 9D-C staging runtime verification:   PASS - BATCH 9D-C STAGING RUNTIME VERIFICATION COMPLETED
+Migrations 022-026:                        APPLIED + VERIFIED
+Focused decision versioning:               PASS
+Focused import-origin provenance:          PASS
+RT-01 through RT-19:                        COMPLETE
+Cleanup:                                    COMPLETE
+Controlled Storage cleanup:                COMPLETE
+Temporary Auth cleanup:                    COMPLETE
+Post-cleanup financial comparison:         NO UNEXPECTED PRE-EXISTING DRIFT
+Batch 9D-B scheduler:                      UNCHANGED AND ACTIVE
+Production action:                         NONE
+```
 
-Second narrow Technical Re-Review remediation: **COMPLETED LOCALLY**
+Authoritative commit / deployment state:
 
-First authorized staging migration 022 attempt: **FAILED AND STOPPED**
+```text
+branch:              main
+HEAD/origin:         b891fdd442ec3b83c47caf081ac2ce7889d98e50
+commit subject:      fix(fx): preserve import origin in booking decisions
+staging target:      gcdsdyegwjdcskpukqlq
+production target:   kusseuycqgdilychphpq (NOT touched)
+production action:   NONE
+staging Edge Functions deployed in the final remediation pass:
+  - imports
+  - invoices
+  - receipts
+```
 
-Targeted migration 022 ordering remediation: **COMPLETED LOCALLY**
+Only `imports`, `invoices`, and `receipts` were (re)deployed to staging in the final remediation pass; no
+unrelated Edge Function was redeployed in the final pass.
 
-Resumed staging migration/deployment execution: **COMPLETED THROUGH EDGE DEPLOYMENT**
-
-Staging runtime verification: **STOPPED AT RT-16E**
-
-Targeted runtime remediation: **COMPLETED LOCALLY**
-
-Forward corrective migration 024 staging apply: **APPLIED + VERIFIED PASS**
-
-Targeted decision-versioning remediation: **COMPLETED LOCALLY**
-
-Forward corrective migration 025 staging apply: **APPLIED + VERIFIED PASS**
-
-Focused RT-05 Invoice Versioning: **PASS**
-
-Focused RT-06 Receipt Versioning: **PASS**
-
-RT-01 through RT-15: **PASS**
-
-RT-16 Import Matrix: **FAILED AT EXPLICIT FOREIGN IMPORTED FX**
-
-Targeted import-governance remediation: **COMPLETED LOCALLY**
-
-Targeted import-origin provenance remediation: **COMPLETED LOCALLY**
-
-Production action: **NOT PERFORMED**
+**Batch 9D-C is NOT officially closed.** Next gate: **Codex Batch 9D-C Closure Review**.
 
 ## Baseline
 
@@ -94,6 +98,329 @@ Targeted import-origin provenance fix baseline:
 ```text
 branch: main
 HEAD/origin: 229280058f8781c4b9fdda7b1b79367401fcd7c2
+```
+
+Final consolidated evidence baseline:
+
+```text
+branch: main
+HEAD/origin: b891fdd442ec3b83c47caf081ac2ce7889d98e50
+commit subject: fix(fx): preserve import origin in booking decisions
+```
+
+## Batch 9D-C Staging Runtime Verification - CONSOLIDATED (FINAL, PASS)
+
+This section consolidates the completed staging runtime verification. It is the authoritative outcome; the
+detailed chronological remediation sections that follow are retained as historical record.
+
+### Final verdict
+
+```text
+PASS - BATCH 9D-C STAGING RUNTIME VERIFICATION COMPLETED
+```
+
+### Summary
+
+```text
+Migrations 022-026:                  APPLIED + VERIFIED
+RT-01 through RT-19:                  COMPLETE
+Cleanup:                             COMPLETE
+Controlled Storage cleanup:         COMPLETE
+Temporary Auth cleanup:             COMPLETE
+Post-cleanup financial comparison:  NO UNEXPECTED PRE-EXISTING DRIFT
+Batch 9D-B scheduler:               UNCHANGED AND ACTIVE
+Production action:                  NONE
+```
+
+### Migration path (022-026, applied + verified in staging)
+
+- **022 - initial Batch 9D-C booking-rate governance migration.** The first staging attempt failed due to
+  pending trigger events during incompatible DDL/backfill ordering (SQLSTATE 55006). The local fix
+  reordered DDL/FKs/RLS/privileges before backfill DML. The final staging apply succeeded.
+- **023 - booking-rate governance RPCs, immutability, and posting guard migration.** Applied and verified
+  in staging.
+- **024 - runtime fix for `fx_record_booking_decision` source provenance scalar handling.** Reason: the
+  BASE_PARITY path hit unassigned generic `RECORD` `v_exchange` / `v_reference` risk. Fix: scalar
+  `source_exchange_rate_id` and scalar `source_fx_reference_rate_id`. Applied and verified.
+- **025 - supersession validation fix.** Reason: a Draft FX update mutated the transaction currency first,
+  then the old-decision lifecycle update to `Superseded` triggered a current-snapshot mismatch. Fix: a
+  narrow lifecycle-only `Superseded` validation exception while preserving material immutability and Posted
+  protection. Applied and verified.
+- **026 - import-origin provenance fix.** Reason: CSV/XLSX import-created decisions had relational import
+  traceability, but `decision.import_origin` was not directly populated. Fix: trusted server-side
+  `import_origin` payload from import batch/row context; import-aware governed create overloads;
+  `import_origin` pass-through to `fx_record_booking_decision`; supersession `import_origin` inheritance
+  trigger. Applied and verified.
+
+### Remediation history (staging blockers resolved)
+
+1. **RT-01 / 024 runtime blocker** - problem: `record "v_exchange" is not assigned yet`; resolution:
+   migration 024 scalarized source FK handling.
+2. **RT-05 / 025 runtime blocker** - problem: `BR-FX-GOVERNANCE: invoice decision currency mismatch`
+   during Draft FX update / decision supersession; resolution: migration 025 narrow lifecycle-only
+   supersession validation fix.
+3. **RT-16E explicit foreign imported FX blocker** - problem: CSV/XLSX import mapping dropped
+   `exchange_rate` and `fx_override_reason`. Observed old bad behavior: input `currency = USD`,
+   `exchange_rate = 1.42`, `fx_override_reason` supplied, yet actual decision source = `CATALOG`, catalog
+   rate = 1.35, `approval_status = NotRequired`, receipt status = Posted, import row posting_status =
+   Posted. Resolution: import mapping now preserves `exchange_rate` and `fx_override_reason`; invoice and
+   receipt paths both covered; invalid/non-positive rates fail closed; explicit foreign rates no longer
+   silently fall back to catalog.
+4. **Import-origin provenance gap** - problem:
+   `fx_booking_rate_decisions.import_origin` remained NULL for CSV/XLSX-created decisions; resolution:
+   migration 026 + service propagation (trusted `import_origin` payload created from batch/row backend
+   context).
+5. **Auth runtime caller blocker** - problem: no usable authenticated staging JWT was available; direct
+   SQL auth-user construction failed and was abandoned; resolution: a temporary staging Auth user was
+   created through the supported Auth Admin flow, assigned the Finance Manager role, used to verify the
+   authenticated Edge runtime, and cleaned after verification.
+
+### Focused decision-versioning proof
+
+```text
+RT-05 Invoice Versioning: PASS
+RT-06 Receipt Versioning: PASS
+```
+
+```text
+v1 Superseded
+v2 new UUID
+same root
+supersedes v1
+transaction pointer moved to v2
+v1 material provenance unchanged
+approval facts preserved
+```
+
+### Focused import-origin provenance proof
+
+```text
+P-01 Invoice import provenance:                 PASS
+P-02 Receipt import provenance:                 PASS
+P-03 Manual invoice import_origin NULL:         PASS
+P-04 Manual receipt import_origin NULL:         PASS
+P-05 Imported decision supersession inheritance: PASS
+```
+
+```text
+imported v1 import_origin populated
+v2 inherited import_origin exactly after governed FX edit
+manual non-import create path keeps import_origin NULL
+```
+
+### RT-16 Import Matrix (PASS)
+
+```text
+Invoice CSV BASE_PARITY:            PASS
+Invoice XLSX CATALOG:               PASS
+Receipt CSV BASE_PARITY:            PASS
+Receipt XLSX CATALOG:               PASS
+Explicit foreign invoice FX:        PASS
+Explicit foreign receipt FX:        PASS
+Missing override reason:            PASS (fail-closed)
+Invalid non-numeric explicit rate:  PASS (fail-closed)
+Non-positive explicit rate:         PASS (fail-closed)
+Missing governed rate:              PASS (fail-closed)
+Stale reference:                    NOT APPLICABLE - current CSV/XLSX import contract exposes no
+                                    reference-selection field
+```
+
+Historical RT-16E fix proof (the previously failing 1.42 explicit receipt fixture, now fail-closed):
+
+```text
+historical 1.42 explicit receipt fixture:
+no silent catalog substitution
+no receipt created
+no decision created
+no posting
+created_count = 0
+posted_count = 0
+failure = booked rate deviation exceeds blocked threshold
+```
+
+Within-band explicit foreign receipt proof:
+
+```text
+within-band explicit foreign receipt:
+decision source = MANUAL_OVERRIDE
+booked_rate = 1.36000000
+approval_status = Pending
+receipt status = Draft
+created_count = 1
+posted_count = 0
+import_origin populated
+```
+
+### RT-17 PDF/Image Intake Matrix (PASS)
+
+```text
+Synthetic PDF: PASS
+Synthetic PNG: PASS
+```
+
+```text
+status = ApprovedDraft
+created_count = 0
+posted_count = 0
+allocated_count = 0
+OCR/provider call = NO
+```
+
+PDF/Image intake remains a review/metadata boundary only: no silent posting, no allocation, no journal
+mutation, no OCR/provider expansion.
+
+### RT-18 Allocation / Financial Regression Matrix (COMPLETE)
+
+```text
+manual allocation:  PASS
+reverse allocation: PASS
+cancel invoice:     PASS
+bounced cheque:     PASS
+realized FX:        PASS
+discount:           PASS
+bank charge:        NOT APPLICABLE - authoritative contract does not implement this capability
+short payment:      PASS
+```
+
+Realized FX proof:
+
+```text
+formula: forex_gain_loss = allocated_amount x (receipt_rate - invoice_rate)
+allocated_amount = 100.00
+invoice_rate = 1.360000
+receipt_rate = 1.340000
+expected: 100.00 x (1.34 - 1.36) = -2.00
+actual:   -2.00
+journal: Dr Forex Loss 2.00 / Cr Forex adjustment 2.00 ; balanced = YES
+invoice booked FX snapshot: UNCHANGED at 1.360000
+receipt booked FX snapshot: UNCHANGED at 1.340000
+```
+
+Discount proof:
+
+```text
+invoice outstanding before = 100.00
+cash allocation = 95.00
+discount_amount = 5.00
+invoice outstanding after = 0.00
+receipt allocated_amount = 95.00
+receipt unallocated_amount = 0.00
+journal: Dr Discount 5.00 / Cr AR discount 5.00 ; balanced = YES
+```
+
+Short payment proof:
+
+```text
+allocation amount = 40.00
+invoice outstanding after = 60.00
+invoice status = Partially Paid
+receipt allocated_amount = 40.00
+receipt unallocated_amount = 0.00
+receipt status = Fully Allocated
+discount_amount = 0.00
+forex_gain_loss = 0.00
+```
+
+Bank charge classification (precise wording): Bank charge was classified as NOT APPLICABLE for Batch 9D-C
+runtime regression because the current authoritative backend/API/RPC contract does not implement or expose
+a bank-charge path. This is not evidence that bank-charge handling is supported. It is a documented current
+capability gap / not-implemented capability outside the executable 9D-C regression contract.
+
+### RT-19 Auto-Allocation
+
+```text
+POST /allocations/auto: AUTO_ALLOCATION_DISABLED
+```
+
+Final note (honest): a final post-cleanup live Edge call could not authenticate after the temporary Auth
+cleanup, but RT-19 had already passed at runtime and the allocation source/deployment was unchanged
+afterward. The final post-cleanup call itself is **not** claimed to have succeeded.
+
+### Cleanup (COMPLETE)
+
+Cleanup was completed for: controlled DB rows; controlled Storage objects; temporary Auth user; temporary
+role; local fixtures; local credentials/tokens.
+
+Storage cleanup:
+
+```text
+bucket: ar-imports
+controlled objects before: 20
+deleted: 20
+remaining: 0
+```
+
+DB cleanup final categories:
+
+```text
+allocation_details:     4 deleted,   0 remaining
+credit_control_logs:    1 deleted,   0 remaining
+customer_change_logs:   1 deleted,   0 remaining
+customers:              1 deleted,   0 remaining
+decision_events:      127 deleted,   0 remaining
+decisions:             45 deleted,   0 remaining
+import_batches:        20 deleted,   0 remaining
+import_files:          20 deleted,   0 remaining
+import_rows:           20 deleted,   0 remaining
+invoice_lines:         20 deleted,   0 remaining
+invoices:              20 deleted,   0 remaining
+journal_entries:       18 deleted,   0 remaining
+journal_lines:         36 deleted,   0 remaining
+ocr_review_decisions:   4 deleted,   0 remaining
+receipts:              16 deleted,   0 remaining
+user_roles:             1 deleted,   0 remaining
+```
+
+Immutable/audit trigger handling during cleanup (transparent for Closure Review):
+
+```text
+Only the exact affected immutability/audit triggers were transactionally disabled and re-enabled for the
+exact controlled cleanup.
+No broad trigger suppression.
+No session_replication_role.
+No unrelated record deletion.
+Trigger state verified restored afterward.
+```
+
+### Financial and scheduler verification
+
+```text
+pre-cleanup financial comparison:      matched continuation baseline
+post-cleanup financial comparison:     matched continuation baseline
+unexpected pre-existing financial drift: NONE
+```
+
+Scheduler (Batch 9D-B, unchanged and active):
+
+```text
+pg_cron = 1.6.4
+pg_net = 0.20.0
+supabase_vault = 0.3.1
+job = batch_9d_b_fx_scheduler_staging
+schedule = 30 7 * * *
+active = true
+target = staging only
+production ref = absent
+Vault secret metadata present
+secret value exposed = NO
+```
+
+### Final safety
+
+```text
+production migration:          NO
+production Edge deployment:     NO
+production Auth user:           NO
+production financial mutation:  NO
+production scheduler change:     NO
+production Vault change:         NO
+staging scheduler change:        NO
+provider config change:          NO
+raw Auth schema manipulation:    NO
+JWT secret extraction:           NO
+fixture committed:               NO
+credential committed:            NO
+repo worktree:                   clean
 ```
 
 ## Staging RT-16 Import Governance Failure and Local Remediation
@@ -250,7 +577,7 @@ Local import-origin remediation:
   Draft transaction later creates a superseding booking decision and no new
   import-origin payload is supplied.
 
-Staging status for this remediation:
+Staging status for this remediation (interim - SUPERSEDED by the consolidated section above):
 
 ```text
 imports Edge deployment: NOT YET PERFORMED
@@ -258,6 +585,11 @@ migration 026 staging apply: NOT YET PERFORMED
 RT-16 rerun after provenance remediation: NOT YET PERFORMED
 Batch 9D-C closure: NOT CLAIMED
 ```
+
+> **Superseded:** the three "NOT YET PERFORMED" items above were subsequently completed - the corrected
+> `imports` Edge Function was deployed to staging, migration 026 was applied + verified, and RT-16 (with
+> RT-01 through RT-19) was rerun to completion. See "Batch 9D-C Staging Runtime Verification - CONSOLIDATED
+> (FINAL, PASS)". Batch 9D-C closure remains **NOT CLAIMED** (next gate: Codex Batch 9D-C Closure Review).
 
 ## Staging Migration 022 Failure and Local Remediation
 
@@ -759,7 +1091,26 @@ POST /allocations/auto: still AUTO_ALLOCATION_DISABLED
 
 ## Next Gate
 
-`Codex targeted import-origin provenance Technical Re-Review`
+`Codex Batch 9D-C Closure Review`
 
-Do not apply corrective migration `026` or deploy the corrected `imports` Edge
-Function to staging until that targeted re-review passes.
+Final consolidated status:
+
+```text
+Batch 9D-C staging runtime verification: PASS
+Migrations 022-026:                      APPLIED + VERIFIED
+Focused decision versioning:             PASS
+Focused import-origin provenance:        PASS
+RT-01 through RT-19:                      COMPLETE
+Cleanup:                                 COMPLETE
+Controlled Storage cleanup:              COMPLETE
+Temporary Auth cleanup:                  COMPLETE
+Post-cleanup financial comparison:       NO UNEXPECTED PRE-EXISTING DRIFT
+Batch 9D-B scheduler:                    UNCHANGED AND ACTIVE
+Production action:                       NONE
+```
+
+**Batch 9D-C is NOT officially closed.** Official closure requires Codex Batch 9D-C Closure Review.
+
+*(Historical: the earlier interim next gate was "Codex targeted import-origin provenance Technical
+Re-Review", which has since been satisfied; migration 026 and the corrected `imports` Edge Function were
+subsequently applied/deployed to staging and verified. This is superseded by the consolidated PASS above.)*
