@@ -15,11 +15,12 @@
      the validated reference-only foundation now allows a real provider to be integrated (9D-B) **before**
      the booking-rate governance batch (9D-C). See **§0** (the authoritative current-state section).
 - **Predecessor:** Batch 9C — Receipt PDF/Image Import Intake (officially closed at `2e5d86e`).
-- **Next gate:** **Codex Batch 9D-D Plan Review** (see the authoritative current-state block in §0.0).
-  Batch 9D-A is CLOSED, DG-1 is FORMALLY APPROVED AND LOCKED, Batch 9D-B is **OFFICIALLY CLOSED**, and
-  Batch 9D-C is **OFFICIALLY CLOSED** (Codex Batch 9D-C Closure Re-Review: `PASS — BATCH 9D-C CLOSURE
-  RE-REVIEW PASSED`; closed at staging-verification level; production rollout reserved for Batch 9D-E).
-  Batch 9D-D (Multi-Currency UX and Monetary Aggregation Correctness) is **PLANNING / NOT IMPLEMENTED**.
+- **Next gate:** **User Batch 9D-D Implementation Approval Decision** (see the authoritative current-state
+  block in §0.0). Batch 9D-A is CLOSED, DG-1 is FORMALLY APPROVED AND LOCKED, Batch 9D-B is **OFFICIALLY
+  CLOSED**, and Batch 9D-C is **OFFICIALLY CLOSED** (Codex Batch 9D-C Closure Re-Review: `PASS — BATCH 9D-C
+  CLOSURE RE-REVIEW PASSED`; closed at staging-verification level; production rollout reserved for Batch 9D-E).
+  Batch 9D-D (Multi-Currency UX and Monetary Aggregation Correctness) is **PLANNING COMPLETE — CODEX PLAN
+  RE-REVIEW PASSED — IMPLEMENTATION NOT STARTED** (implementation approval not granted).
   - *(Historical, 2026-07-07: the then-remaining flow was Codex DG-1 Lock Confirmation Review → 9D-B
     detailed implementation planning → 9D-B implementation approval → 9D-B implementation; all of these
     have since occurred. Earlier still, the Rev 2 gate was "Codex Batch 9D Plan Amendment Review → user
@@ -46,7 +47,7 @@
 > §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
 > history and is **not** erased.
 
-### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-12 — Batch 9D-C officially closed; 9D-D planning)
+### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-12 — Batch 9D-C officially closed; 9D-D planning complete, Codex Plan Re-Review passed)
 
 > **This block is the single authoritative current-state statement for Batch 9D and supersedes any
 > "9D-B not yet implemented / pending plan review / implementation approval not granted" wording elsewhere
@@ -58,12 +59,13 @@
 > | DG-1 (provider decision) | **FORMALLY APPROVED AND LOCKED** |
 > | Batch 9D-B | **OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS — OFFICIAL CLOSURE`) |
 > | Batch 9D-C | **OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS — BATCH 9D-C CLOSURE RE-REVIEW PASSED`; closed at staging-verification level; migrations 022-026 applied+verified; RT-01..RT-19 complete; cleanup complete; no production action) |
-> | Batch 9D-D | **PLANNING / NOT IMPLEMENTED** — Multi-Currency UX and Monetary Aggregation Correctness; detailed plan authored (`docs/plans/BATCH_9D_D_MULTI_CURRENCY_UX_AND_AGGREGATION_CORRECTNESS_PLAN.md`) |
+> | Batch 9D-D | **PLANNING COMPLETE — CODEX PLAN RE-REVIEW PASSED — IMPLEMENTATION NOT STARTED** (Codex Batch 9D-D Plan Re-Review: `PASS — BATCH 9D-D PLAN RE-REVIEW PASSED`; implementation approval not granted); Multi-Currency UX and Monetary Aggregation Correctness; reviewed plan `docs/plans/BATCH_9D_D_MULTI_CURRENCY_UX_AND_AGGREGATION_CORRECTNESS_PLAN.md` |
 > | Batch 9D-E | **NOT STARTED** (owns production rollout) |
 >
-> **Current next gate:** **Codex Batch 9D-D Plan Review**. Batch 9D-C is officially closed at
-> staging-verification level; no production action has occurred. Production rollout remains reserved for
-> Batch 9D-E. 9D-C evidence:
+> **Current next gate:** **User Batch 9D-D Implementation Approval Decision**. Batch 9D-C is officially closed
+> at staging-verification level and Batch 9D-D planning is complete (Codex Plan Re-Review passed); Batch 9D-D
+> implementation has **not** started and implementation approval is **not** granted. No production action has
+> occurred. Production rollout remains reserved for Batch 9D-E. 9D-C evidence:
 > `docs/evidence/SPRINT_BATCH_9D_C_BOOKING_RATE_PROVENANCE_AND_OVERRIDE_GOVERNANCE_IMPLEMENTATION_EVIDENCE.md`.
 >
 > The 9D-B staging scheduler **remains ACTIVE** for continued staging observation under approved staging
@@ -142,7 +144,8 @@ separation is now proven, not assumed.
 > APPROVED AND LOCKED**; Batch 9D-B — **OFFICIALLY CLOSED** (Codex Closure Re-Review `PASS — OFFICIAL
 > CLOSURE`); Batch 9D-C — **OFFICIALLY CLOSED** (Codex Closure Re-Review `PASS — BATCH 9D-C CLOSURE
 > RE-REVIEW PASSED`; closed at staging-verification level; production reserved for 9D-E); Batch 9D-D —
-> **PLANNING / NOT IMPLEMENTED** (current next gate: Codex Batch 9D-D Plan Review).
+> **PLANNING COMPLETE — CODEX PLAN RE-REVIEW PASSED — IMPLEMENTATION NOT STARTED** (current next gate: User
+> Batch 9D-D Implementation Approval Decision; implementation approval not granted).
 
 - **API / transport:** **Frankfurter v2**.
 - **Provider strategy:** **explicit provider pinning is mandatory**. **Initial provider: `MAS`.**
@@ -236,9 +239,10 @@ realized-FX behavior must remain compatible with existing allocation logic.
 > testing + mandatory staging matrix). The plan was fully amended and confirmed, then implemented; Batch
 > 9D-C has since **completed staging runtime verification (PASS)** with migrations 022-026 applied+verified
 > and evidence consolidated, and is now **OFFICIALLY CLOSED** at staging-verification level (Codex Batch
-> 9D-C Closure Re-Review: `PASS`). The current next gate is **Codex Batch 9D-D Plan Review**; production
-> rollout remains reserved for Batch 9D-E. This master section remains the authoritative scope/order
-> summary.
+> 9D-C Closure Re-Review: `PASS`). Batch 9D-D planning is now **complete** (Codex Batch 9D-D Plan Re-Review:
+> `PASS — BATCH 9D-D PLAN RE-REVIEW PASSED`); the current next gate is the **User Batch 9D-D Implementation
+> Approval Decision** (implementation not started, approval not granted); production rollout remains reserved
+> for Batch 9D-E. This master section remains the authoritative scope/order summary.
 
 Current approved architecture remains:
 
