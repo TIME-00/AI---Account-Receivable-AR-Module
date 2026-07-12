@@ -139,7 +139,8 @@ separation is now proven, not assumed.
 >
 > **Authoritative current state (see §0.0):** Batch 9D-A — **OFFICIALLY CLOSED**; DG-1 — **FORMALLY
 > APPROVED AND LOCKED**; Batch 9D-B — **OFFICIALLY CLOSED** (Codex Closure Re-Review `PASS — OFFICIAL
-> CLOSURE`); Batch 9D-C — **DETAILED IMPLEMENTATION PLANNING / PLAN AMENDMENT** (not implemented).
+> CLOSURE`); Batch 9D-C — **IMPLEMENTED; STAGING RUNTIME VERIFICATION PASS; EVIDENCE CONSOLIDATED**
+> (**NOT officially closed**; current next gate: Codex Batch 9D-C Closure Re-Review).
 
 - **API / transport:** **Frankfurter v2**.
 - **Provider strategy:** **explicit provider pinning is mandatory**. **Initial provider: `MAS`.**
