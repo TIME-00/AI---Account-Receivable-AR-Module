@@ -14,7 +14,8 @@ import {
 } from '../_shared/errors.ts';
 import type { AuthContext } from '../_shared/auth.ts';
 import { requireCustomerAccess } from '../_shared/auth.ts';
-import { validateCurrency, validateDate, validateUUID } from '../_shared/validators.ts';
+import { validateDate, validateOperationalCurrencyForWrite, validateUUID } from '../_shared/validators.ts';
+import { roundMoney } from '../_shared/money.ts';
 import type { BankAccount, Customer, CreateCustomerRequest, Invoice, PaginationParams, Receipt } from '../_shared/types.ts';
 import { InvoiceService } from '../invoices/service.ts';
 import { ReceiptService } from '../receipts/service.ts';
@@ -257,10 +258,6 @@ function parseNumber(value: string, field: string): number {
     throw new ValidationError(`Field "${field}" must be numeric.`, { field, value });
   }
   return num;
-}
-
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function hasImportValue(row: Record<string, unknown>, key: string): boolean {
@@ -1975,7 +1972,7 @@ export class ImportService {
       if (classification.action === 'Review Required') {
         const currency = (rawCurrency || 'MYR').toUpperCase();
         validateDate(invoiceDate, 'invoice_date');
-        validateCurrency(currency, 'currency');
+        validateOperationalCurrencyForWrite(currency, 'currency');
         validateInvoiceLines([{
           description,
           quantity,
@@ -2042,7 +2039,7 @@ export class ImportService {
         validateCreateInvoice(mappedData);
       } else {
         validateDate(invoiceDate, 'invoice_date');
-        validateCurrency(currency, 'currency');
+        validateOperationalCurrencyForWrite(currency, 'currency');
       }
       validateInvoiceLines(mappedData.lines);
 
@@ -2098,7 +2095,7 @@ export class ImportService {
 
       if (classification.action === 'Review Required') {
         validateDate(receiptDate, 'receipt_date');
-        validateCurrency(currency, 'currency');
+        validateOperationalCurrencyForWrite(currency, 'currency');
 
         mappedData = {
           receipt_date: receiptDate,

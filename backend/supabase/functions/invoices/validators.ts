@@ -12,7 +12,7 @@ import {
   validateUUID,
   validateMaxLength,
   validateDate,
-  validateCurrency,
+  validateOperationalCurrencyForWrite,
   requirePositiveNumber,
   requireNonNegativeNumber,
   validateEnum,
@@ -86,7 +86,7 @@ export function validateCreateInvoice(body: Record<string, unknown>): CreateInvo
   validateUUID(customer_id, 'customer_id');
 
   const currency = requireString(body.currency, 'currency');
-  validateCurrency(currency, 'currency');
+  validateOperationalCurrencyForWrite(currency, 'currency');
 
   const result: CreateInvoiceInput = {
     doc_type,

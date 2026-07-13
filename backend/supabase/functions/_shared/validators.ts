@@ -153,14 +153,32 @@ export function validatePhone(phone: string, fieldName: string = 'phone'): void 
 
 
 
+export const SUPPORTED_OPERATIONAL_CURRENCIES = ['MYR', 'SGD', 'USD', 'EUR', 'GBP', 'CNY'] as const;
+export type SupportedOperationalCurrency = typeof SUPPORTED_OPERATIONAL_CURRENCIES[number];
+
 /**
- * Validate ISO 4217 currency code (3 uppercase letters).
+ * Validate ISO 4217-style currency code shape (3 uppercase letters).
  */
 export function validateCurrency(code: string, fieldName: string = 'currency'): void {
   if (!/^[A-Z]{3}$/.test(code)) {
     throw new ValidationError(
       `Field "${fieldName}" must be a 3-letter uppercase ISO 4217 currency code (e.g., MYR, USD, SGD).`,
       { field: fieldName, value: code },
+    );
+  }
+}
+
+/**
+ * Validate Batch 9D-D operational currency code for new transaction writes.
+ *
+ * Historical reads may still expose other valid three-letter legacy codes.
+ */
+export function validateOperationalCurrencyForWrite(code: string, fieldName: string = 'currency'): void {
+  validateCurrency(code, fieldName);
+  if (!SUPPORTED_OPERATIONAL_CURRENCIES.includes(code as SupportedOperationalCurrency)) {
+    throw new ValidationError(
+      `Field "${fieldName}" currency "${code}" is not supported for new Batch 9D-D transactions. Supported currencies: ${SUPPORTED_OPERATIONAL_CURRENCIES.join(', ')}.`,
+      { field: fieldName, value: code, supported_currencies: SUPPORTED_OPERATIONAL_CURRENCIES },
     );
   }
 }

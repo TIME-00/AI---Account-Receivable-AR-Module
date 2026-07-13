@@ -6,6 +6,7 @@
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
+import { getUserClient } from '../_shared/db.ts';
 import { errorResponse, successResponse } from '../_shared/errors.ts';
 import { parseRequestBody, parsePagination, validateUUID } from '../_shared/validators.ts';
 import { InvoiceService } from './service.ts';
@@ -63,7 +64,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { route, params } = matchRoute(url);
     const companyId = extractCompanyId(req);
     const auth = await getAuthContext(req, companyId);
-    const service = new InvoiceService();
+    const service = new InvoiceService(
+      undefined,
+      getUserClient(req.headers.get('Authorization')!),
+    );
 
     // ── Collection: list / create ──
     if (route === 'collection') {
@@ -87,8 +91,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           date_to: url.searchParams.get('date_to') ?? undefined,
           search: url.searchParams.get('search') ?? undefined,
         };
-        const { invoices, total } = await service.listInvoices(auth, filters, pagination);
-        return jsonResponse(successResponse(invoices, { total, page: pagination.page, page_size: pagination.page_size }));
+        const { invoices, total, summary } = await service.listInvoices(auth, filters, pagination);
+        return jsonResponse(successResponse(invoices, { total, page: pagination.page, page_size: pagination.page_size, summary }));
       }
     }
 

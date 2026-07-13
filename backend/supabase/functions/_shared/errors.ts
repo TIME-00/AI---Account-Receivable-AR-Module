@@ -4,6 +4,8 @@
 // Implements standardized error handling for PRD Part 1-5
 // ============================================================================
 
+import type { APIMeta, APIResponse } from './types.ts';
+
 // ─── Base Error Classes ─────────────────────────────────────────────────────
 
 /**
@@ -337,11 +339,11 @@ export function errorResponse(error: unknown): { status: number; body: Record<st
 /**
  * Create a standardized success response.
  */
-export function successResponse<T>(
+export function successResponse<T, TSummary = never>(
   data: T,
-  meta?: { total?: number; page?: number; page_size?: number },
-): Record<string, unknown> {
-  const response: Record<string, unknown> = {
+  meta?: APIMeta<TSummary>,
+): APIResponse<T, TSummary> {
+  const response: APIResponse<T, TSummary> = {
     success: true,
     data,
   };

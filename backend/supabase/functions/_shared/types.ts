@@ -233,6 +233,31 @@ export type InvoiceStatus = 'Draft' | 'Open' | 'Partially Paid' | 'Paid' | 'Over
 export type CNType = 'Linked' | 'Standalone';
 export type ReasonCode = 'Return' | 'Discount' | 'Price Adjustment' | 'Error Correction' | 'Other';
 
+export interface FxDecisionReadSummary {
+  id: string;
+  source_category: string;
+  approval_status: string;
+  lifecycle_status: string;
+  decision_version: number;
+  root_decision_id: string;
+  supersedes_decision_id: string | null;
+  import_origin: Record<string, unknown> | null;
+  booked_rate: number;
+  deviation_pct: number | null;
+  stale_reference: boolean;
+  fx_posting_eligible: boolean;
+}
+
+export interface FxReadableTransactionFields {
+  base_available: boolean;
+  fx_posting_eligibility: {
+    gate: 'fx_governance';
+    eligible: boolean;
+    reason: string | null;
+  };
+  fx_decision: FxDecisionReadSummary | null;
+}
+
 export interface Invoice {
   id: string;
   company_id: string;
@@ -271,6 +296,13 @@ export interface Invoice {
   cancel_reason: string | null;
   updated_at: string;
   version: number;
+  base_available?: boolean;
+  fx_posting_eligibility?: {
+    gate: 'fx_governance';
+    eligible: boolean;
+    reason: string | null;
+  };
+  fx_decision?: FxDecisionReadSummary | null;
 }
 
 export interface InvoiceLine {
@@ -332,6 +364,13 @@ export interface Receipt {
   posted_by: string | null;
   posted_at: string | null;
   updated_at: string;
+  base_available?: boolean;
+  fx_posting_eligibility?: {
+    gate: 'fx_governance';
+    eligible: boolean;
+    reason: string | null;
+  };
+  fx_decision?: FxDecisionReadSummary | null;
 }
 
 // ─── Allocation Types ───────────────────────────────────────────────────────
@@ -484,11 +523,11 @@ export interface CustomerARSummary {
 
 // ─── API Request / Response Types ───────────────────────────────────────────
 
-export interface APIResponse<T = unknown> {
+export interface APIResponse<T = unknown, TSummary = never> {
   success: boolean;
   data?: T;
   error?: APIError;
-  meta?: APIMeta;
+  meta?: APIMeta<TSummary>;
 }
 
 export interface APIError {
@@ -497,11 +536,12 @@ export interface APIError {
   details?: Record<string, unknown>;
 }
 
-export interface APIMeta {
+export interface APIMeta<TSummary = never> {
   total?: number;
   page?: number;
   page_size?: number;
   has_next?: boolean;
+  summary?: TSummary;
 }
 
 export interface PaginationParams {

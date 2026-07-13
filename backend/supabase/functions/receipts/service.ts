@@ -26,7 +26,6 @@ import {
   requireRole,
   requireOperationalReadRole,
   requireCustomerAccess,
-  getCustomerAccessFilter,
 } from '../_shared/auth.ts';
 import { validateUUID } from '../_shared/validators.ts';
 import type {
@@ -40,20 +39,189 @@ import { roundTo2 } from '../invoices/calculator.ts';
 import { JournalEntryService } from '../journal-entries/service.ts';
 import type { CreateReceiptInput, PostReceiptInput, CancelReceiptInput, BounceReceiptInput } from './validators.ts';
 import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
+import {
+  fxPostingEligibility,
+  isBaseValueAvailable,
+  withOptionalReadEnrichment,
+} from '../_shared/fx-read-contracts.ts';
+import type { MonetaryCollectionSummary } from '../reports/monetary-contracts.ts';
 
 export interface CreateReceiptOptions {
   importOrigin?: Record<string, unknown>;
+}
+
+interface FxDecisionSummaryRow {
+  id: string;
+  source_category: string;
+  approval_status: string;
+  lifecycle_status: string;
+  decision_version: number;
+  root_decision_id: string;
+  supersedes_decision_id: string | null;
+  import_origin: Record<string, unknown> | null;
+  booked_rate: number;
+  deviation_pct: number | null;
+  stale_reference: boolean;
 }
 
 // ─── Receipt Service ────────────────────────────────────────────────────────
 
 export class ReceiptService {
   private client: SupabaseClient;
+  private readClient: SupabaseClient | null;
   private jeService: JournalEntryService;
 
-  constructor(client?: SupabaseClient) {
+  /**
+   * @param client Trusted mutation client.
+   * @param readClient JWT-scoped authenticated client, or null for mutation-only composition.
+   */
+  constructor(client?: SupabaseClient, readClient: SupabaseClient | null = null) {
     this.client = client ?? getAdminClient();
+    this.readClient = readClient;
     this.jeService = new JournalEntryService(this.client);
+  }
+
+  /** Require the caller's JWT-scoped client for every user-domain read. */
+  private requireReadClient(): SupabaseClient {
+    if (!this.readClient) {
+      throw new Error('Authenticated read client is required for receipt user-domain reads.');
+    }
+    return this.readClient;
+  }
+
+  private readScopeMode(auth: AuthContext): 'company' | 'assigned' {
+    return auth.roles.some(role => ['AR Supervisor', 'Finance Manager', 'Auditor'].includes(role))
+      ? 'company'
+      : 'assigned';
+  }
+
+  private collectionReadParams(
+    auth: AuthContext,
+    filters: Record<string, string | undefined>,
+  ): Record<string, unknown> {
+    return {
+      p_company_id: auth.companyId,
+      p_user_id: auth.userId,
+      p_scope_mode: this.readScopeMode(auth),
+      p_status: filters.status ?? null,
+      p_customer_id: filters.customer_id ?? null,
+      p_payment_method: filters.payment_method ?? null,
+      p_posting_period: filters.posting_period ?? null,
+      p_date_from: filters.date_from ?? null,
+      p_date_to: filters.date_to ?? null,
+      p_search: filters.search ?? null,
+    };
+  }
+
+  private async getAuthoritativeCollection(
+    auth: AuthContext,
+    filters: Record<string, string | undefined>,
+    pagination: PaginationParams,
+  ): Promise<{ rows: Receipt[]; total: number; summary: MonetaryCollectionSummary }> {
+    const readClient = this.requireReadClient();
+    const { data, error } = await readClient.rpc('ar_receipt_collection', {
+      ...this.collectionReadParams(auth, filters),
+      p_page: pagination.page,
+      p_page_size: pagination.page_size,
+    });
+    if (error) throw new Error(`Failed to list receipts: ${error.message}`);
+    if (!data || typeof data !== 'object') throw new Error('Failed to list receipts: invalid RPC response');
+    const result = data as { rows?: Receipt[]; total?: number; summary?: MonetaryCollectionSummary };
+    if (!result.summary || typeof result.summary !== 'object') {
+      throw new Error('Failed to list receipts: missing authoritative summary');
+    }
+    return {
+      rows: result.rows ?? [],
+      total: Number(result.total ?? 0),
+      summary: result.summary,
+    };
+  }
+
+  private async getReadableCustomerIds(auth: AuthContext): Promise<string[]> {
+    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
+    if (visibleCustomerIds.length === 0) return [];
+
+    const fullAccessRoles = ['AR Supervisor', 'Finance Manager', 'Auditor'];
+    if (auth.roles.some(role => fullAccessRoles.includes(role))) {
+      return visibleCustomerIds;
+    }
+
+    const { data, error } = await this.client
+      .from('user_customer_assignments')
+      .select('customer_id')
+      .eq('user_id', auth.userId)
+      .eq('company_id', auth.companyId)
+      .eq('is_active', true)
+      .in('customer_id', visibleCustomerIds);
+
+    if (error) throw new Error(`Failed to fetch customer assignments: ${error.message}`);
+    return (data ?? []).map((row: { customer_id: string }) => row.customer_id);
+  }
+
+  private async requireWritableCustomer(auth: AuthContext, customerId: string): Promise<void> {
+    const readableCustomerIds = await this.getReadableCustomerIds(auth);
+    if (!readableCustomerIds.includes(customerId)) {
+      throw new NotFoundError('Customer', customerId);
+    }
+  }
+
+  private async attachFxDecisionReadSummary<T extends Receipt>(
+    companyId: string,
+    receipts: T[],
+  ): Promise<T[]> {
+    const readClient = this.requireReadClient();
+    const decisionIds = [...new Set(receipts.map(rct => rct.fx_decision_id).filter((id): id is string => Boolean(id)))];
+    if (decisionIds.length === 0) {
+      return receipts.map(rct => ({
+        ...rct,
+        base_available: isBaseValueAvailable(rct.base_amount),
+        fx_posting_eligibility: { gate: 'fx_governance', eligible: false, reason: 'missing_decision' },
+        fx_decision: null,
+      }));
+    }
+
+    const { data, error } = await readClient
+      .from('fx_booking_rate_decisions')
+      .select('id, source_category, approval_status, lifecycle_status, decision_version, root_decision_id, supersedes_decision_id, import_origin, booked_rate, deviation_pct, stale_reference')
+      .eq('company_id', companyId)
+      .in('id', decisionIds);
+
+    if (error) throw new Error(`Failed to fetch receipt FX decision summaries: ${error.message}`);
+
+    const decisionRows = (data ?? []) as FxDecisionSummaryRow[];
+    const decisions = new Map<string, FxDecisionSummaryRow>(
+      decisionRows.map((decision: FxDecisionSummaryRow) => [String(decision.id), decision]),
+    );
+
+    return receipts.map(rct => {
+      const decision = rct.fx_decision_id ? decisions.get(rct.fx_decision_id) : null;
+      const fxGate = fxPostingEligibility(decision ? {
+        source_category: String(decision.source_category),
+        approval_status: String(decision.approval_status),
+        lifecycle_status: String(decision.lifecycle_status),
+        stale_reference: Boolean(decision.stale_reference),
+      } : null);
+
+      return {
+        ...rct,
+        base_available: isBaseValueAvailable(rct.base_amount),
+        fx_posting_eligibility: fxGate,
+        fx_decision: decision ? {
+          id: String(decision.id),
+          source_category: String(decision.source_category),
+          approval_status: String(decision.approval_status),
+          lifecycle_status: String(decision.lifecycle_status),
+          decision_version: Number(decision.decision_version),
+          root_decision_id: String(decision.root_decision_id),
+          supersedes_decision_id: decision.supersedes_decision_id ? String(decision.supersedes_decision_id) : null,
+          import_origin: (decision.import_origin ?? null) as Record<string, unknown> | null,
+          booked_rate: Number(decision.booked_rate),
+          deviation_pct: decision.deviation_pct === null ? null : Number(decision.deviation_pct),
+          stale_reference: Boolean(decision.stale_reference),
+          fx_posting_eligible: fxGate.eligible,
+        } : null,
+      };
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -70,7 +238,7 @@ export class ReceiptService {
     options: CreateReceiptOptions = {},
   ): Promise<Receipt> {
     requireRole(auth, 'AR Clerk');
-    await requireCustomerAccess(auth, data.customer_id);
+    await this.requireWritableCustomer(auth, data.customer_id);
 
     // Validate customer
     const customer = await fetchById<Customer>(this.client, 'customers', data.customer_id);
@@ -134,7 +302,7 @@ export class ReceiptService {
       if (options.importOrigin !== undefined) {
         rpcArgs.p_import_origin = options.importOrigin;
       }
-      receiptId = await callRpc<string>(getAdminClient(), 'fx_create_governed_receipt_draft', rpcArgs);
+      receiptId = await callRpc<string>(this.client, 'fx_create_governed_receipt_draft', rpcArgs);
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key')) {
         throw new BusinessError('DUPLICATE_RECEIPT', `Receipt number ${receiptNo} already exists. Please retry.`, 409);
@@ -142,7 +310,15 @@ export class ReceiptService {
       throw error;
     }
 
-    return await fetchById<Receipt>(this.client, 'receipts', receiptId);
+    const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
+    if (!this.readClient) return receipt;
+    return await withOptionalReadEnrichment(
+      receipt,
+      async () => {
+        const [enriched] = await this.attachFxDecisionReadSummary(auth.companyId, [receipt]);
+        return enriched;
+      },
+    );
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -394,51 +570,24 @@ export class ReceiptService {
   async getReceiptById(auth: AuthContext, receiptId: string): Promise<Receipt> {
     requireOperationalReadRole(auth);
     validateUUID(receiptId, 'id');
-    const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
+    const readClient = this.requireReadClient();
+    const receipt = await fetchById<Receipt>(readClient, 'receipts', receiptId);
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
-    await requireCustomerAccess(auth, receipt.customer_id);
-    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
-    return receipt;
+    await assertCustomerVisible(readClient, auth.companyId, receipt.customer_id);
+    const [enriched] = await this.attachFxDecisionReadSummary(auth.companyId, [receipt]);
+    return enriched;
   }
 
   async listReceipts(
     auth: AuthContext,
     filters: Record<string, string | undefined>,
     pagination: PaginationParams,
-  ): Promise<{ receipts: Receipt[]; total: number }> {
+  ): Promise<{ receipts: Receipt[]; total: number; summary: MonetaryCollectionSummary }> {
     requireOperationalReadRole(auth);
-    const allowedIds = await getCustomerAccessFilter(auth);
-    const visibleCustomerIds = await getVisibleCustomerIds(this.client, auth.companyId);
-    if (visibleCustomerIds.length === 0) return { receipts: [], total: 0 };
+    const collection = await this.getAuthoritativeCollection(auth, filters, pagination);
 
-    let query = this.client
-      .from('receipts')
-      .select('*', { count: 'exact' })
-      .eq('company_id', auth.companyId)
-      .in('customer_id', visibleCustomerIds);
-
-    if (allowedIds !== null) {
-      query = query.in('customer_id', allowedIds);
-    }
-
-    if (filters.status) query = query.eq('status', filters.status);
-    if (filters.customer_id) query = query.eq('customer_id', filters.customer_id);
-    if (filters.payment_method) query = query.eq('payment_method', filters.payment_method);
-    if (filters.posting_period) query = query.eq('posting_period', filters.posting_period);
-    if (filters.date_from) query = query.gte('receipt_date', filters.date_from);
-    if (filters.date_to) query = query.lte('receipt_date', filters.date_to);
-    if (filters.search) {
-      const s = `%${filters.search}%`;
-      query = query.or(`receipt_no.ilike.${s},customer_name.ilike.${s},reference_no.ilike.${s}`);
-    }
-
-    const from = (pagination.page - 1) * pagination.page_size;
-    const to = from + pagination.page_size - 1;
-    query = query.order('receipt_date', { ascending: false }).range(from, to);
-
-    const { data, error, count } = await query;
-    if (error) throw new Error(`Failed to list receipts: ${error.message}`);
-    return { receipts: (data ?? []) as Receipt[], total: count ?? 0 };
+    const receipts = await this.attachFxDecisionReadSummary(auth.companyId, collection.rows);
+    return { receipts, total: collection.total, summary: collection.summary };
   }
 
   /**
@@ -450,10 +599,10 @@ export class ReceiptService {
   ): Promise<Receipt[]> {
     requireOperationalReadRole(auth);
     validateUUID(customerId, 'customer_id');
-    await requireCustomerAccess(auth, customerId);
-    await assertCustomerVisible(this.client, auth.companyId, customerId);
+    const readClient = this.requireReadClient();
+    await assertCustomerVisible(readClient, auth.companyId, customerId);
 
-    const { data, error } = await this.client
+    const { data, error } = await readClient
       .from('receipts')
       .select('*')
       .eq('company_id', auth.companyId)

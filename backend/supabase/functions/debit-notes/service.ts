@@ -17,6 +17,7 @@ import type { AuthContext } from '../_shared/auth.ts';
 import type {
   Invoice,
   InvoiceLine,
+  PaginationParams,
 } from '../_shared/types.ts';
 import { InvoiceService } from '../invoices/service.ts';
 import type { CreateInvoiceInput, CreateInvoiceLineInput } from '../invoices/validators.ts';
@@ -27,9 +28,10 @@ export class DebitNoteService {
   private client: SupabaseClient;
   private invoiceService: InvoiceService;
 
-  constructor(client?: SupabaseClient) {
+  /** Trusted mutation client and optional JWT-scoped delegated read client. */
+  constructor(client?: SupabaseClient, readClient: SupabaseClient | null = null) {
     this.client = client ?? getAdminClient();
-    this.invoiceService = new InvoiceService(this.client);
+    this.invoiceService = new InvoiceService(this.client, readClient);
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -81,6 +83,23 @@ export class DebitNoteService {
   // ════════════════════════════════════════════════════════════════════════
   // GET DEBIT NOTE
   // ════════════════════════════════════════════════════════════════════════
+
+  async listDebitNotes(
+    auth: AuthContext,
+    filters: Record<string, string | undefined>,
+    pagination: PaginationParams,
+  ): Promise<{ debitNotes: Invoice[]; total: number }> {
+    const dnFilters = { ...filters, doc_type: 'Debit Note' };
+    const { invoices, total } = await this.invoiceService.listInvoices(auth, dnFilters, pagination);
+    return { debitNotes: invoices, total };
+  }
+
+  getDebitNote(
+    auth: AuthContext,
+    dnId: string,
+  ): Promise<Invoice & { lines: InvoiceLine[] }> {
+    return this.getDebitNoteDetails(auth, dnId);
+  }
 
   async getDebitNoteDetails(
     auth: AuthContext,

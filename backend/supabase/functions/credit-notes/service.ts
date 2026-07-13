@@ -30,13 +30,23 @@ import type { CreateInvoiceInput, CreateInvoiceLineInput } from '../invoices/val
 
 export class CreditNoteService {
   private client: SupabaseClient;
+  private readClient: SupabaseClient | null;
   private invoiceService: InvoiceService;
   private jeService: JournalEntryService;
 
-  constructor(client?: SupabaseClient) {
+  /** Trusted mutation client and optional JWT-scoped delegated read client. */
+  constructor(client?: SupabaseClient, readClient: SupabaseClient | null = null) {
     this.client = client ?? getAdminClient();
-    this.invoiceService = new InvoiceService(this.client);
+    this.readClient = readClient;
+    this.invoiceService = new InvoiceService(this.client, readClient);
     this.jeService = new JournalEntryService(this.client);
+  }
+
+  private requireReadClient(): SupabaseClient {
+    if (!this.readClient) {
+      throw new Error('Authenticated read client is required for credit-note user-domain reads.');
+    }
+    return this.readClient;
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -199,7 +209,7 @@ export class CreditNoteService {
 
     // Fetch referenced invoice if linked
     if (cn.ref_invoice_id) {
-      const refInvoice = await fetchById<Invoice>(this.client, 'invoices', cn.ref_invoice_id);
+      const refInvoice = await fetchById<Invoice>(this.requireReadClient(), 'invoices', cn.ref_invoice_id);
       return {
         ...cn,
         ref_invoice: refInvoice,
@@ -223,8 +233,9 @@ export class CreditNoteService {
     customerId: string,
   ): Promise<Invoice[]> {
     validateUUID(customerId, 'customer_id');
+    const readClient = this.requireReadClient();
 
-    const { data, error } = await this.client
+    const { data, error } = await readClient
       .from('invoices')
       .select('*')
       .eq('company_id', auth.companyId)

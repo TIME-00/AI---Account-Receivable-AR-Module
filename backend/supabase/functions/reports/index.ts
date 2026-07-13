@@ -6,6 +6,7 @@
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
+import { getUserClient } from '../_shared/db.ts';
 import { errorResponse, successResponse, ValidationError } from '../_shared/errors.ts';
 import { parsePagination, validateDate } from '../_shared/validators.ts';
 import { ReportService } from './service.ts';
@@ -83,7 +84,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { route, params } = matchRoute(subPath);
     const companyId = extractCompanyId(req);
     const auth = await getAuthContext(req, companyId);
-    const service = new ReportService();
+    const service = new ReportService(
+      undefined,
+      getUserClient(req.headers.get('Authorization')!),
+    );
 
     // ── Aging Summary (shorthand: /aging) ──
     if (route === 'aging' && req.method === 'GET') {

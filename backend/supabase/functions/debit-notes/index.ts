@@ -9,6 +9,7 @@ import { errorResponse, successResponse } from '../_shared/errors.ts';
 import { parseRequestBody, parsePagination } from '../_shared/validators.ts';
 import { DebitNoteService } from './service.ts';
 import { validateCreateInvoice, validateInvoiceLines } from '../invoices/validators.ts';
+import { getUserClient } from '../_shared/db.ts';
 
 const ROUTES: Record<string, RegExp> = {
   collection: /^\/?$/,
@@ -41,7 +42,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { route, params } = matchRoute(url);
     const companyId = extractCompanyId(req);
     const auth = await getAuthContext(req, companyId);
-    const service = new DebitNoteService();
+    const service = new DebitNoteService(
+      undefined,
+      getUserClient(req.headers.get('Authorization')!),
+    );
 
     if (route === 'collection') {
       if (req.method === 'POST') {

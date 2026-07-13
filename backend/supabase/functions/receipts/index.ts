@@ -6,6 +6,7 @@
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
+import { getUserClient } from '../_shared/db.ts';
 import { errorResponse, successResponse } from '../_shared/errors.ts';
 import { parseRequestBody, parsePagination, validateUUID } from '../_shared/validators.ts';
 import { ReceiptService } from './service.ts';
@@ -51,7 +52,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { route, params } = matchRoute(url);
     const companyId = extractCompanyId(req);
     const auth = await getAuthContext(req, companyId);
-    const service = new ReceiptService();
+    const service = new ReceiptService(
+      undefined,
+      getUserClient(req.headers.get('Authorization')!),
+    );
 
     if (route === 'collection') {
       if (req.method === 'POST') {
@@ -71,8 +75,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           date_to: url.searchParams.get('date_to') ?? undefined,
           search: url.searchParams.get('search') ?? undefined,
         };
-        const { receipts, total } = await service.listReceipts(auth, filters, pagination);
-        return jsonResponse(successResponse(receipts, { total, page: pagination.page, page_size: pagination.page_size }));
+        const { receipts, total, summary } = await service.listReceipts(auth, filters, pagination);
+        return jsonResponse(successResponse(receipts, { total, page: pagination.page, page_size: pagination.page_size, summary }));
       }
     }
 

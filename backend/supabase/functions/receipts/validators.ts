@@ -11,7 +11,7 @@ import {
   validateUUID,
   validateMaxLength,
   validateDate,
-  validateCurrency,
+  validateOperationalCurrencyForWrite,
   requirePositiveNumber,
   validateEnum,
 } from '../_shared/validators.ts';
@@ -59,7 +59,7 @@ export function validateCreateReceipt(body: Record<string, unknown>): CreateRece
   ) as PaymentMethod;
 
   const currency = requireString(body.currency, 'currency');
-  validateCurrency(currency, 'currency');
+  validateOperationalCurrencyForWrite(currency, 'currency');
 
   const receipt_amount = requirePositiveNumber(body.receipt_amount, 'receipt_amount');
 
