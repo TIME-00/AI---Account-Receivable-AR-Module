@@ -363,7 +363,11 @@ export interface Receipt {
   created_at: string;
   posted_by: string | null;
   posted_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string | null;
   updated_at: string;
+  version: number;
   base_available?: boolean;
   fx_posting_eligibility?: {
     gate: 'fx_governance';

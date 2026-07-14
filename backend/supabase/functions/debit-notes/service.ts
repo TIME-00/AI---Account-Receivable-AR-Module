@@ -45,19 +45,8 @@ export class DebitNoteService {
   ): Promise<Invoice & { lines: InvoiceLine[] }> {
     data.doc_type = 'Debit Note';
 
-    // If referencing an original invoice, validate customer consistency
-    if (data.ref_invoice_id) {
-      const refInvoice = await fetchById<Invoice>(this.client, 'invoices', data.ref_invoice_id);
-
-      // Customer must match
-      if (refInvoice.customer_id !== data.customer_id) {
-        throw new ValidationError(
-          'Debit Note customer must match original invoice customer.',
-          { dn_customer: data.customer_id, invoice_customer: refInvoice.customer_id },
-        );
-      }
-    }
-
+    // InvoiceService owns the shared non-disclosing reference contract;
+    // Migration 028 independently enforces it for every table write path.
     return this.invoiceService.createInvoice(auth, data, lines);
   }
 

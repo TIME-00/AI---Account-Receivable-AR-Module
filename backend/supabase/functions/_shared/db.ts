@@ -4,7 +4,44 @@
 // ============================================================================
 
 import { createClient, SupabaseClient } from 'supabase';
-import { AuthorizationError, BusinessError, ConflictError } from './errors.ts';
+import { BusinessError, ConflictError } from './errors.ts';
+
+interface DatabaseErrorLike {
+  message?: string;
+}
+
+/**
+ * Preserve the repository's public database-error contract for both RPC and
+ * direct PostgREST mutations. Only explicit safe prefixes are mapped; unknown
+ * database, schema, network, and runtime failures remain internal errors.
+ */
+export function throwDatabaseError(
+  error: DatabaseErrorLike,
+  fallbackMessage: string,
+): never {
+  const message = error.message ?? fallbackMessage;
+  const deliberatePrefix = /^(BR-[A-Z0-9][A-Z0-9_-]*|AUTH|VALIDATION|CONFIG|CONFLICT|NOT_FOUND):(?:\s|$)/
+    .exec(message)?.[1];
+
+  if (deliberatePrefix === 'CONFLICT') throw new ConflictError(message);
+  if (deliberatePrefix === 'NOT_FOUND') throw new BusinessError('NOT_FOUND', message, 404);
+  if (
+    deliberatePrefix === 'AUTH' ||
+    deliberatePrefix === 'VALIDATION' ||
+    deliberatePrefix === 'CONFIG'
+  ) {
+    throw new BusinessError(deliberatePrefix, message, 400);
+  }
+  if (deliberatePrefix?.startsWith('BR-')) {
+    throw new BusinessError(deliberatePrefix, message, 400);
+  }
+
+  // Preserve the original database/PostgREST object only in server-side logs.
+  // The thrown error is also deliberately generic as defense in depth; the
+  // shared response boundary independently emits a fixed external 500 message.
+  console.error('[DATABASE_ERROR]', { fallbackMessage, error });
+  throw new Error(fallbackMessage);
+}
 
 // ─── Supabase Client Singleton ──────────────────────────────────────────────
 
@@ -107,7 +144,7 @@ export async function executeSQL<T = Record<string, unknown>>(
 /**
  * Call a PostgreSQL RPC and map deliberate database exceptions to API errors.
  * P1 financial mutation RPCs raise prefixed messages such as BR-*, AUTH,
- * NOT_FOUND, CONFIG, and CONFLICT.
+ * VALIDATION, NOT_FOUND, CONFIG, and CONFLICT.
  */
 export async function callRpc<T = unknown>(
   client: SupabaseClient,
@@ -117,26 +154,7 @@ export async function callRpc<T = unknown>(
   const { data, error } = await client.rpc(functionName, params);
 
   if (error) {
-    const message = error.message ?? `RPC ${functionName} failed`;
-    const prefix = message.split(':', 1)[0] ?? 'RPC_ERROR';
-
-    if (prefix === 'AUTH') {
-      throw new AuthorizationError(message);
-    }
-    if (prefix === 'CONFLICT') {
-      throw new ConflictError(message);
-    }
-    if (prefix === 'NOT_FOUND') {
-      throw new BusinessError('NOT_FOUND', message, 404);
-    }
-    if (prefix === 'CONFIG') {
-      throw new BusinessError('CONFIG_ERROR', message, 400);
-    }
-    if (prefix.startsWith('BR-')) {
-      throw new BusinessError(prefix, message, 400);
-    }
-
-    throw new Error(`RPC ${functionName} failed: ${message}`);
+    throwDatabaseError(error, `RPC ${functionName} failed`);
   }
 
   return data as T;

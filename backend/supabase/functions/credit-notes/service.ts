@@ -61,50 +61,9 @@ export class CreditNoteService {
     // Ensure doc_type is Credit Note
     data.doc_type = 'Credit Note';
 
-    // Validate Linked CN constraints
-    if (data.cn_type === 'Linked') {
-      if (!data.ref_invoice_id) {
-        throw new ValidationError(
-          'Linked Credit Note must specify ref_invoice_id (reference to original invoice).',
-          { field: 'ref_invoice_id' },
-        );
-      }
-
-      // Fetch and validate the referenced invoice
-      const refInvoice = await fetchById<Invoice>(this.client, 'invoices', data.ref_invoice_id);
-
-      // Validate ref invoice state
-      if (refInvoice.doc_type !== 'Invoice' && refInvoice.doc_type !== 'Debit Note') {
-        throw new ValidationError(
-          'Linked CN can only reference an Invoice or Debit Note. Cannot reference another Credit Note.',
-          { ref_doc_type: refInvoice.doc_type },
-        );
-      }
-
-      if (!['Open', 'Overdue', 'Partially Paid'].includes(refInvoice.status)) {
-        throw new BusinessError('BR-CN-REF',
-          `Original invoice ${refInvoice.invoice_no} status is ${refInvoice.status}. Cannot issue Linked CN. Only Open/Overdue/Partially Paid are accepted.`,
-          400, { ref_status: refInvoice.status });
-      }
-
-      // Customer must match
-      if (refInvoice.customer_id !== data.customer_id) {
-        throw new ValidationError(
-          'Credit Note customer must match original invoice customer.',
-          { cn_customer: data.customer_id, invoice_customer: refInvoice.customer_id },
-        );
-      }
-
-      // Currency must match
-      if (refInvoice.currency !== data.currency) {
-        throw new ValidationError(
-          'Linked Credit Note currency must match original invoice currency.',
-          { cn_currency: data.currency, invoice_currency: refInvoice.currency },
-        );
-      }
-    }
-
-    // Delegate to InvoiceService for creation
+    // InvoiceService owns the one application-level Linked Credit Note
+    // validation contract. Migration 028 remains authoritative for every
+    // invoice-table write path.
     return this.invoiceService.createInvoice(auth, data, lines);
   }
 
@@ -209,7 +168,23 @@ export class CreditNoteService {
 
     // Fetch referenced invoice if linked
     if (cn.ref_invoice_id) {
-      const refInvoice = await fetchById<Invoice>(this.requireReadClient(), 'invoices', cn.ref_invoice_id);
+      const readClient = this.requireReadClient();
+      const { data: referenceData, error: referenceError } = await readClient
+        .from('invoices')
+        .select('*')
+        .eq('id', cn.ref_invoice_id)
+        .maybeSingle();
+
+      if (referenceError) {
+        throw new Error(`Failed to fetch linked Credit Note reference: ${referenceError.message}`);
+      }
+      if (!referenceData) {
+        // Do not reveal whether the required reference exists outside the
+        // caller's company/customer scope.
+        throw new NotFoundError('Credit Note', cnId);
+      }
+
+      const refInvoice = referenceData as Invoice;
       return {
         ...cn,
         ref_invoice: refInvoice,

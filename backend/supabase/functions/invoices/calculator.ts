@@ -101,6 +101,12 @@ export function calculateLineAmount(input: LineCalcInput): LineCalcResult {
 
   // Step 1: Gross Amount (full precision, no rounding)
   const grossAmount = safeMul(input.quantity, input.unit_price);
+  if (input.discount_amt > grossAmount) {
+    throw new ValidationError('Discount amount cannot exceed the gross line amount.', {
+      field: 'discount_amt',
+      gross_amount: roundTo2(grossAmount),
+    });
+  }
 
   // Step 2: Calculate discount
   const pctDiscount = input.discount_pct > 0

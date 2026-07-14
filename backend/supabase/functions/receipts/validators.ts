@@ -43,6 +43,10 @@ export interface CancelReceiptInput {
   cancel_reason: string;
 }
 
+export interface ClearReceiptInput {
+  clearance_date?: string;
+}
+
 // ─── Create Receipt Validation ──────────────────────────────────────────────
 
 export function validateCreateReceipt(body: Record<string, unknown>): CreateReceiptInput {
@@ -148,6 +152,15 @@ export function validateCancelReceipt(body: Record<string, unknown>): CancelRece
     );
   }
   return { cancel_reason };
+}
+
+export function validateClearReceipt(body: Record<string, unknown>): ClearReceiptInput {
+  const result: ClearReceiptInput = {};
+  if (body.clearance_date !== undefined && body.clearance_date !== null) {
+    result.clearance_date = requireString(body.clearance_date, 'clearance_date');
+    validateDate(result.clearance_date, 'clearance_date');
+  }
+  return result;
 }
 
 // ─── Bounce Receipt Validation ──────────────────────────────────────────────

@@ -321,8 +321,8 @@ export function errorResponse(error: unknown): { status: number; body: Record<st
     };
   }
 
-  // Unknown error
-  const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+  // Unknown errors retain full diagnostic detail only in server-side logs.
+  // Never expose SQL, PostgREST, schema, network, or runtime messages to callers.
   console.error('[UNHANDLED_ERROR]', error);
   return {
     status: 500,
@@ -330,7 +330,7 @@ export function errorResponse(error: unknown): { status: number; body: Record<st
       success: false,
       error: {
         code: 'INTERNAL_ERROR',
-        message,
+        message: 'An unexpected error occurred',
       },
     },
   };

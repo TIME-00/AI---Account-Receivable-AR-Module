@@ -295,6 +295,7 @@ Deno.test('Batch 9D-C invoice and receipt create paths use atomic governed creat
 
 Deno.test('Batch 9D-C governed FX mutation RPCs own snapshot and decision changes', async () => {
   const migration023 = await read('../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+  const migration028 = await read('../../../database/028_linked_credit_note_reference_integrity.sql');
   const invoiceService = await read('invoices/service.ts');
   const receiptService = await read('receipts/service.ts');
 
@@ -306,8 +307,13 @@ Deno.test('Batch 9D-C governed FX mutation RPCs own snapshot and decision change
   assertStringIncludes(migration023, 'UPDATE public.receipts');
   assertStringIncludes(migration023, 'RETURN public.fx_record_booking_decision');
 
-  assertStringIncludes(invoiceService, "'fx_update_governed_invoice_fx'");
-  assertStringIncludes(invoiceService, "'fx_recalculate_invoice_draft_totals'");
+  assertStringIncludes(invoiceService, "'update_draft_invoice'");
+  assertStringIncludes(invoiceService, "'add_draft_invoice_lines'");
+  assertStringIncludes(invoiceService, "'update_draft_invoice_line'");
+  assertStringIncludes(invoiceService, "'delete_draft_invoice_line'");
+  assertStringIncludes(migration028, 'CREATE FUNCTION public.update_draft_invoice');
+  assertStringIncludes(migration028, 'PERFORM public.fx_update_governed_invoice_fx');
+  assertStringIncludes(migration028, 'PERFORM public.fx_recalculate_invoice_draft_totals');
   assertStringIncludes(receiptService, 'updateDraftReceiptFx');
   assertStringIncludes(receiptService, "'fx_update_governed_receipt_fx'");
   assertStringIncludes(migration023, "current_setting('app.fx_governed_mutation', true) IS DISTINCT FROM 'on'");

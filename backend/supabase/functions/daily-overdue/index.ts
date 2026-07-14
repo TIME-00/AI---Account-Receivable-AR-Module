@@ -69,8 +69,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .gt('outstanding', 0);
 
     if (invErr) {
-      result.errors.push(`Failed to fetch overdue invoices: ${invErr.message}`);
-      console.error('[DAILY-OVERDUE] Invoice fetch error:', invErr.message);
+      result.errors.push('Failed to fetch overdue invoices');
+      console.error('[DAILY-OVERDUE] Invoice fetch error:', invErr);
     } else if (overdueInvoices && overdueInvoices.length > 0) {
       // Batch update all discovered overdue invoices
       const invoiceIds = overdueInvoices.map(i => i.id);
@@ -82,7 +82,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .in('status', ['Open', 'Partially Paid']); // Safety: only update non-terminal
 
       if (updateErr) {
-        result.errors.push(`Failed to update overdue invoices: ${updateErr.message}`);
+        result.errors.push('Failed to update overdue invoices');
+        console.error('[DAILY-OVERDUE] Invoice update error:', updateErr);
       } else {
         result.invoices_updated = count ?? invoiceIds.length;
         console.log(`[DAILY-OVERDUE] Updated ${result.invoices_updated} invoices to Overdue`);
@@ -113,7 +114,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .gt('outstanding', 0);
 
     if (severeErr) {
-      result.errors.push(`Failed to fetch severe overdue: ${severeErr.message}`);
+      result.errors.push('Failed to fetch severe overdue invoices');
+      console.error('[DAILY-OVERDUE] Severe-overdue fetch error:', severeErr);
     } else if (severeOverdue && severeOverdue.length > 0) {
       // Deduplicate customer IDs
       const customerIds = [...new Set(severeOverdue.map(i => i.customer_id))];
@@ -158,7 +160,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
             .eq('status', 'Active'); // Optimistic check
 
           if (holdErr) {
-            result.errors.push(`Failed to hold customer ${custId}: ${holdErr.message}`);
+            result.errors.push('Failed to place an overdue customer on hold');
+            console.error('[DAILY-OVERDUE] Customer hold error:', { customerId: custId, error: holdErr });
             continue;
           }
 
@@ -192,7 +195,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           console.log(`[EMAIL_HOOK] Auto-hold notification: Customer ${customer.customer_name} held due to ${daysPastDue}-day overdue invoice ${worstInvoice.invoice_no}`);
 
         } catch (err) {
-          result.errors.push(`Error processing customer ${custId}: ${err instanceof Error ? err.message : 'Unknown'}`);
+          result.errors.push('Failed to process an overdue customer');
+          console.error('[DAILY-OVERDUE] Customer processing error:', { customerId: custId, error: err });
         }
       }
 
@@ -213,7 +217,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
 
   } catch (error) {
-    result.errors.push(error instanceof Error ? error.message : 'Unknown error');
+    result.errors.push('Daily overdue task failed');
     result.execution_time_ms = Date.now() - startTime;
 
     console.error('[DAILY-OVERDUE] Fatal error:', error);

@@ -14,6 +14,7 @@ import {
   validateCreateReceipt,
   validatePostReceipt,
   validateCancelReceipt,
+  validateClearReceipt,
   validateBounceReceipt,
 } from './validators.ts';
 
@@ -85,6 +86,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse(successResponse(receipt));
     }
 
+    if (route === 'single' && req.method === 'DELETE') {
+      await service.deleteDraftReceipt(auth, params.id);
+      return jsonResponse(successResponse({ deleted: true }));
+    }
+
     if (route === 'post' && req.method === 'POST') {
       const body = await parseRequestBody(req);
       const input = validatePostReceipt(body as Record<string, unknown>);
@@ -108,9 +114,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (route === 'clearCheque' && req.method === 'POST') {
       const body = await parseRequestBody(req);
-      const clearanceDate = (body as Record<string, unknown>).clearance_date
-        ? String((body as Record<string, unknown>).clearance_date) : undefined;
-      const result = await service.clearCheque(auth, params.id, clearanceDate);
+      const input = validateClearReceipt(body as Record<string, unknown>);
+      const result = await service.clearCheque(auth, params.id, input);
       return jsonResponse(successResponse(result));
     }
 

@@ -10,9 +10,6 @@ import {
   callRpc,
   getNextSequence,
   fetchById,
-  isFiscalPeriodOpen,
-  getConfigValue,
-  getGLAccountId,
 } from '../_shared/db.ts';
 import {
   BusinessError,
@@ -20,7 +17,6 @@ import {
   BRErrors,
   ValidationError,
 } from '../_shared/errors.ts';
-import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
 import {
   requireRole,
@@ -36,8 +32,13 @@ import type {
   ReceiptStatus,
 } from '../_shared/types.ts';
 import { roundTo2 } from '../invoices/calculator.ts';
-import { JournalEntryService } from '../journal-entries/service.ts';
-import type { CreateReceiptInput, PostReceiptInput, CancelReceiptInput, BounceReceiptInput } from './validators.ts';
+import type {
+  CreateReceiptInput,
+  PostReceiptInput,
+  CancelReceiptInput,
+  ClearReceiptInput,
+  BounceReceiptInput,
+} from './validators.ts';
 import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
 import {
   fxPostingEligibility,
@@ -69,7 +70,6 @@ interface FxDecisionSummaryRow {
 export class ReceiptService {
   private client: SupabaseClient;
   private readClient: SupabaseClient | null;
-  private jeService: JournalEntryService;
 
   /**
    * @param client Trusted mutation client.
@@ -78,7 +78,6 @@ export class ReceiptService {
   constructor(client?: SupabaseClient, readClient: SupabaseClient | null = null) {
     this.client = client ?? getAdminClient();
     this.readClient = readClient;
-    this.jeService = new JournalEntryService(this.client);
   }
 
   /** Require the caller's JWT-scoped client for every user-domain read. */
@@ -365,6 +364,16 @@ export class ReceiptService {
     return { ...postedReceipt, je_no: rpcResult?.je_no };
   }
 
+  async deleteDraftReceipt(auth: AuthContext, receiptId: string): Promise<void> {
+    requireRole(auth, 'AR Clerk');
+    validateUUID(receiptId, 'id');
+    await callRpc(this.client, 'delete_draft_receipt', {
+      p_receipt_id: receiptId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+    });
+  }
+
   // ════════════════════════════════════════════════════════════════════════
 
   // CHEQUE CLEARANCE (Stage 2 — CHQ only)
@@ -383,80 +392,17 @@ export class ReceiptService {
   async clearCheque(
     auth: AuthContext,
     receiptId: string,
-    clearanceDate?: string,
+    input: ClearReceiptInput = {},
   ): Promise<Receipt & { je_no?: string }> {
     requireRole(auth, 'AR Supervisor');
     validateUUID(receiptId, 'id');
 
-    const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
-    if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
-    await requireCustomerAccess(auth, receipt.customer_id);
-    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
-
-    // Validate: must be CHQ and Posted
-    if (receipt.payment_method !== 'CHQ') {
-      throw new ValidationError('Cheque clearance only applies to CHQ payment method.', { payment_method: receipt.payment_method });
-    }
-    if (receipt.status !== 'Posted' && receipt.status !== 'Fully Allocated') {
-      throw new BusinessError('BR-RCT-CHQ',
-        `Cheque clearance requires Posted or Fully Allocated status. Current: ${receipt.status}`, 400);
-    }
-
-    const bankAccount = await fetchById<BankAccount>(this.client, 'bank_accounts', receipt.bank_account_id);
-    const chequeAcctCode = await getConfigValue(this.client, auth.companyId, CONFIG_KEYS.DEFAULT_CHEQUE_ACCT) ?? '1200-002';
-    const chequeAcctId = await getGLAccountId(this.client, auth.companyId, chequeAcctCode);
-    const bankAcctId = bankAccount.gl_account_id;
-
-    let jeNo: string | undefined;
-    if (chequeAcctId && bankAcctId) {
-      const jeDate = clearanceDate ?? new Date().toISOString().slice(0, 10);
-      const postingPeriod = jeDate.slice(0, 7);
-
-      const periodOpen = await isFiscalPeriodOpen(this.client, auth.companyId, postingPeriod);
-      if (!periodOpen) throw BRErrors.JE_007_PERIOD_CLOSED(postingPeriod);
-
-      const jeResult = await this.jeService.createJournalEntry({
-        company_id: auth.companyId,
-        je_date: jeDate,
-        posting_period: postingPeriod,
-        source_type: 'RCT',
-        source_doc_no: receipt.receipt_no,
-        source_doc_id: receiptId,
-        description: `Cheque clearance: ${receipt.receipt_no} — ${receipt.customer_name}`,
-        currency: receipt.currency,
-        exchange_rate: receipt.exchange_rate,
-        base_currency: receipt.base_currency,
-        lines: [
-          {
-            gl_account_id: bankAcctId,
-            description: `Bank (cleared): ${receipt.receipt_no}`,
-            debit_amount: receipt.receipt_amount,
-            credit_amount: 0,
-          },
-          {
-            gl_account_id: chequeAcctId,
-            description: `Cheques on Hand (cleared): ${receipt.receipt_no}`,
-            debit_amount: 0,
-            credit_amount: receipt.receipt_amount,
-          },
-        ],
-        created_by: auth.userId,
-      });
-      jeNo = jeResult.je_no;
-    }
-
-    // Update value_date to clearance date
-    const { data: updated, error } = await this.client
-      .from('receipts')
-      .update({
-        value_date: clearanceDate ?? new Date().toISOString().slice(0, 10),
-      })
-      .eq('id', receiptId)
-      .select()
-      .single();
-
-    if (error) throw new Error(`Failed to clear cheque: ${error.message}`);
-    return { ...(updated as Receipt), je_no: jeNo };
+    return await callRpc<Receipt & { je_no?: string }>(this.client, 'clear_receipt_cheque', {
+      p_receipt_id: receiptId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+      p_clearance_date: input.clearance_date ?? null,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -478,49 +424,12 @@ export class ReceiptService {
     requireRole(auth, 'AR Supervisor');
     validateUUID(receiptId, 'id');
 
-    const receipt = await fetchById<Receipt>(this.client, 'receipts', receiptId);
-    if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
-    await requireCustomerAccess(auth, receipt.customer_id);
-    await assertCustomerVisible(this.client, auth.companyId, receipt.customer_id);
-
-    if (receipt.status !== 'Posted') {
-      throw new BusinessError('BR-RCT-CANCEL',
-        `Only Posted receipts can be cancelled. Current status: ${receipt.status}`, 400);
-    }
-
-    if (receipt.allocated_amount > 0) {
-      throw new BusinessError('BR-RCT-CANCEL-ALLOC',
-        `Receipt ${receipt.receipt_no} has active allocations (allocated: ${receipt.allocated_amount}). Reverse allocations before cancelling.`,
-        400, { allocated_amount: receipt.allocated_amount });
-    }
-
-    // Reverse JE
-    const existingJEs = await this.jeService.findJEsBySourceDoc(receiptId, 'RCT');
-    const activeJE = existingJEs.find(je => !je.is_reversed);
-    if (activeJE) {
-      const postingPeriod = receipt.posting_period ?? receipt.receipt_date.slice(0, 7);
-      await this.jeService.createReversalJE({
-        company_id: auth.companyId,
-        original_je_id: activeJE.id,
-        reversal_date: new Date().toISOString().slice(0, 10),
-        posting_period: postingPeriod,
-        reason: input.cancel_reason,
-        created_by: auth.userId,
-      });
-    }
-
-    const { data: cancelled, error } = await this.client
-      .from('receipts')
-      .update({
-        status: 'Cancelled',
-        unallocated_amount: 0,
-      })
-      .eq('id', receiptId)
-      .select()
-      .single();
-
-    if (error) throw new Error(`Failed to cancel receipt: ${error.message}`);
-    return cancelled as Receipt;
+    return await callRpc<Receipt>(this.client, 'cancel_receipt', {
+      p_receipt_id: receiptId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+      p_cancel_reason: input.cancel_reason,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -571,7 +480,20 @@ export class ReceiptService {
     requireOperationalReadRole(auth);
     validateUUID(receiptId, 'id');
     const readClient = this.requireReadClient();
-    const receipt = await fetchById<Receipt>(readClient, 'receipts', receiptId);
+    const { data: receiptData, error: receiptError } = await readClient
+      .from('receipts')
+      .select('*')
+      .eq('id', receiptId)
+      .maybeSingle();
+
+    if (receiptError) {
+      throw new Error(`Failed to fetch receipt(${receiptId}): ${receiptError.message}`);
+    }
+    if (!receiptData) {
+      throw new NotFoundError('Receipt', receiptId);
+    }
+
+    const receipt = receiptData as Receipt;
     if (receipt.company_id !== auth.companyId) throw new NotFoundError('Receipt', receiptId);
     await assertCustomerVisible(readClient, auth.companyId, receipt.customer_id);
     const [enriched] = await this.attachFxDecisionReadSummary(auth.companyId, [receipt]);

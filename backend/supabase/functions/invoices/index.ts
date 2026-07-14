@@ -6,6 +6,7 @@
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
+import type { AuthContext } from '../_shared/auth.ts';
 import { getUserClient } from '../_shared/db.ts';
 import { errorResponse, successResponse } from '../_shared/errors.ts';
 import { parseRequestBody, parsePagination, validateUUID } from '../_shared/validators.ts';
@@ -16,6 +17,7 @@ import {
   validateCreateInvoiceLine,
   validatePostInvoice,
   validateCancelInvoice,
+  validateCorrectPostedReference,
 } from './validators.ts';
 
 // ─── Route Patterns ─────────────────────────────────────────────────────────
@@ -30,6 +32,7 @@ const ROUTES: Record<string, RegExp> = {
   singleLine: new RegExp(`^\\/${UUID}\\/lines\\/${UUID}\\/?$`, 'i'),
   post:       new RegExp(`^\\/${UUID}\\/post\\/?$`, 'i'),
   cancel:     new RegExp(`^\\/${UUID}\\/cancel\\/?$`, 'i'),
+  reference:  new RegExp(`^\\/${UUID}\\/reference\\/?$`, 'i'),
 };
 
 function getSubPath(pathname: string): string {
@@ -54,20 +57,42 @@ function matchRoute(url: URL): { route: string; params: Record<string, string> }
   return { route: 'notFound', params: {} };
 }
 
+function handleInvoiceCORS(): Response {
+  const response = handleCORS();
+  response.headers.set(
+    'Access-Control-Allow-Methods',
+    'POST, GET, OPTIONS, PUT, PATCH, DELETE',
+  );
+  return response;
+}
+
 // ─── Main Handler ───────────────────────────────────────────────────────────
 
-Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method === 'OPTIONS') return handleCORS();
+export interface InvoiceHandlerDependencies {
+  authenticate(req: Request, companyId: string): Promise<AuthContext>;
+  createService(authorizationHeader: string): InvoiceService;
+}
+
+const productionDependencies: InvoiceHandlerDependencies = {
+  authenticate: getAuthContext,
+  createService: (authorizationHeader) => new InvoiceService(
+    undefined,
+    getUserClient(authorizationHeader),
+  ),
+};
+
+export async function handleInvoiceRequest(
+  req: Request,
+  dependencies: InvoiceHandlerDependencies = productionDependencies,
+): Promise<Response> {
+  if (req.method === 'OPTIONS') return handleInvoiceCORS();
 
   try {
     const url = new URL(req.url);
     const { route, params } = matchRoute(url);
     const companyId = extractCompanyId(req);
-    const auth = await getAuthContext(req, companyId);
-    const service = new InvoiceService(
-      undefined,
-      getUserClient(req.headers.get('Authorization')!),
-    );
+    const auth = await dependencies.authenticate(req, companyId);
+    const service = dependencies.createService(req.headers.get('Authorization')!);
 
     // ── Collection: list / create ──
     if (route === 'collection') {
@@ -143,6 +168,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
     }
 
+    // ── Posted Reference Correction ──
+    if (route === 'reference') {
+      if (req.method !== 'PATCH') {
+        return jsonResponse(
+          {
+            success: false,
+            error: {
+              code: 'METHOD_NOT_ALLOWED',
+              message: `Method ${req.method} is not allowed for posted reference correction`,
+            },
+          },
+          405,
+        );
+      }
+      const { id } = params;
+      const body = await parseRequestBody(req);
+      const input = validateCorrectPostedReference(body as Record<string, unknown>);
+      const result = await service.correctPostedReference(auth, id, input.reference_no);
+      return jsonResponse(successResponse(result));
+    }
+
     // ── Post Invoice ──
     if (route === 'post' && req.method === 'POST') {
       const { id } = params;
@@ -171,4 +217,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { status, body } = errorResponse(error);
     return jsonResponse(body, status);
   }
-});
+}
+
+export function createInvoiceHandler(
+  dependencies: InvoiceHandlerDependencies = productionDependencies,
+): (req: Request) => Promise<Response> {
+  return (req) => handleInvoiceRequest(req, dependencies);
+}
+
+export const handler = createInvoiceHandler();
+
+if (import.meta.main) {
+  Deno.serve(handler);
+}

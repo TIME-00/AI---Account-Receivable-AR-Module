@@ -17,7 +17,6 @@ import {
 import {
   BusinessError,
   NotFoundError,
-  ConflictError,
   BRErrors,
   ValidationError,
 } from '../_shared/errors.ts';
@@ -28,7 +27,7 @@ import {
   requireOperationalReadRole,
   requireCustomerAccess,
 } from '../_shared/auth.ts';
-import { validateUUID } from '../_shared/validators.ts';
+import { validateMaxLength, validateUUID } from '../_shared/validators.ts';
 import type {
   Invoice,
   InvoiceLine,
@@ -38,7 +37,6 @@ import type {
 } from '../_shared/types.ts';
 import { calculateLineAmount, calculateInvoiceTotals, roundTo2 } from './calculator.ts';
 import type { CreateInvoiceInput, CreateInvoiceLineInput, PostInvoiceInput, CancelInvoiceInput } from './validators.ts';
-import { JournalEntryService } from '../journal-entries/service.ts';
 import { CustomerService } from '../customers/service.ts';
 import { assertCustomerVisible, getVisibleCustomerIds } from '../_shared/visibility.ts';
 import {
@@ -66,12 +64,17 @@ interface FxDecisionSummaryRow {
   stale_reference: boolean;
 }
 
+const LINKED_CREDIT_NOTE_REFERENCE_STATUSES: InvoiceStatus[] = [
+  'Open',
+  'Overdue',
+  'Partially Paid',
+];
+
 // ─── Invoice Service ────────────────────────────────────────────────────────
 
 export class InvoiceService {
   private client: SupabaseClient;
   private readClient: SupabaseClient | null;
-  private jeService: JournalEntryService;
   private customerService: CustomerService;
 
   /**
@@ -81,7 +84,6 @@ export class InvoiceService {
   constructor(client?: SupabaseClient, readClient: SupabaseClient | null = null) {
     this.client = client ?? getAdminClient();
     this.readClient = readClient;
-    this.jeService = new JournalEntryService(this.client);
     this.customerService = new CustomerService(this.client);
   }
 
@@ -170,6 +172,120 @@ export class InvoiceService {
     const readableCustomerIds = await this.getReadableCustomerIds(auth);
     if (!readableCustomerIds.includes(customerId)) {
       throw new NotFoundError('Customer', customerId);
+    }
+  }
+
+  /**
+   * Defense-in-depth validation for Credit/Debit Note creation and Draft FX
+   * edits. Migration 028 remains the authoritative all-write-path boundary.
+   * Invalid references deliberately share one non-disclosing public contract.
+   */
+  private async validateLinkedCreditNoteReference(
+    data: Pick<CreateInvoiceInput, 'doc_type' | 'cn_type' | 'ref_invoice_id' | 'customer_id' | 'currency'>,
+    companyId: string,
+    documentId?: string,
+  ): Promise<void> {
+    if (data.doc_type === 'Debit Note') {
+      if (data.cn_type || data.ref_invoice_id === documentId) {
+        throw new BusinessError(
+          'BR-DN-REF',
+          'Debit Note reference is invalid or unavailable.',
+          400,
+          { field: 'ref_invoice_id' },
+        );
+      }
+      if (!data.ref_invoice_id) return;
+
+      const { data: referenceData, error } = await this.client
+        .from('invoices')
+        .select('id, company_id, customer_id, currency, doc_type, status')
+        .eq('id', data.ref_invoice_id)
+        .maybeSingle();
+      if (error) {
+        throw new Error(`Failed to validate Debit Note reference: ${error.message}`);
+      }
+      const reference = referenceData as Pick<
+        Invoice,
+        'id' | 'company_id' | 'customer_id' | 'currency' | 'doc_type' | 'status'
+      > | null;
+      const valid = reference !== null
+        && ['Invoice', 'Credit Note'].includes(reference.doc_type)
+        && reference.company_id === companyId
+        && reference.customer_id === data.customer_id
+        && reference.currency === data.currency
+        && ['Open', 'Overdue', 'Partially Paid', 'Paid'].includes(reference.status);
+      if (!valid) {
+        throw new BusinessError(
+          'BR-DN-REF',
+          'Debit Note reference is invalid or unavailable.',
+          400,
+          { field: 'ref_invoice_id' },
+        );
+      }
+      return;
+    }
+
+    if (data.doc_type !== 'Credit Note') {
+      if (data.cn_type || data.ref_invoice_id) {
+        throw new BusinessError(
+          'BR-DOC-REF',
+          'Financial document reference is invalid or unavailable.',
+          400,
+          { field: 'ref_invoice_id' },
+        );
+      }
+      return;
+    }
+
+    if (data.cn_type !== 'Linked') {
+      if (data.ref_invoice_id) {
+        throw new BusinessError(
+          'BR-CN-REF',
+          'ref_invoice_id is only permitted for Linked Credit Notes.',
+          400,
+          { field: 'ref_invoice_id' },
+        );
+      }
+      return;
+    }
+
+    if (!data.ref_invoice_id || data.ref_invoice_id === documentId) {
+      throw new BusinessError(
+        'BR-CN-REF',
+        'Linked Credit Note reference is invalid or unavailable.',
+        400,
+        { field: 'ref_invoice_id' },
+      );
+    }
+
+    const { data: referenceData, error } = await this.client
+      .from('invoices')
+      .select('id, company_id, customer_id, currency, doc_type, status')
+      .eq('id', data.ref_invoice_id)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to validate Linked Credit Note reference: ${error.message}`);
+    }
+
+    const reference = referenceData as Pick<
+      Invoice,
+      'id' | 'company_id' | 'customer_id' | 'currency' | 'doc_type' | 'status'
+    > | null;
+    const valid = reference !== null
+      && reference.doc_type === 'Invoice'
+      && reference.company_id === companyId
+      && reference.customer_id === data.customer_id
+      && reference.currency === data.currency
+      && LINKED_CREDIT_NOTE_REFERENCE_STATUSES.includes(reference.status);
+
+    if (!valid) {
+      throw new BusinessError(
+        'BR-CN-REF',
+        'Linked Credit Note reference is invalid or unavailable.',
+        400,
+        { field: 'ref_invoice_id' },
+      );
     }
   }
 
@@ -297,6 +413,8 @@ export class InvoiceService {
     if (customer.status === 'Inactive' && data.doc_type !== 'Credit Note') {
       throw BRErrors.CUS_001_INACTIVE(customer.customer_name);
     }
+
+    await this.validateLinkedCreditNoteReference(data, auth.companyId);
 
     // Determine document sequence type
     const seqType = data.doc_type === 'Invoice' ? 'INV'
@@ -447,16 +565,6 @@ export class InvoiceService {
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
     const rate = exchangeRate ?? invoice.exchange_rate;
 
-    // Get current max line_no
-    const { data: existingLines } = await this.client
-      .from('invoice_lines')
-      .select('line_no')
-      .eq('invoice_id', invoiceId)
-      .order('line_no', { ascending: false })
-      .limit(1);
-
-    let nextLineNo = (existingLines?.[0]?.line_no ?? 0) + 10;
-
     const insertRows: Record<string, unknown>[] = [];
 
     for (const line of lines) {
@@ -481,7 +589,6 @@ export class InvoiceService {
 
       insertRows.push({
         invoice_id: invoiceId,
-        line_no: nextLineNo,
         description: line.description,
         item_code: line.item_code ?? null,
         product_id: line.product_id ?? null,
@@ -499,21 +606,15 @@ export class InvoiceService {
         cost_center: line.cost_center ?? null,
         line_remarks: line.line_remarks ?? null,
       });
-
-      nextLineNo += 10;
     }
 
-    const { data: created, error } = await this.client
-      .from('invoice_lines')
-      .insert(insertRows)
-      .select();
-
-    if (error) throw new Error(`Failed to add invoice lines: ${error.message}`);
-
-    // Recalculate header totals
-    await this.recalculateTotals(invoiceId, rate);
-
-    return (created ?? []) as InvoiceLine[];
+    void rate;
+    return await callRpc<InvoiceLine[]>(this.client, 'add_draft_invoice_lines', {
+      p_invoice_id: invoiceId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+      p_lines: insertRows,
+    });
   }
 
   /**
@@ -574,18 +675,13 @@ export class InvoiceService {
       if (updatePayload[key] === undefined) delete updatePayload[key];
     });
 
-    const { data: updated, error } = await this.client
-      .from('invoice_lines')
-      .update(updatePayload)
-      .eq('id', lineId)
-      .select()
-      .single();
-
-    if (error) throw new Error(`Failed to update line: ${error.message}`);
-
-    await this.recalculateTotals(invoiceId, invoice.exchange_rate);
-
-    return updated as InvoiceLine;
+    return await callRpc<InvoiceLine>(this.client, 'update_draft_invoice_line', {
+      p_invoice_id: invoiceId,
+      p_line_id: lineId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+      p_changes: updatePayload,
+    });
   }
 
   /**
@@ -600,15 +696,12 @@ export class InvoiceService {
     const line = await this.fetchInvoiceLineOrThrow(lineId);
     if (line.invoice_id !== invoiceId) throw new NotFoundError('InvoiceLine', lineId);
 
-    const { error } = await this.client
-      .from('invoice_lines')
-      .delete()
-      .eq('id', lineId)
-      .eq('invoice_id', invoiceId);
-
-    if (error) throw new Error(`Failed to delete line: ${error.message}`);
-
-    await this.recalculateTotals(invoiceId, invoice.exchange_rate);
+    await callRpc(this.client, 'delete_draft_invoice_line', {
+      p_invoice_id: invoiceId,
+      p_line_id: lineId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -698,71 +791,18 @@ export class InvoiceService {
 
     const invoice = await this.fetchInvoiceOrThrow(invoiceId);
     if (invoice.company_id !== auth.companyId) throw new NotFoundError('Invoice', invoiceId);
-    await requireCustomerAccess(auth, invoice.customer_id);
-    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
-    // Only Open invoices can be cancelled
-    if (invoice.status !== 'Open') {
-      if (invoice.status === 'Partially Paid') {
-        throw BRErrors.INV_004_PARTIALLY_PAID(invoice.invoice_no);
-      }
-      throw new BusinessError('BR-INV-003',
-        `Only Open invoices can be cancelled. Current status: ${invoice.status}`, 400);
-    }
-
-    // Check no active allocations
-    const { count: allocCount } = await this.client
-      .from('allocation_details')
-      .select('*', { count: 'exact', head: true })
-      .eq('invoice_id', invoiceId)
-      .eq('status', 'Active');
-
-    if (allocCount && allocCount > 0) {
-      throw BRErrors.INV_003_CANNOT_CANCEL(invoice.invoice_no);
-    }
-
-    // Check outstanding = total_amount (no partial payments via CN either)
-    if (Math.abs(invoice.outstanding - invoice.total_amount) > 0.01) {
-      throw BRErrors.INV_003_CANNOT_CANCEL(invoice.invoice_no);
-    }
-
-    // Generate reversal JE (BR-JE-004)
-    const existingJEs = await this.jeService.findJEsBySourceDoc(invoiceId);
-    const activeJE = existingJEs.find(je => !je.is_reversed);
-
-    if (activeJE) {
-      const postingPeriod = invoice.posting_period ?? invoice.invoice_date.slice(0, 7);
-      await this.jeService.createReversalJE({
-        company_id: auth.companyId,
-        original_je_id: activeJE.id,
-        reversal_date: new Date().toISOString().slice(0, 10),
-        posting_period: postingPeriod,
-        reason: input.cancel_reason,
-        created_by: auth.userId,
-      });
-    }
-
-    // Update invoice status
-    const { data: cancelled, error } = await this.client
-      .from('invoices')
-      .update({
-        status: 'Cancelled',
-        outstanding: 0,
-        cancelled_by: auth.userId,
-        cancelled_at: new Date().toISOString(),
-        cancel_reason: input.cancel_reason,
-        version: invoice.version + 1,
-      })
-      .eq('id', invoiceId)
-      .eq('version', invoice.version)
-      .select()
-      .single();
-
-    if (error || !cancelled) {
-      throw new ConflictError('Invoice was modified by another user during cancellation.');
-    }
-
-    return cancelled as Invoice;
+    // Migration 028 keeps every cancellation precondition, reversal journal,
+    // status mutation, caller authorization, assignment scope, and customer
+    // visibility check in one PostgreSQL transaction. The governed RPC remains
+    // the authoritative financial mutation boundary.
+    return await callRpc<Invoice>(this.client, 'cancel_invoice', {
+      p_invoice_id: invoiceId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+      p_cancel_reason: input.cancel_reason,
+      p_expected_version: invoice.version,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -777,16 +817,34 @@ export class InvoiceService {
     validateUUID(invoiceId, 'id');
     const readClient = this.requireReadClient();
 
-    const invoice = await fetchById<Invoice>(readClient, 'invoices', invoiceId);
+    // A caller-scoped lookup intentionally makes a nonexistent invoice and an
+    // RLS-hidden invoice indistinguishable. `maybeSingle()` returns a clean
+    // null for both cases; genuine PostgREST/database errors remain failures.
+    const { data: invoiceData, error: invoiceError } = await readClient
+      .from('invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .maybeSingle();
+
+    if (invoiceError) {
+      throw new Error(`Failed to fetch invoice(${invoiceId}): ${invoiceError.message}`);
+    }
+    if (!invoiceData) throw new NotFoundError('Invoice', invoiceId);
+
+    const invoice = invoiceData as Invoice;
     if (invoice.company_id !== auth.companyId) throw new NotFoundError('Invoice', invoiceId);
 
     await assertCustomerVisible(readClient, auth.companyId, invoice.customer_id);
 
-    const { data: lines } = await readClient
+    const { data: lines, error: linesError } = await readClient
       .from('invoice_lines')
       .select('*')
       .eq('invoice_id', invoiceId)
       .order('line_no');
+
+    if (linesError) {
+      throw new Error(`Failed to fetch invoice lines for invoice(${invoiceId}): ${linesError.message}`);
+    }
 
     const [enriched] = await this.attachFxDecisionReadSummary(auth.companyId, [invoice]);
     return { ...enriched, lines: (lines ?? []) as InvoiceLine[] };
@@ -837,45 +895,61 @@ export class InvoiceService {
     if (data.reason_code !== undefined) updatePayload.reason_code = data.reason_code;
     if (data.reason_desc !== undefined) updatePayload.reason_desc = data.reason_desc;
 
-    if (fxMaterialChange) {
-      const governedRate = Number(updatePayload.exchange_rate ?? invoice.exchange_rate);
-      await callRpc<string>(getAdminClient(), 'fx_update_governed_invoice_fx', {
-        p_company_id: auth.companyId,
-        p_invoice_id: invoiceId,
-        p_actor_user_id: auth.userId,
-        p_currency: nextCurrency,
-        p_invoice_date: nextDate,
-        p_exchange_rate: governedRate,
-        p_explicit_rate_supplied: data.exchange_rate !== undefined,
-        p_override_reason: data.fx_override_reason ?? null,
-      });
+    if (
+      data.currency !== undefined
+      && (
+        (invoice.doc_type === 'Credit Note' && invoice.cn_type === 'Linked')
+        || (invoice.doc_type === 'Debit Note' && invoice.ref_invoice_id)
+      )
+    ) {
+      await this.validateLinkedCreditNoteReference({
+        doc_type: invoice.doc_type,
+        cn_type: invoice.cn_type ?? undefined,
+        ref_invoice_id: invoice.ref_invoice_id ?? undefined,
+        customer_id: invoice.customer_id,
+        currency: nextCurrency,
+      }, auth.companyId, invoice.id);
+    }
 
-      const nonProtectedPayload = { ...updatePayload };
-      delete nonProtectedPayload.currency;
-      delete nonProtectedPayload.invoice_date;
-      delete nonProtectedPayload.exchange_rate;
-      if (Object.keys(nonProtectedPayload).length > 0) {
-        const { error: nonProtectedError } = await this.client
-          .from('invoices')
-          .update(nonProtectedPayload)
-          .eq('id', invoiceId);
-        if (nonProtectedError) throw new Error(`Failed to update invoice: ${nonProtectedError.message}`);
-      }
-      return await this.fetchInvoiceOrThrow(invoiceId);
+    if (fxMaterialChange) {
+      updatePayload.fx_explicit_rate_supplied = data.exchange_rate !== undefined;
+      updatePayload.fx_override_reason = data.fx_override_reason ?? null;
     }
 
     if (Object.keys(updatePayload).length === 0) return invoice;
+    return await callRpc<Invoice>(this.client, 'update_draft_invoice', {
+      p_invoice_id: invoiceId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+      p_changes: updatePayload,
+    });
+  }
 
-    const { data: updated, error } = await this.client
-      .from('invoices')
-      .update(updatePayload)
-      .eq('id', invoiceId)
-      .select()
-      .single();
+  /**
+   * Correct only the external reference of an already-posted Invoice-family
+   * document. Migration 028 independently locks and authorizes the target and
+   * writes immutable audit evidence; no trusted table UPDATE is composed here.
+   */
+  async correctPostedReference(
+    auth: AuthContext,
+    invoiceId: string,
+    referenceNo: string | null,
+  ): Promise<Invoice> {
+    requireRole(auth, 'AR Clerk');
+    validateUUID(invoiceId, 'id');
+    if (referenceNo !== null) {
+      if (referenceNo.trim().length === 0) {
+        throw new ValidationError('reference_no must be non-blank or null');
+      }
+      validateMaxLength(referenceNo, 50, 'reference_no');
+    }
 
-    if (error) throw new Error(`Failed to update invoice: ${error.message}`);
-
-    return updated as Invoice;
+    return await callRpc<Invoice>(this.client, 'correct_posted_invoice_reference', {
+      p_invoice_id: invoiceId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+      p_reference_no: referenceNo,
+    });
   }
 
   /**
@@ -883,46 +957,17 @@ export class InvoiceService {
    */
   async deleteDraftInvoice(auth: AuthContext, invoiceId: string): Promise<void> {
     requireRole(auth, 'AR Clerk');
-    const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
-    await requireCustomerAccess(auth, invoice.customer_id);
-    await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
-
-    const { count: importReferenceCount, error: importReferenceError } = await this.client
-      .from('import_rows')
-      .select('id', { count: 'exact', head: true })
-      .eq('invoice_id', invoiceId);
-
-    if (importReferenceError) {
-      throw new Error(`Failed to check invoice import references: ${importReferenceError.message}`);
-    }
-    if ((importReferenceCount ?? 0) > 0) {
-      throw new ConflictError(
-        'Imported draft invoices are retained as import audit evidence and cannot be deleted. '
-        + 'Post and cancel the invoice through the supported workflow when cleanup is required.',
-      );
-    }
-
-    // Delete lines first (CASCADE should handle, but explicit is safer)
-    await this.client.from('invoice_lines').delete().eq('invoice_id', invoiceId);
-    const { error } = await this.client.from('invoices').delete().eq('id', invoiceId);
-    if (error) throw new Error(`Failed to delete invoice: ${error.message}`);
+    validateUUID(invoiceId, 'id');
+    await callRpc(this.client, 'delete_draft_invoice', {
+      p_invoice_id: invoiceId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════════
   // PRIVATE HELPERS
   // ════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Recalculate invoice header totals from line items.
-   */
-  private async recalculateTotals(invoiceId: string, exchangeRate: number): Promise<void> {
-    void exchangeRate;
-    const invoice = await this.fetchInvoiceOrThrow(invoiceId);
-    await callRpc<void>(getAdminClient(), 'fx_recalculate_invoice_draft_totals', {
-      p_company_id: invoice.company_id,
-      p_invoice_id: invoiceId,
-    });
-  }
 
   /**
    * Fetch and validate that invoice is in Draft status.

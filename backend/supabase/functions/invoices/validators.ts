@@ -70,6 +70,10 @@ export interface CancelInvoiceInput {
   cancel_reason: string;
 }
 
+export interface CorrectPostedReferenceInput {
+  reference_no: string | null;
+}
+
 // ─── Create Invoice Validation ──────────────────────────────────────────────
 
 export function validateCreateInvoice(body: Record<string, unknown>): CreateInvoiceInput {
@@ -139,9 +143,25 @@ export function validateCreateInvoice(body: Record<string, unknown>): CreateInvo
     if (result.cn_type === 'Linked') {
       result.ref_invoice_id = requireString(body.ref_invoice_id, 'ref_invoice_id');
       validateUUID(result.ref_invoice_id, 'ref_invoice_id');
-    } else if (body.ref_invoice_id) {
-      result.ref_invoice_id = optionalUUID(body.ref_invoice_id, 'ref_invoice_id') ?? undefined;
+    } else if (body.ref_invoice_id !== undefined && body.ref_invoice_id !== null) {
+      throw new ValidationError(
+        'ref_invoice_id is only permitted for Linked Credit Notes.',
+        { field: 'ref_invoice_id' },
+      );
     }
+  } else if (doc_type === 'Debit Note') {
+    if (body.cn_type !== undefined && body.cn_type !== null) {
+      throw new ValidationError(
+        'cn_type is only permitted for Credit Notes.',
+        { field: 'cn_type' },
+      );
+    }
+    result.ref_invoice_id = optionalUUID(body.ref_invoice_id, 'ref_invoice_id') ?? undefined;
+  } else if (body.cn_type != null || body.ref_invoice_id != null) {
+    throw new ValidationError(
+      'Credit/Debit Note reference fields are not permitted for a normal Invoice.',
+      { field: body.cn_type != null ? 'cn_type' : 'ref_invoice_id' },
+    );
   }
 
   return result;
@@ -243,4 +263,35 @@ export function validateCancelInvoice(body: Record<string, unknown>): CancelInvo
     );
   }
   return { cancel_reason };
+}
+
+export function validateCorrectPostedReference(
+  body: Record<string, unknown>,
+): CorrectPostedReferenceInput {
+  const unsupportedFields = Object.keys(body).filter((field) => field !== 'reference_no');
+  if (unsupportedFields.length > 0) {
+    throw new ValidationError(
+      `Unsupported field(s): ${unsupportedFields.join(', ')}. Only reference_no is permitted.`,
+      { fields: unsupportedFields },
+    );
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(body, 'reference_no')) {
+    throw new ValidationError('reference_no is required.', { field: 'reference_no' });
+  }
+
+  const referenceNo = body.reference_no;
+  if (referenceNo === null) return { reference_no: null };
+  if (typeof referenceNo !== 'string') {
+    throw new ValidationError('reference_no must be a string or null.', {
+      field: 'reference_no',
+    });
+  }
+  if (referenceNo.trim().length === 0) {
+    throw new ValidationError('reference_no must be non-blank or null.', {
+      field: 'reference_no',
+    });
+  }
+  validateMaxLength(referenceNo, 50, 'reference_no');
+  return { reference_no: referenceNo };
 }
