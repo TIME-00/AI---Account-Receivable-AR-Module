@@ -4455,3 +4455,183 @@ Deno.test('Batch 9D-D invoice and receipt read contracts expose additive FX gove
   assert(!sharedTypes.includes('fx_decision_status?: string | null'), 'Unexpected temporary concatenated fx_decision_status field');
   assert(sharedTypes.includes('base_available?: boolean'), 'Expected optional additive base availability field');
 });
+
+// Migration 029 tests are static/local contract evidence. They verify the
+// committed production SQL and real Edge dispatcher composition, but do not
+// represent PostgreSQL installation or staging concurrency proof.
+Deno.test('Batch 9D-D Migration 029 statically hardens governed sequence generation without changing callers', async () => {
+  const migration029 = await read('../../../../database/029_batch_9d_d_staging_runtime_defect_remediation.sql');
+  const migration028 = await read('../../../../database/028_linked_credit_note_reference_integrity.sql');
+  const migration002 = await read('../../../../database/002_create_views.sql');
+  const migration007 = await read('../../../../database/007_financial_rpcs.sql');
+  const migration023 = await read('../../../../database/023_fx_booking_rate_rpcs_and_immutability.sql');
+  const sharedDb = await read('../_shared/db.ts');
+
+  assertEquals((migration029.match(/^BEGIN;$/gm) ?? []).length, 1);
+  assertEquals((migration029.match(/^COMMIT;$/gm) ?? []).length, 1);
+  assertEquals(
+    (migration029.match(/CREATE OR REPLACE FUNCTION public\.get_next_sequence\(/g) ?? []).length,
+    1,
+  );
+  assert(migration029.includes(
+    "pg_catalog.to_regprocedure(\n    'public.get_next_sequence(uuid,character varying,character varying)'",
+  ));
+  assert(migration029.includes(
+    "'public.clear_receipt_cheque(uuid,uuid,uuid,date)'",
+  ));
+
+  const sequenceStart = migration029.indexOf('CREATE OR REPLACE FUNCTION public.get_next_sequence(');
+  const sequenceEnd = migration029.indexOf('\n$$;', sequenceStart) + '\n$$;'.length;
+  const sequence = migration029.slice(sequenceStart, sequenceEnd);
+  assert(sequenceStart >= 0 && sequenceEnd > sequenceStart);
+  assert(sequence.includes('RETURNS pg_catalog.varchar(30)'));
+  assert(sequence.includes('VOLATILE'));
+  assert(sequence.includes('SECURITY INVOKER'));
+  assert(sequence.includes("SET search_path = ''"));
+  assert(!/EXECUTE\s+(?:FORMAT|IMMEDIATE)/i.test(sequence));
+
+  assert(sequence.includes('public.document_sequences'));
+  assertEquals(
+    (sequence.match(/(?<!public\.)\bdocument_sequences\b/g) ?? []).length,
+    0,
+    'The replacement function must not contain an unqualified document_sequences reference',
+  );
+  for (const qualifiedBuiltin of [
+    'pg_catalog.date_part',
+    'pg_catalog.pg_advisory_xact_lock',
+    'pg_catalog.hashtextextended',
+    'pg_catalog.concat',
+    'pg_catalog.max',
+    'pg_catalog.now',
+    'pg_catalog.lpad',
+  ]) {
+    assert(sequence.includes(qualifiedBuiltin), `Expected schema-qualified ${qualifiedBuiltin}`);
+  }
+
+  const advisoryLock = sequence.indexOf('pg_catalog.pg_advisory_xact_lock(');
+  const customerRowLock = sequence.indexOf('ORDER BY ds.current_year, ds.current_month, ds.id');
+  const customerForUpdate = sequence.indexOf('FOR UPDATE;', customerRowLock);
+  const customerUpsert = sequence.indexOf('ON CONFLICT (company_id, doc_type, current_year, current_month)', customerForUpdate);
+  assert(advisoryLock >= 0 && customerRowLock > advisoryLock
+    && customerForUpdate > customerRowLock && customerUpsert > customerForUpdate);
+  assert(sequence.includes('last_sequence = sequence_row.last_sequence + 1'));
+  assert(sequence.includes("v_result := 'CUST-'"));
+  for (const documentType of ['CUST', 'INV', 'CN', 'DN', 'RCT', 'JE']) {
+    assert(sequence.includes(`WHEN '${documentType}'`), `Missing ${documentType} numbering compatibility`);
+  }
+  assert(sequence.includes("v_result := 'JE-' || p_source_type || '-'"));
+
+  assert(migration028.includes("v_je_no := public.get_next_sequence(p_company_id, 'JE', 'RCT');"));
+  for (const sourceType of ["'INV'", "'CN'", "'DN'", "'RCT'", "'ADJ'", "'REV'"]) {
+    const callers = `${migration007}\n${migration023}\n${migration028}`;
+    assert(callers.includes(sourceType), `Expected preserved ${sourceType} caller/source contract`);
+  }
+  assert(sharedDb.includes("client.rpc('get_next_sequence'"));
+  assert(migration002.includes('RETURNS VARCHAR(30)'));
+  assert(!/GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.get_next_sequence/i.test(migration029));
+  assert(!/REVOKE\s+.*public\.get_next_sequence/i.test(migration029));
+
+  const clearanceStart = migration028.indexOf('CREATE FUNCTION public.clear_receipt_cheque(');
+  const clearanceEnd = migration028.indexOf('\n$$;', clearanceStart);
+  const clearance = migration028.slice(clearanceStart, clearanceEnd);
+  const sequenceCall = clearance.indexOf("public.get_next_sequence(p_company_id, 'JE', 'RCT')");
+  const journalInsert = clearance.indexOf('INSERT INTO public.journal_entries', sequenceCall);
+  const receiptUpdate = clearance.indexOf('UPDATE public.receipts', journalInsert);
+  assert(sequenceCall >= 0 && journalInsert > sequenceCall && receiptUpdate > journalInsert);
+  assert(!/^\s*COMMIT;/im.test(clearance), 'Late failure must roll back sequence, journal, and Receipt mutations together');
+});
+
+Deno.test('Batch 9D-D Migration 029 statically makes posted-reference target scope authorization-safe', async () => {
+  const migration029 = await read('../../../../database/029_batch_9d_d_staging_runtime_defect_remediation.sql');
+  const functionStart = migration029.indexOf(
+    'CREATE OR REPLACE FUNCTION public.correct_posted_invoice_reference(',
+  );
+  const revokeStart = migration029.indexOf(
+    'REVOKE ALL ON FUNCTION public.correct_posted_invoice_reference(',
+    functionStart,
+  );
+  const body = migration029.slice(functionStart, revokeStart);
+
+  assertEquals(
+    (migration029.match(/CREATE OR REPLACE FUNCTION public\.correct_posted_invoice_reference\(/g) ?? []).length,
+    1,
+  );
+  assert(migration029.includes(
+    "'public.correct_posted_invoice_reference(uuid,uuid,uuid,text)'",
+  ));
+  assert(body.includes('RETURNS pg_catalog.jsonb'));
+  assert(body.includes('SECURITY DEFINER'));
+  assert(body.includes("SET search_path = ''"));
+  assert(!/EXECUTE\s+(?:FORMAT|IMMEDIATE)/i.test(body));
+
+  const roleCheck = body.indexOf('PERFORM public.rpc_check_role(');
+  const targetLock = body.indexOf('FROM public.invoices AS i');
+  const forUpdate = body.indexOf('FOR UPDATE;', targetLock);
+  const accessCheck = body.indexOf('PERFORM public.rpc_check_customer_access(', forUpdate);
+  const referenceUpdate = body.indexOf('UPDATE public.invoices', accessCheck);
+  const auditInsert = body.indexOf('INSERT INTO public.credit_control_logs', referenceUpdate);
+  assert(roleCheck >= 0 && targetLock > roleCheck && forUpdate > targetLock
+    && accessCheck > forUpdate && referenceUpdate > accessCheck && auditInsert > referenceUpdate);
+
+  assert(body.includes("WHEN SQLSTATE 'P0001' THEN"));
+  assert(body.includes('GET STACKED DIAGNOSTICS v_access_message = MESSAGE_TEXT;'));
+  assert(body.includes("'AUTH: User does not have access to this customer'"));
+  assert(body.includes("'NOT_FOUND: Customer not found'"));
+  assertEquals(
+    (body.match(/MESSAGE = 'NOT_FOUND: Financial document not found'/g) ?? []).length,
+    2,
+    'Missing and customer-hidden paths must raise the same governed message',
+  );
+  assert(body.includes('RAISE;'), 'Unrelated P0001 errors must be re-raised unchanged');
+  assert(!body.includes('WHEN OTHERS'), 'Unknown SQL errors must never be converted to NOT_FOUND');
+  assert(body.includes('SET reference_no = p_reference_no'));
+  assert(body.includes("'Reference Correction'"));
+  assert(body.includes('RETURN pg_catalog.to_jsonb(v_updated)'));
+  assert(!/^\s*COMMIT;/im.test(body), 'Reference update and audit insertion must remain one transaction');
+
+  const signature = [
+    'public.correct_posted_invoice_reference(',
+    '  pg_catalog.uuid,',
+    '  pg_catalog.uuid,',
+    '  pg_catalog.uuid,',
+    '  pg_catalog.text',
+    ')',
+  ].join('\n');
+  assert(migration029.includes(`GRANT EXECUTE ON FUNCTION ${signature} TO service_role;`));
+  for (const role of ['PUBLIC', 'anon', 'authenticated', 'service_role']) {
+    assert(migration029.includes(`REVOKE ALL ON FUNCTION ${signature} FROM ${role};`));
+  }
+  assert(!/\b(?:ALTER|GRANT|REVOKE)\s+(?:TABLE|POLICY)\b/i.test(migration029));
+});
+
+Deno.test('Batch 9D-D Migration 029 hidden and nonexistent reference targets have an identical production-handler envelope', async () => {
+  const hiddenId = '99999999-9999-4999-8999-999999999981';
+  const nonexistentId = '99999999-9999-4999-8999-999999999982';
+
+  const invoke = async (invoiceId: string): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const client = new MockSupabaseClient({}, 'service_role');
+    client.rpcErrors.correct_posted_invoice_reference = {
+      code: 'P0001',
+      message: 'NOT_FOUND: Financial document not found',
+    };
+    const response = await postedReferenceHandler(client)(postedReferenceRequest(
+      `/${invoiceId}/reference`,
+      'PATCH',
+      { reference_no: 'PO-HIDDEN-SAFE' },
+    ));
+    assertEquals(client.rpcCalls.length, 1);
+    assertEquals((client.rpcCalls[0].params as MockRow).p_invoice_id, invoiceId);
+    return { status: response.status, body: await responseJson(response) };
+  };
+
+  const hidden = await invoke(hiddenId);
+  const nonexistent = await invoke(nonexistentId);
+  assertEquals(hidden.status, 404);
+  assertEquals(nonexistent.status, 404);
+  assertJsonEquals(hidden.body, nonexistent.body, 'Hidden and nonexistent envelopes must be byte-equivalent JSON');
+  assertEquals((hidden.body.error as MockRow).code, 'NOT_FOUND');
+  assertEquals(
+    (hidden.body.error as MockRow).message,
+    'NOT_FOUND: Financial document not found',
+  );
+});
