@@ -62,7 +62,7 @@
 > §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
 > history and is **not** erased.
 
-### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-20 - Batch 9D-D source implementation, local validation, Migration 030 staging runtime, allocations candidate route staging runtime, credential remediation, daily-overdue fail-closed remediation, Codex self-validation, Claude independent source review, and Claude independent staging closure confirmation are PASS. No Critical or High finding remains. The sole Medium documentation undercount is corrected to exactly three controlled `0.01` records, all `Reversed` with reversal timestamp, reason, and actor; zero active gate allocation remains and financial arithmetic reconciles. Production and Batch 9D-E are NOT STARTED. Frontend production deployment is NOT AUTHORIZED. Commit is NOT YET AUTHORIZED; push is NOT AUTHORIZED because GitHub main may trigger a Vercel production deployment.)
+### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-20 - Batch 9D-D source implementation, local validation, Migration 030 staging runtime, allocations candidate route staging runtime, credential remediation, daily-overdue fail-closed remediation, Codex self-validation, Claude independent source review, and Claude independent staging closure confirmation are PASS. No Critical or High finding remains. The sole Medium documentation undercount is corrected to exactly three controlled `0.01` records, all `Reversed` with reversal timestamp, reason, and actor; zero active gate allocation remains and financial arithmetic reconciles. Production is NOT STARTED. Batch 9D-D is now FULLY CLOSED and committed locally as BATCH_9D_D_CODE_COMMIT `233005146f7e9551e45fc437fc7fcade678a9f62`; local `main` is ahead of `origin/main` by exactly one commit, and the Batch 9D-E planning documentation is present but UNCOMMITTED. The future BATCH_9D_E_ROLLOUT_HEAD is SYMBOLIC: it is resolved operationally from the clean local Git HEAD after the authorized planning commit and captured in Gate 9D-E1 execution evidence, never written back into its own commit, and no extra identity-recording commit is required. Frontend production deployment is NOT AUTHORIZED. Push is NOT AUTHORIZED because GitHub main may trigger a Vercel production deployment. Batch 9D-E is in DETAILED PLANNING; see §0.8 and `docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md`.)
 
 > **This block is the single authoritative current-state statement for Batch 9D and supersedes any
 > "9D-B not yet implemented / pending plan review / implementation approval not granted" wording elsewhere
@@ -160,6 +160,85 @@
 > scope. **No production deployment, no production provider call, no production scheduler activation, and
 > no production mutation occurred.** Canonical execution order is unchanged:
 > `9D-A (CLOSED) → DG-1 → 9D-B (CLOSED) → 9D-C (CLOSED) → 9D-D → 9D-E` (§0.2).
+>
+> **Batch 9D-D closure and Batch 9D-E planning status (CURRENT — 2026-07-20; supersedes the
+> "commit not yet approved" wording above, which is retained as historical record):**
+>
+> - **Batch 9D-D is FULLY CLOSED** at source, local-validation, staging, credential, security,
+>   independent-review, documentation and **local-commit** levels.
+> - **`BATCH_9D_D_CODE_COMMIT` (immutable accepted implementation):**
+>   `233005146f7e9551e45fc437fc7fcade678a9f62`
+>   (`feat(ar): complete Batch 9D-D multi-currency allocation closure`). This is the accepted **code**
+>   commit; it is **not** the commit that will be pushed, because it does not contain the Batch 9D-E plan.
+> - **`BATCH_9D_E_ROLLOUT_HEAD` (future, SYMBOLIC):** the clean local `main` HEAD produced by the
+>   separately authorized Batch 9D-E **planning commit**. **The concrete rollout HEAD will be resolved
+>   from the clean local Git HEAD (`git rev-parse HEAD`) and captured in the Gate 9D-E1 execution
+>   evidence after the planning commit is complete.** It is **NOT written back into the commit it
+>   identifies** — a commit cannot contain its own SHA, so requiring that would loop forever. **No extra
+>   identity-recording commit is required, and neither plan is edited during E1 merely to insert the
+>   value.** `BATCH_9D_D_CODE_COMMIT` must remain an ancestor of it, and only approved planning
+>   documentation may appear between them. See
+>   `docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md` §0.1.
+> - **Pre-planning baseline (state at the moment `BATCH_9D_D_CODE_COMMIT` was created):** local `main`
+>   at `233005146f7e9551e45fc437fc7fcade678a9f62`, ahead of `origin/main`
+>   (`d5c9c0a0125b7ab0cb0b767424a4a2b8e01ab87d`) by exactly **one** commit, behind by zero; 0 staged,
+>   0 unstaged tracked; **no tracked planning delta yet**; 18 unrelated untracked files under
+>   `social-media/`.
+> - **Current planning worktree (state now, before any planning commit):** local `main` still at
+>   `233005146f7e9551e45fc437fc7fcade678a9f62`, ahead 1 / behind 0; **0 staged**; **one modified tracked
+>   file** (this Batch 9D master plan); **one untracked file**
+>   (`docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md`); and 18 unrelated untracked files under
+>   `social-media/`. **The worktree is therefore NOT limited to 18 untracked `social-media/` files** —
+>   the Batch 9D-E planning documentation is present and uncommitted.
+> - **After the future authorized planning commit**, the worktree is expected to be tracked-clean
+>   (0 staged, 0 unstaged tracked, `social-media/` untracked only). **No documentation update is required
+>   to record the rollout HEAD** — Gate 9D-E1 resolves it at runtime and records it in the E1 execution
+>   report and evidence artifact.
+> - The 18 `social-media/` paths are **unrelated to Batch 9D and must not be staged, edited, moved,
+>   deleted, or included in any Batch 9D commit**.
+> - **Push is NOT AUTHORIZED.** Pushing GitHub `main` may automatically trigger a Vercel production
+>   frontend deployment, and the committed frontend depends on `GET /allocations/candidates`, which is
+>   not yet available in production.
+> - **Production rollout is NOT STARTED.** No production migration, deployment, secret, key, scheduler
+>   or Vercel action has occurred.
+> - **Batch 9D-E is in DETAILED PLANNING (planning and documentation only).** The plan is
+>   `docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md`. It grants **no** authorization; it proposes four
+>   future gates (9D-E1 read-only preflight → 9D-E2 backend rollout → 9D-E3 push and frontend deployment
+>   → 9D-E4 scheduler decision and closure) and requires the **entire backend rollout to complete before
+>   the commit is pushed**.
+> - **The first independent Codex review of the Batch 9D-E plan returned
+>   `RETURN TO CLAUDE CODE — BATCH 9D-E PLAN REMEDIATION REQUIRED`** with blocking findings
+>   `B9DE-PR-001` … `B9DE-PR-008` and non-blocking wording findings `B9DE-PR-009` … `B9DE-PR-010`.
+>   **Rev 2** closed all ten: Gate 9D-E1 made strictly read-only with no Edge Function invocation;
+>   `daily-overdue` caller-coordination branches; an E1-observed migration manifest replacing the assumed
+>   list; expected Migration 022 governance deltas separated from unexpected monetary deltas; the
+>   allocation equation corrected to include `discount_amount`; inaccurate reversibility claims removed;
+>   all 16 Edge Function deployments locked; scheduler Option B given a closure path; material Medium
+>   findings made blocking; and production identity readiness added.
+> - **The second independent Codex review returned
+>   `RETURN TO CLAUDE CODE — MATERIAL BATCH 9D-E PLAN DEFECT REMAINS`** with findings
+>   `B9DE-FPR-001` … `B9DE-FPR-004` (blocking) and `B9DE-FPR-005` … `B9DE-FPR-006` (non-blocking).
+> - **Plan remediation is COMPLETED AT REV 3.1 AND AWAITING FINAL CONFIRMATION.** Rev 3 separates
+>   `BATCH_9D_D_CODE_COMMIT` from the future `BATCH_9D_E_ROLLOUT_HEAD` (Rev 2 would have required
+>   pushing a commit that does not contain the plan); completes the `daily-overdue` server-secret state
+>   model (`ABSENT`/`PRESENT`/`UNKNOWN`) with branches A, B1, B2, B3 and C so an existing working secret
+>   can never be silently rotated; fixes the "deploy immediately" versus "deploy last" contradiction with
+>   one canonical deployment position; makes scheduler Option B executable via paths B1 (no production
+>   mutation) and B2 (separately authorized manual sync); removes wording that could have made Migration
+>   022's expected governance rows trigger a false NO-GO; and corrects the migration DML classification to
+>   distinguish migration-time DML from stored-function-body DML.
+> - **Rev 3.1 (current) corrects one Git self-reference defect only.** Rev 3 required the planning
+>   commit's SHA to be written back into the same documents that commit contains, which is unsatisfiable
+>   (each write changes the documents and produces a new SHA). Rev 3.1 makes `BATCH_9D_E_ROLLOUT_HEAD`
+>   **symbolic in the committed plans** and resolves it operationally at Gate 9D-E1 from
+>   `git rev-parse HEAD`, capturing it in E1 execution evidence rather than in Git. **All Rev 2 and Rev 3
+>   security, financial, migration, function, scheduler and rollback corrections are preserved unchanged.**
+> - **The Batch 9D-E plan is NOT yet independently approved and must NOT be described as
+>   implementation-ready** until the remediation passes the next independent review.
+> - **Current next gate: one consolidated final independent Codex read-only confirmation of the
+>   corrected (Rev 3.1) Batch 9D-E production rollout plan.** Production, push, migration, deployment,
+>   credentials, and schedulers remain unauthorized until that confirmation passes and a specific gate is
+>   separately approved. **The Batch 9D-E planning commit is itself not yet authorized.**
 
 ### 0.1 Batch 9D-A closure status
 
@@ -385,6 +464,30 @@ Production readiness review; migration readiness; provider **production** connec
 reference-sync smoke; production booking-governance verification where applicable; multi-currency UX
 production smoke; **zero financial regression** verification; rollback/containment plan; final production
 evidence. **No production deployment occurs in this task.**
+
+**Detailed plan (2026-07-20, Rev 3.1 — remediated twice plus one micro identity correction, awaiting final
+independent confirmation):**
+`docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md` — planning-only, granting no authorization, and
+**not to be described as implementation-ready until the next independent review passes**. Rev 1 received
+`RETURN TO CLAUDE CODE — BATCH 9D-E PLAN REMEDIATION REQUIRED`; Rev 2 closes findings `B9DE-PR-001`
+through `B9DE-PR-010`.
+
+Rev 2 records: the **expected candidate** migration set (`017`–`030`) which Gate 9D-E1 must replace with
+an observed `PRODUCTION_MISSING_MIGRATION_MANIFEST`; all **16** Edge Functions as a mandatory deployment
+manifest because `_shared/db.ts` now resolves named modern API keys (`fx-rates` and `fx-rate-sync` new to
+production); the mandatory ordering constraints (named production secret key before any function deploy;
+migrations before functions; `daily-overdue` caller/secret coordination before its redeploy; **backend
+complete before push**); four authorization gates with Gate 9D-E1 **strictly read-only and invoking no
+Edge Function**; production identity readiness; Group A/B/C financial fingerprints separating unexpected
+monetary delta from the **expected** Migration 022 governance backfill; the allocation equation including
+`discount_amount`; honest forward-only rollback classification with a containment rule forbidding any
+redeploy of vulnerable `daily-overdue` code; material-Medium blocking; and a recommendation of
+**scheduler Option B** — all 16 functions deployed (including `fx-rate-sync` and `fx-rates`) with the
+recurring production FX scheduler disabled. Under **Option B1 (default)** no production manual sync is
+executed and none is required for closure; a production manual sync occurs only under **separately
+authorized Option B2**. It also flags that production `daily-overdue` is ACTIVE **v6
+pre-fix** — a version-number collision with staging's fixed v6 — and still carries the fail-open
+predicate, which is why Gate 9D-E1 must not invoke it over HTTP.
 
 ### 0.9 Architecture invariants (mandatory — reaffirmed)
 
