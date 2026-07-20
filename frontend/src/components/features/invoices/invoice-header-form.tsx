@@ -1,6 +1,8 @@
 "use client";
 
 import { cn, formatDate } from "@/lib/utils";
+import { SUPPORTED_CURRENCY_OPTIONS } from "@/lib/currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { CustomerComboboxWithCreate } from "@/components/features/customers/customer-combobox-with-create";
 import type { UseFormReturn } from "react-hook-form";
 import type { InvoiceFormValues } from "@/lib/invoice-schema";
@@ -12,7 +14,8 @@ interface InvoiceHeaderFormProps {
   form: UseFormReturn<InvoiceFormValues>;
   customers: Customer[];
   paymentTerms: PaymentTermOption[];
-  customerSearch: string;
+  /** Reserved for the customer search overlay; not read by this component. */
+  _customerSearch?: string;
   setCustomerSearch: (q: string) => void;
   selectedCustomerName: string;
   setSelectedCustomerName: (n: string) => void;
@@ -26,7 +29,6 @@ export function InvoiceHeaderForm({
   form,
   customers,
   paymentTerms,
-  customerSearch,
   setCustomerSearch,
   selectedCustomerName,
   setSelectedCustomerName,
@@ -36,6 +38,8 @@ export function InvoiceHeaderForm({
   calculatedDueDate,
 }: InvoiceHeaderFormProps) {
   const docType = form.watch("doc_type");
+  // Authoritative company base currency for the FX rate direction label.
+  const { baseCurrency } = useBaseCurrency();
 
   return (
     <div className="glass-card p-6 animate-fade-in">
@@ -111,17 +115,18 @@ export function InvoiceHeaderForm({
             Currency <span className="text-red-400">*</span>
           </label>
           <select {...form.register("currency")} className="input-premium w-full">
-            <option value="MYR">MYR (Malaysian Ringgit)</option>
-            <option value="USD">USD (US Dollar)</option>
-            <option value="SGD">SGD (Singapore Dollar)</option>
-            <option value="EUR">EUR (Euro)</option>
+            {SUPPORTED_CURRENCY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
         </div>
 
         {/* Exchange Rate */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-slate-600">
-            Exchange Rate (1 {form.watch("currency")} = ? MYR)
+            Exchange Rate ({baseCurrency
+              ? `1 ${form.watch("currency")} = ? ${baseCurrency}`
+              : `1 ${form.watch("currency")} → company base`})
           </label>
           <input
             type="number"

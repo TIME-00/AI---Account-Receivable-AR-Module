@@ -7,13 +7,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
-import type { Invoice, InvoiceLine, Customer, TaxCode, PaymentTerm } from "@/types";
+import type { Invoice, InvoiceLine, Customer, TaxCode, PaymentTerm, MonetaryCollectionSummary } from "@/types";
 import type { TaxCodeOption, PaymentTermOption } from "@/hooks/use-invoice-calculator";
-import {
-  filterVisibleCustomerRecords,
-  filterVisibleCustomers,
-  isKnownHiddenCustomer,
-} from "@/lib/customer-visibility";
+import { filterVisibleCustomers } from "@/lib/customer-visibility";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -194,26 +190,63 @@ export function useInvoiceList(filters: {
 
   return useQuery({
     queryKey: ["invoices", "list", filters],
-    queryFn: async () => {
-      const params: Record<string, string | number> = {
-        page: filters.page ?? 1,
-        page_size: filters.page_size ?? 20,
-      };
+    queryFn: async (): Promise<InvoiceListResult> => {
+      const page = filters.page ?? 1;
+      const pageSize = filters.page_size ?? 20;
+      const params: Record<string, string | number> = { page, page_size: pageSize };
       if (filters.status) params.status = filters.status;
       if (filters.customer_id) params.customer_id = filters.customer_id;
       if (filters.search) params.search = filters.search;
       if (filters.doc_type) params.doc_type = filters.doc_type;
 
-      // useApi() returns json.data = Invoice[] (raw array).
-      // meta.total is discarded by useApi(). Client-side pagination for prototype.
-      const [invoices, customers] = await Promise.all([
-        api.get<Invoice[]>("/invoices", { params }),
-        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
-      ]);
-      return filterVisibleCustomerRecords(invoices, customers);
+      // Batch 9D-D / B9DD-FEIR-001: the backend response is the authoritative
+      // visible row set AND the authoritative summary, produced together.
+      //
+      // `ar_invoice_collection` (migration 027) derives both its page rows and
+      // its summary from one `scoped_customers` CTE that already excludes
+      // is_deleted/is_hidden customers and applies user assignment scoping. The
+      // previous code additionally post-filtered these rows against a separate,
+      // capped `/customers?page_size=500` request (server-clamped to 100). That
+      // filter was redundant with the backend scope, and because it narrowed
+      // ROWS but not the SUMMARY, the two could describe different sets. It is
+      // removed rather than reproduced client-side.
+      const res = await api.getWithMeta<Invoice[]>("/invoices", { params });
+
+      return {
+        rows: res.data,
+        summary: res.meta?.summary,
+        pagination: {
+          total: res.meta?.total ?? res.data.length,
+          page: res.meta?.page ?? page,
+          page_size: res.meta?.page_size ?? pageSize,
+        },
+      };
     },
     staleTime: 30_000,
   });
+}
+
+/** Backend pagination envelope, preserved verbatim (never synthesized). */
+export interface ListPagination {
+  /** Total rows in the FILTERED COLLECTION (not just this page). */
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** Return shape of {@link useInvoiceList}. */
+export interface InvoiceListResult {
+  /** Rows for the CURRENT PAGE only. */
+  rows: Invoice[];
+  /** Authoritative summary over the ENTIRE filtered collection. */
+  summary?: MonetaryCollectionSummary;
+  pagination: ListPagination;
+}
+
+/** Derive total page count from backend pagination metadata. */
+export function totalPagesFrom(pagination: ListPagination | undefined): number {
+  if (!pagination || pagination.page_size <= 0) return 1;
+  return Math.max(1, Math.ceil(pagination.total / pagination.page_size));
 }
 
 // ─── Query: Single Invoice (with Lines) ─────────────────────────────────────
@@ -223,16 +256,11 @@ export function useInvoice(id: string) {
 
   return useQuery({
     queryKey: ["invoices", id],
-    queryFn: async () => {
-      const [invoice, customers] = await Promise.all([
-        api.get<Invoice & { lines: InvoiceLine[] }>(`/invoices/${id}`),
-        api.get<Customer[]>("/customers", { params: { page: 1, page_size: 500 } }),
-      ]);
-      if (isKnownHiddenCustomer(customers, invoice.customer_id)) {
-        throw new Error("Invoice not found");
-      }
-      return invoice;
-    },
+    // B9DD-FEIR-001: `getInvoiceById` calls `assertCustomerVisible`, which 404s
+    // when the customer is deleted or hidden — server-side and uncapped. The
+    // previous client-side re-check against a capped `/customers` page could
+    // only ever be weaker, so it is removed rather than duplicated here.
+    queryFn: () => api.get<Invoice & { lines: InvoiceLine[] }>(`/invoices/${id}`),
     enabled: !!id,
   });
 }

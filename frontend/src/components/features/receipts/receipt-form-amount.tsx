@@ -1,7 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { formatCurrency } from "@/lib/utils";
+import { formatMoneySafe, SUPPORTED_CURRENCY_OPTIONS } from "@/lib/currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { roundTo2 } from "@/lib/invoice-calculator";
 import { Controller, type UseFormReturn } from "react-hook-form";
 import type { ReceiptFormValues } from "@/lib/receipt-schema";
@@ -15,6 +16,11 @@ interface ReceiptFormAmountProps {
 }
 
 export function ReceiptFormAmount({ form, watchCurrency, watchAmount, watchExchangeRate }: ReceiptFormAmountProps) {
+  // B9DD-FEIR-006: base parity is `transaction currency === company base
+  // currency`, resolved from authoritative company context — not a hard-coded
+  // comparison against "MYR".
+  const { baseCurrency } = useBaseCurrency();
+  const isBaseParity = baseCurrency !== null && watchCurrency === baseCurrency;
   const baseAmount = roundTo2(watchAmount * watchExchangeRate);
 
   return (
@@ -71,12 +77,9 @@ export function ReceiptFormAmount({ form, watchCurrency, watchAmount, watchExcha
                 {...field}
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
-                <option value="MYR">MYR — Malaysian Ringgit</option>
-                <option value="SGD">SGD — Singapore Dollar</option>
-                <option value="USD">USD — US Dollar</option>
-                <option value="EUR">EUR — Euro</option>
-                <option value="GBP">GBP — British Pound</option>
-                <option value="CNY">CNY — Chinese Yuan</option>
+                {SUPPORTED_CURRENCY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
               </select>
             )}
           />
@@ -84,7 +87,9 @@ export function ReceiptFormAmount({ form, watchCurrency, watchAmount, watchExcha
 
         {/* Exchange Rate */}
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-slate-600">Exchange Rate (→ MYR)</label>
+          <label className="mb-1.5 block text-xs font-medium text-slate-600">
+            Exchange Rate {baseCurrency ? `(1 ${watchCurrency || "—"} → ${baseCurrency})` : "(→ company base)"}
+          </label>
           <Controller
             control={form.control}
             name="exchange_rate"
@@ -95,18 +100,24 @@ export function ReceiptFormAmount({ form, watchCurrency, watchAmount, watchExcha
                 min="0.0001"
                 value={field.value || ""}
                 onChange={(e) => field.onChange(parseFloat(e.target.value) || 1)}
-                disabled={watchCurrency === "MYR"}
+                disabled={isBaseParity}
                 className={cn(
                   "h-10 w-full rounded-lg border bg-white px-3 text-right font-mono text-sm text-slate-800",
                   "focus:outline-none focus:ring-1 focus:ring-brand-500",
-                  watchCurrency === "MYR" ? "border-slate-200 text-slate-400" : "border-slate-300"
+                  isBaseParity ? "border-slate-200 text-slate-400" : "border-slate-300"
                 )}
               />
             )}
           />
-          {watchCurrency !== "MYR" && watchAmount > 0 && (
+          {!isBaseParity && watchAmount > 0 && (
             <p className="mt-1 text-[10px] text-slate-500">
-              Base amount: <span className="font-mono text-slate-600">{formatCurrency(baseAmount)}</span>
+              {/* Draft estimate — explicitly labelled, with the rate direction shown. */}
+              Estimated base: <span className="font-mono text-slate-600">≈ {formatMoneySafe(baseAmount, baseCurrency)}</span>
+              {baseCurrency && watchCurrency && Number.isFinite(watchExchangeRate) && (
+                <span className="ml-1 text-slate-400">
+                  (1 {watchCurrency} = {Number(watchExchangeRate).toFixed(4)} {baseCurrency})
+                </span>
+              )}
             </p>
           )}
         </div>

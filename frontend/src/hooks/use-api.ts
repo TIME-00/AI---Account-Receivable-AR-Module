@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { supabase, API_BASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase";
 import { useCompanyStore } from "@/stores/company-store";
 import { getErrorMessage } from "@/lib/error-messages";
-import type { APIResponse } from "@/types";
+import type { APIResponse, APIMeta } from "@/types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,8 +26,13 @@ interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined>;
 }
 
-interface ApiClient {
+export interface ApiClient {
   get: <T = unknown>(path: string, opts?: RequestOptions) => Promise<T>;
+  /**
+   * Like `get`, but returns the response `data` together with the `meta`
+   * envelope (pagination + Batch 9D-D authoritative monetary `summary`).
+   */
+  getWithMeta: <T = unknown>(path: string, opts?: RequestOptions) => Promise<{ data: T; meta?: APIMeta }>;
   post: <T = unknown>(path: string, body?: unknown, opts?: RequestOptions) => Promise<T>;
   patch: <T = unknown>(path: string, body?: unknown, opts?: RequestOptions) => Promise<T>;
   del: <T = unknown>(path: string, opts?: RequestOptions) => Promise<T>;
@@ -102,7 +107,13 @@ export function useApi(): ApiClient {
   );
 
   /**
-   * Core request handler.
+   * Core request handler — the SINGLE canonical implementation.
+   *
+   * Returns the parsed `data` together with the response `meta` envelope. `get`
+   * unwraps to `data` for its existing callers; `getWithMeta` returns both.
+   * Keeping one implementation means auth headers, company/tenant headers, query
+   * params, base URL, silent mode, error mapping, the auth redirect and non-JSON
+   * handling cannot drift apart between the two (§17).
    */
   const request = useCallback(
     async <T = unknown>(
@@ -110,7 +121,7 @@ export function useApi(): ApiClient {
       path: string,
       body?: unknown,
       opts: RequestOptions = {}
-    ): Promise<T> => {
+    ): Promise<{ data: T; meta?: APIMeta }> => {
       const headers = await buildHeaders(opts.headers);
 
       if (body && (method === "POST" || method === "PATCH")) {
@@ -137,7 +148,7 @@ export function useApi(): ApiClient {
           }
           throw new ApiError("NETWORK_ERROR", text || `HTTP ${res.status}`, res.status);
         }
-        return (await res.text()) as unknown as T;
+        return { data: (await res.text()) as unknown as T, meta: undefined };
       }
 
       // Parse API response envelope
@@ -167,7 +178,7 @@ export function useApi(): ApiClient {
         throw new ApiError(errorCode, friendlyMessage, res.status, error.details);
       }
 
-      return json.data as T;
+      return { data: json.data as T, meta: json.meta };
     },
     [buildHeaders, buildUrl]
   );
@@ -193,13 +204,15 @@ export function useApi(): ApiClient {
 
   return {
     get: <T = unknown>(path: string, opts?: RequestOptions) =>
+      request<T>("GET", path, undefined, opts).then((r) => r.data),
+    getWithMeta: <T = unknown>(path: string, opts?: RequestOptions) =>
       request<T>("GET", path, undefined, opts),
     post: <T = unknown>(path: string, body?: unknown, opts?: RequestOptions) =>
-      request<T>("POST", path, body, opts),
+      request<T>("POST", path, body, opts).then((r) => r.data),
     patch: <T = unknown>(path: string, body?: unknown, opts?: RequestOptions) =>
-      request<T>("PATCH", path, body, opts),
+      request<T>("PATCH", path, body, opts).then((r) => r.data),
     del: <T = unknown>(path: string, opts?: RequestOptions) =>
-      request<T>("DELETE", path, undefined, opts),
+      request<T>("DELETE", path, undefined, opts).then((r) => r.data),
     rawFetch,
   };
 }

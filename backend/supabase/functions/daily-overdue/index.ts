@@ -14,9 +14,10 @@
 //   Then set up a pg_cron job or external cron to POST to this function daily.
 // ============================================================================
 
-import { handleCORS, jsonResponse } from '../_shared/cors.ts';
-import { getAdminClient } from '../_shared/db.ts';
-import { roundTo2 } from '../invoices/calculator.ts';
+import { handleCORS, jsonResponse } from "../_shared/cors.ts";
+import { getAdminClient } from "../_shared/db.ts";
+import { roundTo2 } from "../invoices/calculator.ts";
+import { validateDailyOverdueCronAuth } from "./auth.ts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -30,11 +31,43 @@ interface OverdueResult {
 
 // ─── Main Handler ───────────────────────────────────────────────────────────
 
-Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method === 'OPTIONS') return handleCORS();
+type DailyOverdueClient = ReturnType<typeof getAdminClient>;
 
-  const startTime = Date.now();
-  const client = getAdminClient();
+export interface DailyOverdueHandlerDependencies {
+  getExpectedSecret?: () => string | undefined;
+  getClient?: () => DailyOverdueClient;
+  runTask?: (
+    client: DailyOverdueClient,
+    startTime: number,
+  ) => Promise<Response>;
+}
+
+export function createDailyOverdueHandler(
+  dependencies: DailyOverdueHandlerDependencies = {},
+): (req: Request) => Promise<Response> {
+  return async (req: Request): Promise<Response> => {
+    if (req.method === "OPTIONS") return handleCORS();
+
+    const expectedSecret = (dependencies.getExpectedSecret ??
+      (() => Deno.env.get("CRON_SECRET")))();
+    const authFailure = validateDailyOverdueCronAuth(req, expectedSecret);
+    if (authFailure) {
+      return jsonResponse({
+        success: false,
+        error: { code: authFailure.code, message: authFailure.message },
+      }, authFailure.status);
+    }
+
+    const startTime = Date.now();
+    const client = (dependencies.getClient ?? getAdminClient)();
+    return (dependencies.runTask ?? runDailyOverdueTask)(client, startTime);
+  };
+}
+
+async function runDailyOverdueTask(
+  client: DailyOverdueClient,
+  startTime: number,
+): Promise<Response> {
   const result: OverdueResult = {
     invoices_updated: 0,
     customers_held: 0,
@@ -44,13 +77,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   };
 
   try {
-    // Optional: Verify this is called by a trusted source (cron secret)
-    const cronSecret = req.headers.get('X-Cron-Secret');
-    const expectedSecret = Deno.env.get('CRON_SECRET');
-    if (expectedSecret && cronSecret !== expectedSecret) {
-      return jsonResponse({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid cron secret' } }, 401);
-    }
-
     const today = new Date().toISOString().slice(0, 10);
     console.log(`[DAILY-OVERDUE] Starting daily overdue check for ${today}`);
 
@@ -61,35 +87,37 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // and update their status to 'Overdue'.
 
     const { data: overdueInvoices, error: invErr } = await client
-      .from('invoices')
-      .select('id, invoice_no, customer_id, due_date, outstanding, status')
-      .in('status', ['Open', 'Partially Paid'])
-      .in('doc_type', ['Invoice', 'Debit Note'])
-      .lt('due_date', today)
-      .gt('outstanding', 0);
+      .from("invoices")
+      .select("id, invoice_no, customer_id, due_date, outstanding, status")
+      .in("status", ["Open", "Partially Paid"])
+      .in("doc_type", ["Invoice", "Debit Note"])
+      .lt("due_date", today)
+      .gt("outstanding", 0);
 
     if (invErr) {
-      result.errors.push('Failed to fetch overdue invoices');
-      console.error('[DAILY-OVERDUE] Invoice fetch error:', invErr);
+      result.errors.push("Failed to fetch overdue invoices");
+      console.error("[DAILY-OVERDUE] Invoice fetch error:", invErr);
     } else if (overdueInvoices && overdueInvoices.length > 0) {
       // Batch update all discovered overdue invoices
-      const invoiceIds = overdueInvoices.map(i => i.id);
+      const invoiceIds = overdueInvoices.map((i) => i.id);
 
       const { error: updateErr, count } = await client
-        .from('invoices')
-        .update({ status: 'Overdue' })
-        .in('id', invoiceIds)
-        .in('status', ['Open', 'Partially Paid']); // Safety: only update non-terminal
+        .from("invoices")
+        .update({ status: "Overdue" })
+        .in("id", invoiceIds)
+        .in("status", ["Open", "Partially Paid"]); // Safety: only update non-terminal
 
       if (updateErr) {
-        result.errors.push('Failed to update overdue invoices');
-        console.error('[DAILY-OVERDUE] Invoice update error:', updateErr);
+        result.errors.push("Failed to update overdue invoices");
+        console.error("[DAILY-OVERDUE] Invoice update error:", updateErr);
       } else {
         result.invoices_updated = count ?? invoiceIds.length;
-        console.log(`[DAILY-OVERDUE] Updated ${result.invoices_updated} invoices to Overdue`);
+        console.log(
+          `[DAILY-OVERDUE] Updated ${result.invoices_updated} invoices to Overdue`,
+        );
       }
     } else {
-      console.log('[DAILY-OVERDUE] No new overdue invoices found');
+      console.log("[DAILY-OVERDUE] No new overdue invoices found");
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -106,42 +134,42 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // Find all distinct customers with invoices overdue by >90 days
     const { data: severeOverdue, error: severeErr } = await client
-      .from('invoices')
-      .select('customer_id')
-      .in('status', ['Overdue'])
-      .in('doc_type', ['Invoice', 'Debit Note'])
-      .lt('due_date', cutoffDate)
-      .gt('outstanding', 0);
+      .from("invoices")
+      .select("customer_id")
+      .in("status", ["Overdue"])
+      .in("doc_type", ["Invoice", "Debit Note"])
+      .lt("due_date", cutoffDate)
+      .gt("outstanding", 0);
 
     if (severeErr) {
-      result.errors.push('Failed to fetch severe overdue invoices');
-      console.error('[DAILY-OVERDUE] Severe-overdue fetch error:', severeErr);
+      result.errors.push("Failed to fetch severe overdue invoices");
+      console.error("[DAILY-OVERDUE] Severe-overdue fetch error:", severeErr);
     } else if (severeOverdue && severeOverdue.length > 0) {
       // Deduplicate customer IDs
-      const customerIds = [...new Set(severeOverdue.map(i => i.customer_id))];
+      const customerIds = [...new Set(severeOverdue.map((i) => i.customer_id))];
       result.customers_checked = customerIds.length;
 
       for (const custId of customerIds) {
         try {
           // Only hold Active customers (don't downgrade On Hold → On Hold or Blocked → On Hold)
           const { data: customer } = await client
-            .from('customers')
-            .select('id, customer_name, status')
-            .eq('id', custId)
-            .eq('status', 'Active')
+            .from("customers")
+            .select("id, customer_name, status")
+            .eq("id", custId)
+            .eq("status", "Active")
             .single();
 
           if (!customer) continue; // Already On Hold, Blocked, or Inactive
 
           // Calculate the worst overdue days for this customer
           const { data: worstInvoice } = await client
-            .from('invoices')
-            .select('invoice_no, due_date, outstanding')
-            .eq('customer_id', custId)
-            .in('status', ['Overdue'])
-            .in('doc_type', ['Invoice', 'Debit Note'])
-            .gt('outstanding', 0)
-            .order('due_date', { ascending: true })
+            .from("invoices")
+            .select("invoice_no, due_date, outstanding")
+            .eq("customer_id", custId)
+            .in("status", ["Overdue"])
+            .in("doc_type", ["Invoice", "Debit Note"])
+            .gt("outstanding", 0)
+            .order("due_date", { ascending: true })
             .limit(1)
             .single();
 
@@ -149,19 +177,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
           const worstDueDate = new Date(worstInvoice.due_date);
           const daysPastDue = Math.floor(
-            (new Date().getTime() - worstDueDate.getTime()) / (1000 * 60 * 60 * 24)
+            (new Date().getTime() - worstDueDate.getTime()) /
+              (1000 * 60 * 60 * 24),
           );
 
           // Update customer status to On Hold
           const { error: holdErr } = await client
-            .from('customers')
-            .update({ status: 'On Hold' })
-            .eq('id', custId)
-            .eq('status', 'Active'); // Optimistic check
+            .from("customers")
+            .update({ status: "On Hold" })
+            .eq("id", custId)
+            .eq("status", "Active"); // Optimistic check
 
           if (holdErr) {
-            result.errors.push('Failed to place an overdue customer on hold');
-            console.error('[DAILY-OVERDUE] Customer hold error:', { customerId: custId, error: holdErr });
+            result.errors.push("Failed to place an overdue customer on hold");
+            console.error("[DAILY-OVERDUE] Customer hold error:", {
+              customerId: custId,
+              error: holdErr,
+            });
             continue;
           }
 
@@ -169,38 +201,50 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
           // Write audit log
           await client
-            .from('customer_change_logs')
+            .from("customer_change_logs")
             .insert({
               customer_id: custId,
-              field_name: 'status',
-              old_value: 'Active',
-              new_value: 'On Hold',
+              field_name: "status",
+              old_value: "Active",
+              new_value: "On Hold",
               changed_by: null, // System action
-              change_reason: `BR-CM-004: Auto-hold — Invoice ${worstInvoice.invoice_no} is ${daysPastDue} days past due (>90 days), outstanding amount ${worstInvoice.outstanding}`,
+              change_reason:
+                `BR-CM-004: Auto-hold — Invoice ${worstInvoice.invoice_no} is ${daysPastDue} days past due (>90 days), outstanding amount ${worstInvoice.outstanding}`,
             });
 
           // Write credit control log
           await client
-            .from('credit_control_logs')
+            .from("credit_control_logs")
             .insert({
-              company_id: (await client.from('customers').select('company_id').eq('id', custId).single()).data?.company_id,
+              company_id:
+                (await client.from("customers").select("company_id").eq(
+                  "id",
+                  custId,
+                ).single()).data?.company_id,
               customer_id: custId,
-              action: 'Auto Hold (>90 days)',
-              details: `System auto-hold: Invoice ${worstInvoice.invoice_no} is ${daysPastDue} days past due. Earliest due date: ${worstInvoice.due_date}, outstanding: ${worstInvoice.outstanding}`,
+              action: "Auto Hold (>90 days)",
+              details:
+                `System auto-hold: Invoice ${worstInvoice.invoice_no} is ${daysPastDue} days past due. Earliest due date: ${worstInvoice.due_date}, outstanding: ${worstInvoice.outstanding}`,
               amount: Number(worstInvoice.outstanding),
               created_by: null,
             });
 
           // Notification placeholder
-          console.log(`[EMAIL_HOOK] Auto-hold notification: Customer ${customer.customer_name} held due to ${daysPastDue}-day overdue invoice ${worstInvoice.invoice_no}`);
-
+          console.log(
+            `[EMAIL_HOOK] Auto-hold notification: Customer ${customer.customer_name} held due to ${daysPastDue}-day overdue invoice ${worstInvoice.invoice_no}`,
+          );
         } catch (err) {
-          result.errors.push('Failed to process an overdue customer');
-          console.error('[DAILY-OVERDUE] Customer processing error:', { customerId: custId, error: err });
+          result.errors.push("Failed to process an overdue customer");
+          console.error("[DAILY-OVERDUE] Customer processing error:", {
+            customerId: custId,
+            error: err,
+          });
         }
       }
 
-      console.log(`[DAILY-OVERDUE] Checked ${result.customers_checked} customers, held ${result.customers_held}`);
+      console.log(
+        `[DAILY-OVERDUE] Checked ${result.customers_checked} customers, held ${result.customers_held}`,
+      );
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -209,23 +253,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     result.execution_time_ms = Date.now() - startTime;
 
-    console.log(`[DAILY-OVERDUE] Complete. Invoices: ${result.invoices_updated}, Customers held: ${result.customers_held}, Time: ${result.execution_time_ms}ms`);
+    console.log(
+      `[DAILY-OVERDUE] Complete. Invoices: ${result.invoices_updated}, Customers held: ${result.customers_held}, Time: ${result.execution_time_ms}ms`,
+    );
 
     return jsonResponse({
       success: true,
       data: result,
     });
-
   } catch (error) {
-    result.errors.push('Daily overdue task failed');
+    result.errors.push("Daily overdue task failed");
     result.execution_time_ms = Date.now() - startTime;
 
-    console.error('[DAILY-OVERDUE] Fatal error:', error);
+    console.error("[DAILY-OVERDUE] Fatal error:", error);
 
     return jsonResponse({
       success: false,
       data: result,
-      error: { code: 'SCHEDULED_TASK_ERROR', message: 'Daily overdue task failed' },
+      error: {
+        code: "SCHEDULED_TASK_ERROR",
+        message: "Daily overdue task failed",
+      },
     }, 500);
   }
-});
+}
+
+if (import.meta.main) {
+  Deno.serve(createDailyOverdueHandler());
+}

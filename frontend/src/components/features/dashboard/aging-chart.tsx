@@ -16,9 +16,11 @@ interface AgingBucket {
 interface AgingChartProps {
   data: AgingBucket[];
   isLoading: boolean;
+  /** Company base currency (amounts are company-base). */
+  currency: string | null;
 }
 
-export function AgingChart({ data, isLoading }: AgingChartProps) {
+export function AgingChart({ data, isLoading, currency }: AgingChartProps) {
   const hasData = data.some((bucket) => bucket.amount > 0 || bucket.count > 0);
 
   return (
@@ -26,7 +28,9 @@ export function AgingChart({ data, isLoading }: AgingChartProps) {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Aging Analysis</h3>
-          <p className="text-xs text-slate-500">Aging Bucket Distribution</p>
+          <p className="text-xs text-slate-500">
+            Aging Bucket Distribution{currency ? ` — ${currency.toUpperCase()} (company base)` : ""}
+          </p>
         </div>
         <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1">
           <Clock className="h-3 w-3 text-slate-400" />
@@ -49,7 +53,7 @@ export function AgingChart({ data, isLoading }: AgingChartProps) {
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis dataKey="name" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} />
               <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<ChartTooltip />} />
+              <Tooltip content={<ChartTooltip currency={currency} />} />
               <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
                 {data.map((entry, index) => (
                   <Cell key={index} fill={entry.fill} opacity={0.85} />

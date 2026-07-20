@@ -1,7 +1,7 @@
 "use client";
 
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { formatAmount } from "@/lib/utils";
+import { formatMoneySafe } from "@/lib/currency";
 import { TOOLTIP_STYLE } from "./chart-tooltip";
 import { TrendingUp } from "lucide-react";
 
@@ -14,7 +14,8 @@ interface CollectionTrendPoint {
 
 interface CollectionTrendChartProps {
   data: CollectionTrendPoint[];
-  currency: string;
+  /** Company base currency (values are company-base); null when unavailable. */
+  currency: string | null;
   isLoading?: boolean;
 }
 
@@ -26,7 +27,7 @@ export function CollectionTrendChart({ data, currency, isLoading = false }: Coll
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Collection Trend</h3>
-          <p className="text-xs text-slate-500">Receipts collected by month (base {currency})</p>
+          <p className="text-xs text-slate-500">Receipts collected by month (company base{currency ? ` — ${currency}` : ""})</p>
         </div>
         <TrendingUp className="h-4 w-4 text-emerald-500" />
       </div>
@@ -53,7 +54,7 @@ export function CollectionTrendChart({ data, currency, isLoading = false }: Coll
               <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} />
               <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
               <Tooltip
-                formatter={(value: number) => [`${currency} ${formatAmount(value)}`, "Collected"]}
+                formatter={(value: number) => [formatMoneySafe(value, currency), "Collected"]}
                 contentStyle={TOOLTIP_STYLE}
               />
               <Area type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} fill="url(#collectionGradient)" dot={{ fill: "#10b981", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "#34d399" }} />

@@ -12,17 +12,17 @@ import {
   useImport,
   IMPORT_STEPS,
   summarizeValidationCounts,
-  type ImportStep,
   type ImportRow,
+  type ImportBatch,
   type ImportCustomerResolution,
   type ImportCustomerSuggestion,
   type ImportInvoiceSuggestion,
-  type ImportBatchStatus,
 } from "@/hooks/use-import";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { ReviewActions } from "@/components/features/imports/review-actions";
 import { OcrImportFlow } from "@/components/features/imports/ocr-import-flow";
+import { ImportGovernanceCell } from "@/components/features/imports/import-governance-cell";
 import { cn, formatDate } from "@/lib/utils";
 import {
   Upload, FileText, ChevronRight, CheckCircle2,
@@ -70,18 +70,6 @@ const ROW_STATUS_COLORS: Record<string, { bg: string; text: string; dot: string 
   Skipped:   { bg: "bg-gray-100",    text: "text-gray-500",    dot: "bg-gray-400" },
   Created:   { bg: "bg-blue-50",     text: "text-blue-700",    dot: "bg-blue-500" },
   Unmatched: { bg: "bg-amber-50",    text: "text-amber-700",   dot: "bg-amber-500" },
-};
-
-const BATCH_STATUS_COLORS: Record<string, string> = {
-  Uploaded:   "text-slate-600",
-  Parsing:    "text-blue-600",
-  Parsed:     "text-blue-600",
-  Validating: "text-amber-600",
-  Validated:  "text-emerald-600",
-  Executing:  "text-indigo-600",
-  Completed:  "text-emerald-600",
-  Failed:     "text-red-600",
-  Cancelled:  "text-gray-500",
 };
 
 // ─── Page Component ─────────────────────────────────────────────────────────
@@ -486,7 +474,7 @@ export default function InvoiceImportPage() {
             <RowsTable
               rows={rows}
               showValidation={true}
-              batchId={batch.id}
+              batch={batch}
               reviewImportRow={reviewImportRow}
               reviewLoading={reviewLoading}
             />
@@ -567,7 +555,7 @@ export default function InvoiceImportPage() {
                 rows={rows}
                 showValidation={true}
                 showResult={true}
-                batchId={batch.id}
+                batch={batch}
                 reviewImportRow={reviewImportRow}
                 reviewLoading={reviewLoading}
               />
@@ -672,17 +660,22 @@ function RowsTable({
   rows,
   showValidation,
   showResult,
-  batchId,
+  batch,
   reviewImportRow,
   reviewLoading,
 }: {
   rows: ImportRow[];
   showValidation?: boolean;
   showResult?: boolean;
-  batchId?: string;
+  /**
+   * B9DD-RR-005: the whole batch, not just its id — it is the authoritative
+   * import-origin envelope (`import_type` + `file_type`) for every row shown.
+   */
+  batch?: ImportBatch | null;
   reviewImportRow?: ReturnType<typeof useImport>["reviewImportRow"];
   reviewLoading?: ReturnType<typeof useImport>["reviewLoading"];
 }) {
+  const batchId = batch?.id;
   if (rows.length === 0) {
     return (
       <div className="rounded-xl border border-slate-200 p-8 text-center">
@@ -733,6 +726,10 @@ function RowsTable({
                   </th>
                 </>
               )}
+              {/* B9DD-FEIR-008: FX / import governance provenance */}
+              <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider min-w-[220px]">
+                Currency &amp; FX governance
+              </th>
               {showValidation && (
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider min-w-[200px]">
                   Errors
@@ -800,6 +797,10 @@ function RowsTable({
                       </td>
                     </>
                   )}
+                  {/* FX / import governance provenance for this row */}
+                  <td className="px-3 py-2 align-top">
+                    <ImportGovernanceCell mappedData={row.mapped_data} batch={batch} />
+                  </td>
                   {showValidation && (
                     <td className="px-3 py-2">
                       {row.validation_errors?.length ? (

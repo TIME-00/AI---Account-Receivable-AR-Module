@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, ChevronLeft, ChevronRight, ListChecks } from "lucide-react";
 import { useAllocations } from "@/hooks/use-allocations";
-import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
+import { formatMoney, sumByCurrency } from "@/lib/currency";
+import { CurrencySubtotals } from "@/components/ui/currency-subtotals";
 import type { AllocationMethod, AllocationStatus } from "@/types";
 
 interface AllocationHistoryTableProps {
@@ -58,10 +60,21 @@ export function AllocationHistoryTable({
     return Math.max(1, Math.ceil(meta.total / meta.page_size));
   }, [meta]);
 
-  const totalAllocated = allocations
-    .filter((allocation) => allocation.status === "Active")
-    .reduce((sum, allocation) => sum + Number(allocation.allocated_amount), 0);
-  const currency = allocations[0]?.receipt_currency ?? "MYR";
+  // B9DD-FEIR-004: the `allocate_receipt` SQL invariant (BR-REC-003) guarantees
+  // receipt.currency === invoice.currency for EACH allocation PAIR. It does NOT
+  // make a page of allocations single-currency: this table is also rendered
+  // unscoped (global history), where rows from different receipts can carry
+  // different currencies. Summing them into one number and labelling it with
+  // `allocations[0].receipt_currency` produced a fabricated total.
+  //
+  // Totals are therefore grouped by receipt_currency, and each is a genuine
+  // same-currency sum. No company-base rollup is invented: the allocations read
+  // contract supplies no base allocation amount, so none is shown.
+  const activeSubtotals = sumByCurrency(
+    allocations.filter((allocation) => allocation.status === "Active"),
+    (allocation) => allocation.receipt_currency,
+    (allocation) => Number(allocation.allocated_amount),
+  );
 
   const setStatusFilter = (nextStatus: AllocationStatus | "All") => {
     setStatus(nextStatus);
@@ -85,10 +98,16 @@ export function AllocationHistoryTable({
             </span>
           )}
         </div>
-        {allocations.length > 0 && (
-          <p className="text-xs font-medium text-slate-500">
-            Active total: <span className="font-mono text-slate-800">{formatCurrency(totalAllocated, currency)}</span>
-          </p>
+        {allocations.length > 0 && activeSubtotals.length > 0 && (
+          <div className="flex items-start gap-2">
+            {/* Scope is explicit: these totals describe THIS PAGE only. */}
+            <p className="text-xs font-medium text-slate-500">Active total (this page):</p>
+            <CurrencySubtotals
+              subtotals={activeSubtotals}
+              className="text-xs [&>div]:text-xs"
+              color="text-slate-800"
+            />
+          </div>
         )}
       </div>
 
@@ -176,7 +195,7 @@ export function AllocationHistoryTable({
                       <p className="text-[10px] font-mono text-slate-400">{allocation.customer_code}</p>
                     </td>
                     <td className={cn("px-4 py-3 text-right text-sm font-mono font-semibold", allocation.status === "Reversed" && "text-slate-400 line-through")}>
-                      {formatCurrency(allocation.allocated_amount, allocation.receipt_currency)}
+                      {formatMoney(allocation.allocated_amount, allocation.receipt_currency)}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">{formatDate(allocation.allocation_date)}</td>
                     <td className="px-4 py-3">
@@ -187,12 +206,12 @@ export function AllocationHistoryTable({
                     </td>
                     {!showReceiptColumn && (
                       <td className="px-4 py-3 text-right text-sm font-mono text-slate-600">
-                        {formatCurrency(allocation.invoice_outstanding, allocation.receipt_currency)}
+                        {formatMoney(allocation.invoice_outstanding, allocation.receipt_currency)}
                       </td>
                     )}
                     {!showInvoiceColumn && (
                       <td className="px-4 py-3 text-right text-sm font-mono text-slate-600">
-                        {formatCurrency(allocation.receipt_amount, allocation.receipt_currency)}
+                        {formatMoney(allocation.receipt_amount, allocation.receipt_currency)}
                       </td>
                     )}
                   </tr>

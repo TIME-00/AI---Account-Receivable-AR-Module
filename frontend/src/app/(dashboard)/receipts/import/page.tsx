@@ -33,11 +33,13 @@ import {
   type ImportCustomerSuggestion,
   type ImportInvoiceSuggestion,
   type ImportRow,
+  type ImportBatch,
 } from "@/hooks/use-import";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ReviewActions } from "@/components/features/imports/review-actions";
 import { OcrImportFlow } from "@/components/features/imports/ocr-import-flow";
+import { ImportGovernanceCell } from "@/components/features/imports/import-governance-cell";
 import { cn, formatDate } from "@/lib/utils";
 
 // Import channel: existing CSV/Excel wizard vs. Batch 9C PDF/Image intake.
@@ -411,7 +413,7 @@ export default function ReceiptImportPage() {
             <RowsTable
               rows={rows}
               showValidation
-              batchId={batch.id}
+              batch={batch}
               reviewImportRow={reviewImportRow}
               reviewLoading={reviewLoading}
             />
@@ -450,7 +452,7 @@ export default function ReceiptImportPage() {
               rows={rows}
               showValidation
               showResult
-              batchId={batch.id}
+              batch={batch}
               reviewImportRow={reviewImportRow}
               reviewLoading={reviewLoading}
             />
@@ -518,17 +520,22 @@ function RowsTable({
   rows,
   showValidation,
   showResult,
-  batchId,
+  batch,
   reviewImportRow,
   reviewLoading,
 }: {
   rows: ImportRow[];
   showValidation?: boolean;
   showResult?: boolean;
-  batchId?: string;
+  /**
+   * B9DD-RR-005: the whole batch, not just its id — it is the authoritative
+   * import-origin envelope (`import_type` + `file_type`) for every row shown.
+   */
+  batch?: ImportBatch | null;
   reviewImportRow?: ReturnType<typeof useImport>["reviewImportRow"];
   reviewLoading?: ReturnType<typeof useImport>["reviewLoading"];
 }) {
+  const batchId = batch?.id;
   if (rows.length === 0) {
     return (
       <div className="rounded-xl border border-slate-200 p-8 text-center">
@@ -561,6 +568,8 @@ function RowsTable({
                   <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Receipt Reference</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Amount</th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Allocation</th>
+                  {/* B9DD-FEIR-008: FX / import governance provenance */}
+                  <th className="min-w-[220px] px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Currency &amp; FX governance</th>
                   <th className="min-w-[220px] px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Errors</th>
                 </>
               )}
@@ -640,6 +649,9 @@ function RowsTable({
                             <p className="text-[10px] text-slate-500">Unapplied balance: {String(unappliedAmount)}</p>
                           )}
                         </div>
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <ImportGovernanceCell mappedData={row.mapped_data} batch={batch} />
                       </td>
                       <td className="px-3 py-2">
                         {row.validation_errors?.length ? (

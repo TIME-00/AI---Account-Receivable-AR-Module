@@ -37,6 +37,7 @@ export const receiptFormSchema = z.object({
   }),
   currency: z
     .string()
+    .min(1, "Please select a currency.")
     .min(3, "Currency code must be 3 characters.")
     .max(3, "Currency code must be 3 characters."),
   receipt_amount: z
@@ -90,12 +91,20 @@ export type ReceiptFormValues = z.infer<typeof receiptFormSchema>;
 
 // ─── Default Values ─────────────────────────────────────────────────────────
 
+/**
+ * B9DD-RR-003: currency starts UNSELECTED — never a fabricated "MYR".
+ *
+ * The form initializes it from the authenticated company's base currency once
+ * `/auth/me` resolves. If the base currency is unavailable the field stays
+ * empty and the `min(1)` validator above blocks submission until the user picks
+ * a supported currency.
+ */
 export function defaultReceiptValues(): ReceiptFormValues {
   return {
     receipt_date: new Date().toISOString().slice(0, 10),
     customer_id: "",
     payment_method: "TT",
-    currency: "MYR",
+    currency: "",
     receipt_amount: 0,
     bank_account_id: "",
     exchange_rate: 1,

@@ -17,6 +17,21 @@ import {
   type InvoiceFormValues,
 } from "@/lib/invoice-schema";
 import { useInvoiceCalculator } from "@/hooks/use-invoice-calculator";
+import { useSeedBaseCurrency } from "@/hooks/use-seed-base-currency";
+
+/**
+ * Read a react-hook-form field error message without an `any` cast.
+ *
+ * RHF field errors are a recursive union (FieldError | FieldErrors | arrays), so
+ * the message lives either on the node itself or on its synthetic `root`.
+ */
+function readFieldErrorMessage(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const node = error as { message?: unknown; root?: { message?: unknown } };
+  if (typeof node.message === "string" && node.message.length > 0) return node.message;
+  if (typeof node.root?.message === "string" && node.root.message.length > 0) return node.root.message;
+  return undefined;
+}
 import {
   useCustomers,
   useTaxCodes,
@@ -71,6 +86,20 @@ export function useInvoiceForm() {
     defaultValues: defaultInvoiceValues(),
     mode: "onChange",
   });
+
+  // B9DD-RR-003: seed the currency from the authenticated company base once it
+  // is known. The form default is "" — never a fabricated "MYR" — and a user's
+  // own selection is never overwritten.
+  const baseCurrencyState = useSeedBaseCurrency(
+    useMemo(
+      () => ({
+        getCurrency: () => form.getValues("currency"),
+        setCurrency: (currency: string) =>
+          form.setValue("currency", currency, { shouldValidate: true, shouldDirty: false }),
+      }),
+      [form],
+    ),
+  );
 
   const { fields, append, remove } = useFieldArray({
     control: form.control,
@@ -216,8 +245,7 @@ export function useInvoiceForm() {
         // Surface the first validation error as a toast
         const errors = form.formState.errors;
         const firstError = Object.values(errors).find(Boolean);
-        const message = (firstError as any)?.message
-          ?? (firstError as any)?.root?.message
+        const message = readFieldErrorMessage(firstError)
           ?? "Please fix form validation errors before saving.";
         toast.error("Validation Error", { description: String(message) });
         return;
@@ -249,8 +277,7 @@ export function useInvoiceForm() {
       if (!valid) {
         const errors = form.formState.errors;
         const firstError = Object.values(errors).find(Boolean);
-        const message = (firstError as any)?.message
-          ?? (firstError as any)?.root?.message
+        const message = readFieldErrorMessage(firstError)
           ?? "Please fix form validation errors before posting.";
         toast.error("Validation Error", { description: String(message) });
         return;
@@ -302,6 +329,11 @@ export function useInvoiceForm() {
 
     // Calculator
     calc,
+
+    // Company base currency (B9DD-RR-003) — authoritative, may be unavailable.
+    baseCurrency: baseCurrencyState.baseCurrency,
+    baseCurrencyLoading: baseCurrencyState.isLoading,
+    baseCurrencyUnavailable: baseCurrencyState.isUnavailable,
 
     // Submit
     handleCreateDraft,

@@ -15,12 +15,27 @@
      the validated reference-only foundation now allows a real provider to be integrated (9D-B) **before**
      the booking-rate governance batch (9D-C). See **§0** (the authoritative current-state section).
 - **Predecessor:** Batch 9C — Receipt PDF/Image Import Intake (officially closed at `2e5d86e`).
-- **Next gate:** **User Batch 9D-D Implementation Approval Decision** (see the authoritative current-state
-  block in §0.0). Batch 9D-A is CLOSED, DG-1 is FORMALLY APPROVED AND LOCKED, Batch 9D-B is **OFFICIALLY
-  CLOSED**, and Batch 9D-C is **OFFICIALLY CLOSED** (Codex Batch 9D-C Closure Re-Review: `PASS — BATCH 9D-C
-  CLOSURE RE-REVIEW PASSED`; closed at staging-verification level; production rollout reserved for Batch 9D-E).
-  Batch 9D-D (Multi-Currency UX and Monetary Aggregation Correctness) is **PLANNING COMPLETE — CODEX PLAN
-  RE-REVIEW PASSED — IMPLEMENTATION NOT STARTED** (implementation approval not granted).
+- **Current gate state (2026-07-18):** Migration 030 and `GET /allocations/candidates` are installed,
+  deployed and runtime-verified in the explicitly approved staging project only. During that gate an
+  enabled privileged legacy staging service-role key was exposed by malformed output redaction. It was
+  treated as compromised: all 16 affected Edge consumers were migrated to hosted named secret and
+  publishable key dictionaries, the legacy anon/service-role pair was disabled and proven rejected,
+  and the complete affected runtime matrix passed. A subsequent independent review found that
+  `daily-overdue` still failed open when its separate `CRON_SECRET` server configuration was absent.
+  That custom-auth boundary is now fail closed before admin-client creation, uses constant-time
+  comparison, has 12 permanent focused tests, and is deployed/runtime-verified as staging v6. The
+  approved staging project had no `CRON_SECRET`, so one staging-only value was configured without
+  repository/output exposure. There is no `daily-overdue` cron job to rewire; the Batch 9D-B FX job
+  remains unchanged. No credential value is retained in this plan.
+  See the authoritative current-state block in Section 0.0. Batch 9D-A is CLOSED, DG-1 is FORMALLY APPROVED
+  AND LOCKED, Batch 9D-B is **OFFICIALLY CLOSED**, and Batch 9D-C is **OFFICIALLY CLOSED** (Codex Batch 9D-C
+  Closure Re-Review: `PASS  -  BATCH 9D-C CLOSURE RE-REVIEW PASSED`; closed at staging-verification level;
+  production rollout reserved for Batch 9D-E). Batch 9D-D (Multi-Currency UX and Monetary Aggregation
+  Correctness) has its **backend and staging scope CLOSED (PASS)** at baseline `d5c9c0a`
+  (`fix(ar): close Batch 9D-D staging runtime defects`; migrations 027-029 applied + verified in staging),
+  and its **frontend Multi-Currency UX IMPLEMENTED** in the consolidated frontend gate  -  **subject to
+  independent Codex frontend/backend integration review** (not review-passed). Commit and push remain
+  pending separate authorization after review; production rollout reserved for Batch 9D-E.
   - *(Historical, 2026-07-07: the then-remaining flow was Codex DG-1 Lock Confirmation Review → 9D-B
     detailed implementation planning → 9D-B implementation approval → 9D-B implementation; all of these
     have since occurred. Earlier still, the Rev 2 gate was "Codex Batch 9D Plan Amendment Review → user
@@ -47,7 +62,7 @@
 > §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
 > history and is **not** erased.
 
-### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-12 — Batch 9D-C officially closed; 9D-D planning complete, Codex Plan Re-Review passed)
+### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-20 - Batch 9D-D source implementation, local validation, Migration 030 staging runtime, allocations candidate route staging runtime, credential remediation, daily-overdue fail-closed remediation, Codex self-validation, Claude independent source review, and Claude independent staging closure confirmation are PASS. No Critical or High finding remains. The sole Medium documentation undercount is corrected to exactly three controlled `0.01` records, all `Reversed` with reversal timestamp, reason, and actor; zero active gate allocation remains and financial arithmetic reconciles. Production and Batch 9D-E are NOT STARTED. Frontend production deployment is NOT AUTHORIZED. Commit is NOT YET AUTHORIZED; push is NOT AUTHORIZED because GitHub main may trigger a Vercel production deployment.)
 
 > **This block is the single authoritative current-state statement for Batch 9D and supersedes any
 > "9D-B not yet implemented / pending plan review / implementation approval not granted" wording elsewhere
@@ -59,16 +74,89 @@
 > | DG-1 (provider decision) | **FORMALLY APPROVED AND LOCKED** |
 > | Batch 9D-B | **OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS — OFFICIAL CLOSURE`) |
 > | Batch 9D-C | **OFFICIALLY CLOSED** (Codex Closure Re-Review: `PASS — BATCH 9D-C CLOSURE RE-REVIEW PASSED`; closed at staging-verification level; migrations 022-026 applied+verified; RT-01..RT-19 complete; cleanup complete; no production action) |
-> | Batch 9D-D | **PLANNING COMPLETE — CODEX PLAN RE-REVIEW PASSED — IMPLEMENTATION NOT STARTED** (Codex Batch 9D-D Plan Re-Review: `PASS — BATCH 9D-D PLAN RE-REVIEW PASSED`; implementation approval not granted); Multi-Currency UX and Monetary Aggregation Correctness; reviewed plan `docs/plans/BATCH_9D_D_MULTI_CURRENCY_UX_AND_AGGREGATION_CORRECTNESS_PLAN.md` |
+> | Batch 9D-D history | **The following long row is a pre-FNC historical snapshot. Its pending-Codex status, validation counts, and five-dimension lifecycle description are superseded by the current FNC correction immediately after it.** |
+> | Batch 9D-D | **BACKEND/STAGING BASELINE THROUGH MIGRATION 029 CLOSED (PASS); FINAL CLOSURE DELTA (PHASE A SOURCE-LEVEL BACKEND + PHASE B FRONTEND) IMPLEMENTED LOCALLY - PENDING ONE FINAL INDEPENDENT CODEX CONSOLIDATED SOURCE-LEVEL REVIEW** (baseline `d5c9c0a` `fix(ar): close Batch 9D-D staging runtime defects`; migrations 027-029 applied + verified in staging. The frontend passed through multiple implementation, independent review and remediation cycles: (1) FE/BE integration - 13 findings B9DD-FEIR-001 ... B9DD-FEIR-013; (2) remediation re-review - 7 findings B9DD-RR-001 ... B9DD-RR-007; (3) focused re-review - **CLOSED B9DD-RR-001 (Aging pagination) and B9DD-RR-003 (form currency/MYR)**, returned 6 findings B9DD-FR-001 ... B9DD-FR-006; (4) delta re-review - **CLOSED B9DD-FR-001 (customer placeholder state), B9DD-FR-003 (real OCR composition) and B9DD-FR-005 (credit_rating coverage)** and returned 3 findings B9DD-DR-001 ... B9DD-DR-003 (the allocation candidate scan was still not fail-closed under mutable offset pagination - it overwrote the collection total each page and accepted short/empty pages, so a shrinking collection returned success while skipping invoices that appeared on no page, and the page discarded the error so instability rendered as "no outstanding invoices"; the monetary guard's hand-rolled comment stripper did not model regex literals and could DELETE real code, an UNDER-scan/false-negative; documentation overstated both). B9DD-DR-001 ... B9DD-DR-003 were remediated; the micro-delta review then concluded that the frontend-only OFFSET scan could DETECT instability but never PROVE coverage; and the consolidated source-level review that followed ACCEPTED Phase A and returned four frontend findings, B9DD-CDR-001 ... B9DD-CDR-004 (the candidate parser applied the six-code NEW-WRITE currency list to an existing-document READ contract, so a legacy JPY receipt would have been impossible to allocate; allocation actions still hung off a RENDER-TIME verification boolean that a captured callback could carry into the window after the query cache had moved but before React re-rendered; the monetary AST guard still missed nullish/logical fallbacks, destructuring, aliases, callback-local variables, accumulator assignment, reduceRight and JSX static text; and the evidence contained contradictory or overstated statements). All four were remediated; the focused re-review that followed then returned four further findings, B9DD-CRR-001 ... B9DD-CRR-004 (the live authorization binding was CONTENT-based, so a BYTE-IDENTICAL background refetch settled a new authoritative generation whose content compared EQUAL and silently RE-AUTHORIZED stale callbacks before React rebound - reproduced, with `dataUpdateCount` 1 -> 2, the same data reference retained by structural sharing, and a stale payload buildable; the receipt A -> B selection handler scheduled state without SYNCHRONOUSLY revoking authority, so receipt A's captured callbacks stayed authorized inside the selection event itself; the monetary AST guard missed RETURNED accumulator assignments (`return (sum += row.outstanding)`), which were inside its own documented callback-local scope; and the evidence still carried an active present-tense OFFSET section asserting that only mutable offset pagination existed and that a backend fix was unactioned future work - a world Phase A had already replaced). All four were remediated; the focused re-review that followed then returned two further findings, B9DD-FRR-001 ... B9DD-FRR-002 (the React rebind effect observed `dataUpdatedAt`, a MILLISECOND timestamp, so two successful byte-identical reads completing in the same millisecond were invisible to it - `dataUpdateCount` advanced 1 -> 2 while structural sharing preserved the data reference, the fingerprint and the timestamp, so the effect never re-ran, the workbench stayed bound to the OLD generation, invocation-time authorization then denied every action FOREVER, and the stale `canSubmit` memo still rendered the Confirm button enabled - a permanently bricked workbench; and the documentation asserted that `dataUpdatedAt` 'defeats structural sharing' and made 'every authoritative read rebind', which was false). SAFETY had held throughout; LIVENESS had not. Both were remediated; the consolidated review that followed then returned four further findings, B9DD-FDR-001 ... B9DD-FDR-004 - including one PRODUCTION-REACHABLE tenant defect: the candidate Query key was receipt-only, so switching company via the header's real `setCompany` path left Company A's cached candidate contract displayed and locally actionable under Company B (no refetch, `boundCustomerName: "Company A"`, `canSubmit: true`); `dataUpdateCount` was treated as globally collision-free when it is monotonic only WITHIN one Query instance, so a removed-and-recreated Query with identical count/timestamp/content revived an old binding; old callbacks read the newest mutable bound ref and could pass under a LATER binding while acting on their own captured rows; and the Confirm button could paint ENABLED while every action denied. All four were remediated; a further review then returned B9DD-FCR-001 ... B9DD-FCR-003 (a permanent regression was missing for `resetQueries()`, which reuses the SAME Query object so the WeakMap epoch does NOT change and every token field can repeat - safety there rests on the reset/pending revision, layout revocation and binding-session rollover, not the epoch; React lifecycle warnings were still present under `--reporter=verbose` (39 act, 23 act-environment, 3 setState-in-render) and an earlier gate had wrongly reported them clean because it read the default reporter and used a pattern React's interpolated component name could never match; and the documentation overstated epoch/HMR/layout/warning coverage). All three are now remediated in place. Allocation authority binds FIVE dimensions - current company, Query INSTANCE epoch (a WeakMap keyed on the public Query object), Query generation, contract content, and the local binding SESSION a callback was created in - compared in that order; the candidate Query key is company-scoped; the current tenant is read from the store at INVOCATION time; the rebind is driven by a collision-free QueryCache revision built on the public `dataUpdateCount`, observed via `useSyncExternalStore` over the public `queryClient.getQueryCache().subscribe(...)`, and now runs in the LAYOUT phase so no enabled-but-inert control paints. The remedy is the **Final Closure Delta**: **Phase A** adds Migration 030 `public.get_allocation_candidates(...)` (STABLE, SECURITY DEFINER, `search_path = ''`, service_role-only, read-only, non-paginated, capped at 5,000, deterministically ordered by due_date/invoice_no/id) exposed as `GET /allocations/candidates`, returning ONE complete candidate set from ONE PostgreSQL statement snapshot; **Phase B** consumes it, DELETES the OFFSET scan with no fallback, validates the contract client-side with Zod (accepting any `^[A-Z]{3}$` code, matching the backend's existing-document READ boundary rather than its NEW-WRITE list), binds the workbench to the governed receipt, and clears all candidate/allocation state unless the contract is currently verified. Every mutating action, `buildPayload` and submission re-verify against the LIVE TanStack query cache at INVOCATION time (default-deny). Authority binds BOTH the contract content fingerprint AND the authoritative query fetch generation (`dataUpdateCount` + `dataUpdatedAt`, from the public `QueryState` shape), so a stale callback is denied during a refetch in flight, after a failed refetch that retains data, before a changed-content rebind, AND before a BYTE-IDENTICAL-content rebind (which content comparison alone cannot see). Receipt-ID transitions revoke authority SYNCHRONOUSLY before scheduling the new selection, closing the pre-commit window that no cache check can close. Separately from that invocation-time SAFETY, React rebind LIVENESS is driven by a collision-free QueryCache revision (`dataUpdateCount`, never `dataUpdatedAt` alone), so a byte-identical refetch settling in the SAME millisecond still rebinds, clears the previous generation's lines and restores actionability - proven by a deterministic test that freezes `Date.now`. The monetary guard becomes a bounded AST dataflow analysis over `reduce`/`reduceRight` (parameter binding, destructuring/aliasing, callback-local taint, fallbacks, accumulator updates and RETURNED accumulator assignments) plus JSX static text, with its non-interprocedural boundary documented and asserted. **Migration 030 is NOT applied to staging or production; the allocations Edge Function is NOT deployed; PostgreSQL runtime behaviour for Migration 030 is NOT proven; staging has NOT verified the route.** B9DD-RR-008 is informational local `node_modules` state only and required no tracked-file change. Local validation: 28 test files / 526 tests, 0 failed, 0 skipped (verbose reporter: zero React lifecycle warnings); TypeScript, ESLint and the production build (26 application routes) all pass; npm audit 0 high / 0 critical; `deno check` passes and the Phase A source-contract test passes 12/12 via the existing non-install `--no-check` path. **Not** review-passed; **not** closed; commit/push **not authorized** (GitHub main may trigger a Vercel production deploy)); Multi-Currency UX and Monetary Aggregation Correctness; reviewed plan `docs/plans/BATCH_9D_D_MULTI_CURRENCY_UX_AND_AGGREGATION_CORRECTNESS_PLAN.md`; frontend evidence `docs/evidence/SPRINT_BATCH_9D_D_MULTI_CURRENCY_UX_AND_MONETARY_AGGREGATION_EVIDENCE.md` |
+> **Final FNC lifecycle and gate-status correction (CURRENT; supersedes the pending-Codex status,
+> validation counts, and lifecycle/reset/warning wording in the long Batch 9D-D history row above):** allocation authority now binds six independent dimensions:
+> current company, Query-object epoch, a synchronous per-company/receipt QueryCache lifecycle epoch,
+> QueryState generation, contract content, and local callback binding session. `resetQueries()` keeps
+> the same Query object and may repeat its final count/timestamp/content; matching QueryCache events
+> therefore advance the lifecycle epoch synchronously before `notifyManager.batchCalls` schedules the
+> React notification. Invocation-time checks deny immediately, and layout rebind rolls the session
+> before paint. Fast Refresh may preserve hook state while module trackers reset, so safety fails
+> closed on mismatches and does not assume HMR destroys bindings. Testing Library 16.3.2 already
+> configures the React act environment and cleanup; warning remediation is attributed to correct
+> `act`/`waitFor` boundaries, removal of invalid probes, and safe QueryCache-to-React scheduling - not
+> to an allegedly absent global flag. See evidence Section 3.12.
+> Final local validation for this Codex implementation: **28 test files / 530 tests, 0 failed, 0
+> skipped; 26 application routes; verbose React warning scan zero; TypeScript, ESLint, and build
+> pass; npm audit remains 3 moderate overall / 2 moderate production with 0 high / 0 critical.**
+> Pre-credential-remediation worktree at that validation: **58 modified tracked files, 53 untracked
+> files, staged 0; tracked diff 5,991 insertions / 1,202 deletions.**
+>
+> **Staging credential incident correction (CURRENT; supersedes all source-only/unapplied status in
+> the historical row):** Migration 030 and the candidate route are staging-installed/deployed and
+> runtime-verified. A privileged legacy staging service-role key exposed by malformed output redaction
+> was treated as compromised. The 16 Edge Functions sharing `_shared/db.ts` were migrated to a named
+> modern server secret plus the hosted default publishable-key dictionary, then redeployed to staging
+> only. The legacy anon/service-role pair is disabled and both keys return 401. Replacement-backed
+> candidate, manual-allocation, tenant/Clerk, all affected user/read routes, scheduler and disabled-auto
+> checks pass. The Batch 9D-B scheduler retained its separate credential and schedule. No JWT signing
+> rotation, Vault change, production action, commit, or push occurred.
+> Final credential-remediation worktree: **60 modified tracked files, 54 untracked files, staged 0;
+> tracked diff 6,060 insertions / 1,231 deletions.** Local frontend validation remains **28 files /
+> 530 tests**, with 0 failed, 0 skipped, 26 application routes and zero verbose lifecycle warnings.
+>
+> **Daily-overdue security correction (CURRENT; supersedes the historical fail-open pattern and the
+> credential-gate record that treated it as accepted):** `daily-overdue` remains `verify_jwt=false`
+> because its function-level boundary now fails closed before any admin client or privileged query.
+> Missing/blank server configuration returns a sanitized 500; missing/blank/incorrect callers return
+> sanitized 401; the supplied value is checked with the accepted constant-time helper. Twelve permanent
+> tests and two mutation checks prove the configuration, comparison, zero-privileged-call, ordering and
+> response invariants. Staging lacked `CRON_SECRET`, so one staging-only secret was configured and only
+> `daily-overdue` was explicitly deployed (v6, ACTIVE). Missing/empty/incorrect/anonymous/ordinary-user
+> calls return 401; the correct caller returns 200. The bounded positive invocation moved exactly three
+> pre-counted invoices to `Overdue`, held no customer, wrote no customer/credit logs, and is idempotent.
+> No `daily-overdue` cron job exists; the separate Batch 9D-B FX job and schedule are unchanged.
+> Exactly three controlled `0.01` allocation records remain as reversed audit history:
+> `B9DD runtime gate emergency cleanup`, `B9DD staging runtime negative-matrix reversal`, and
+> `Batch 9D-D credential rotation regression reversal`. All three are `Reversed` with reversal timestamp, reason, and actor;
+> no active `0.01` gate allocation remains and the associated receipt/invoice arithmetic reconciles.
+> `frontend/.env.local` still resolves to production, was not edited or used for network traffic, and
+> must be replaced by an explicitly configured staging frontend environment before interactive local
+> staging UI tests. Claude Code subsequently completed its separately configured independent read-only
+> staging confirmation with `PASS - INDEPENDENT STAGING CLOSURE CONFIRMATION COMPLETE`.
+> Final daily-overdue-remediation worktree: **62 modified tracked files, 56 untracked files, staged 0;
+> tracked diff 6,225 insertions / 1,313 deletions.**
+> Final closure-documentation worktree contains **62 modified tracked files and 74 untracked files:
+> 56 Batch 9D-D files plus 18 unrelated `social-media/` files that are excluded from the proposed Batch
+> commit; tracked diff 6,231 insertions / 1,313 deletions; staged 0**.
+>
 > | Batch 9D-E | **NOT STARTED** (owns production rollout) |
 >
-> **Current next gate:** **User Batch 9D-D Implementation Approval Decision**. Batch 9D-C is officially closed
-> at staging-verification level and Batch 9D-D planning is complete (Codex Plan Re-Review passed); Batch 9D-D
-> implementation has **not** started and implementation approval is **not** granted. No production action has
-> occurred. Production rollout remains reserved for Batch 9D-E. 9D-C evidence:
+> **Current staging gate state (authoritative):** Migration 030 and the allocations candidate route are
+> installed/deployed and runtime-verified in the approved staging project only. The credential incident
+> discovered during that gate is remediated: an exposed privileged legacy staging service-role key was
+> replaced for every affected Edge consumer, the legacy anon/service-role pair is disabled and rejected,
+> and replacement-backed candidate, manual-allocation, tenant/Clerk, scheduler and disabled-auto paths
+> pass. The `daily-overdue` custom-auth follow-up is also deployed and runtime-verified fail closed; its
+> staging secret is present, its negative/positive matrix passes, and no daily-overdue cron invocation
+> exists. Exactly three controlled `0.01` allocation records remain in `Reversed` audit state with
+> reversal timestamp, reason, and actor; no active gate allocation remains and receipt/invoice arithmetic
+> reconciles. Claude independent staging closure confirmation is **PASS**. Batch 9D-C remains closed at
+> staging-verification level. The first frontend attempt **FAILED** the
+> independent Codex frontend/backend integration review (13 confirmed findings: list row/summary scope;
+> reports capped at 100 rows; missing Customer Statement UI; allocation-history and receipt-exposure
+> cross-currency defects; residual MYR defaults; undirected FX presentation; missing import/OCR governance;
+> contract requiredness mismatch; missing integration tests; lint not configured; vulnerable test stack;
+> inaccurate evidence). **All 13 have been remediated in the uncommitted worktree**. One **backend contract limitation was
+> recorded, not modified** (`v_customer_credit_utilization` sums outstanding across currencies without FX
+> normalization  -  the frontend routes around it via `ar_aging_by_customer`). Commit and push are **not yet
+> approved**. No production action has occurred; production rollout remains **NOT STARTED**, reserved for
+> Batch 9D-E. 9D-C evidence:
 > `docs/evidence/SPRINT_BATCH_9D_C_BOOKING_RATE_PROVENANCE_AND_OVERRIDE_GOVERNANCE_IMPLEMENTATION_EVIDENCE.md`.
 >
-> The 9D-B staging scheduler **remains ACTIVE** for continued staging observation under approved staging
+> The 9D-B staging scheduler **remains ACTIVE and unchanged** for continued staging observation under approved staging
 > scope. **No production deployment, no production provider call, no production scheduler activation, and
 > no production mutation occurred.** Canonical execution order is unchanged:
 > `9D-A (CLOSED) → DG-1 → 9D-B (CLOSED) → 9D-C (CLOSED) → 9D-D → 9D-E` (§0.2).
@@ -144,8 +232,18 @@ separation is now proven, not assumed.
 > APPROVED AND LOCKED**; Batch 9D-B — **OFFICIALLY CLOSED** (Codex Closure Re-Review `PASS — OFFICIAL
 > CLOSURE`); Batch 9D-C — **OFFICIALLY CLOSED** (Codex Closure Re-Review `PASS — BATCH 9D-C CLOSURE
 > RE-REVIEW PASSED`; closed at staging-verification level; production reserved for 9D-E); Batch 9D-D —
-> **PLANNING COMPLETE — CODEX PLAN RE-REVIEW PASSED — IMPLEMENTATION NOT STARTED** (current next gate: User
-> Batch 9D-D Implementation Approval Decision; implementation approval not granted).
+> **MIGRATIONS THROUGH 030 AND THE ALLOCATIONS CANDIDATE ROUTE ARE INSTALLED/DEPLOYED AND RUNTIME-VERIFIED
+> IN THE APPROVED STAGING PROJECT; THE LEGACY STAGING API-KEY INCIDENT IS REMEDIATED** (baseline `d5c9c0a`; migrations 027-029 applied + verified in staging; the
+> first frontend attempt failed the independent FE/BE integration review and findings
+> B9DD-FEIR-001 ... B9DD-FEIR-013 were remediated; that remediation FAILED the re-review, producing
+> B9DD-RR-001 ... B9DD-RR-007; those were remediated, and the focused re-review CLOSED B9DD-RR-001
+> and B9DD-RR-003 but returned B9DD-FR-001 ... B9DD-FR-006; those were remediated, and the delta
+> re-review CLOSED B9DD-FR-001/FR-003/FR-005 but returned B9DD-DR-001 ... B9DD-DR-003; those were
+> remediated, and the micro-delta review then concluded the frontend-only OFFSET scan could not
+> prove coverage - so the Final Closure Delta adds a governed backend candidate contract
+> (Phase A, Migration 030, now staging-installed/verified) and its frontend consumption (Phase B).
+> All affected Edge consumers now use modern named key dictionaries; the compromised legacy pair is
+> disabled and rejected. Commit/push remain **not authorized**; production remains untouched).
 
 - **API / transport:** **Frankfurter v2**.
 - **Provider strategy:** **explicit provider pinning is mandatory**. **Initial provider: `MAS`.**
@@ -239,10 +337,26 @@ realized-FX behavior must remain compatible with existing allocation logic.
 > testing + mandatory staging matrix). The plan was fully amended and confirmed, then implemented; Batch
 > 9D-C has since **completed staging runtime verification (PASS)** with migrations 022-026 applied+verified
 > and evidence consolidated, and is now **OFFICIALLY CLOSED** at staging-verification level (Codex Batch
-> 9D-C Closure Re-Review: `PASS`). Batch 9D-D planning is now **complete** (Codex Batch 9D-D Plan Re-Review:
-> `PASS — BATCH 9D-D PLAN RE-REVIEW PASSED`); the current next gate is the **User Batch 9D-D Implementation
-> Approval Decision** (implementation not started, approval not granted); production rollout remains reserved
-> for Batch 9D-E. This master section remains the authoritative scope/order summary.
+> 9D-C Closure Re-Review: `PASS`). Batch 9D-D backend and staging scope are now **CLOSED (PASS)** (baseline
+> `d5c9c0a` `fix(ar): close Batch 9D-D staging runtime defects`; migrations 027-029 applied + verified in
+> staging), and the Batch 9D-D **frontend Multi-Currency UX**  -  implemented in the consolidated
+> frontend gate, then **failed** the independent Codex FE/BE integration review  -  has been
+> **remediated in place** against findings B9DD-FEIR-001 ... B9DD-FEIR-013; then, after the
+> remediation re-review also failed, against B9DD-RR-001 ... B9DD-RR-007; then, after the focused
+> re-review, against B9DD-FR-001 ... B9DD-FR-006; then, after the delta re-review, against
+> B9DD-DR-001 ... B9DD-DR-003; then, after the micro-delta review, via the Final Closure Delta
+> (Phase A governed candidate contract, source-level only + Phase B frontend consumption); and
+> finally, after the consolidated source-level review ACCEPTED Phase A, against
+> B9DD-CDR-001 ... B9DD-CDR-004; and finally, after the focused source-level re-review, against
+> B9DD-CRR-001 ... B9DD-CRR-004; and finally, after the focused re-review, against
+> B9DD-FRR-001 ... B9DD-FRR-002; and finally, after the consolidated review, against
+> B9DD-FDR-001 ... B9DD-FDR-004; and finally, after the closure review, against
+> B9DD-FCR-001 ... B9DD-FCR-003 (frontend evidence
+> `docs/evidence/SPRINT_BATCH_9D_D_MULTI_CURRENCY_UX_AND_MONETARY_AGGREGATION_EVIDENCE.md`); Migration 030
+> and the governed candidate route are now staging-installed/deployed/runtime-verified, and the
+> privileged legacy staging-key exposure is remediated with the legacy pair disabled and rejected.
+> Commit/push remain **not approved**; production rollout remains **NOT STARTED**, reserved for Batch 9D-E. This master section
+> remains the authoritative scope/order summary.
 
 Current approved architecture remains:
 
@@ -375,7 +489,7 @@ Files inspected (read-only) in the original plan and this amendment:
   `006_rls_policies.sql`, `007_financial_rpcs.sql`, `007c_api_staging_fixtures.sql`,
   `014_live_dashboard_metrics.sql`, migration index (`002`–`016`, `README.md`).
 - **Backend Edge Functions:** `invoices/service.ts`, `invoices/validators.ts`, `receipts/service.ts`,
-  `reports/service.ts`, `imports/service.ts`, `daily-overdue/index.ts`, `_shared/constants.ts`,
+  `reports/service.ts`, `imports/service.ts`, `daily-overdue/auth.ts`, `daily-overdue/index.ts`, `_shared/constants.ts`,
   `_shared/validators.ts`, `_shared/errors.ts`, function inventory.
 - **Frontend:** `lib/utils.ts`, `app/(dashboard)/invoices/[id]/page.tsx`, `stores/company-store.ts`,
   currency-touching file inventory (51 files).
@@ -937,7 +1051,8 @@ only; no `ar.*`; Settings "Daily FX Sync" flips to **Live** only after a verifie
   `003_seed_data.sql:231`, `006_rls_policies.sql:251-316`, `007_financial_rpcs.sql:243,650,833-937`,
   `007c_api_staging_fixtures.sql:143-408`, `014_live_dashboard_metrics.sql:121-336,460-477`.
 - Backend: `invoices/service.ts:127,636,768`, `invoices/validators.ts:98`, `receipts/service.ts:89,500`,
-  `reports/service.ts:218,303`, `imports/service.ts` (no FX handling), `daily-overdue/index.ts:9-15,48-52`,
+  `reports/service.ts:218,303`, `imports/service.ts` (no FX handling), `daily-overdue/auth.ts`,
+  `daily-overdue/index.ts`,
   `_shared/constants.ts:95-98`, `_shared/validators.ts:159`.
 - Frontend: `lib/utils.ts:12-28`, `app/(dashboard)/invoices/[id]/page.tsx:204,308-311`,
   `stores/company-store.ts:29`.

@@ -3865,8 +3865,8 @@ Deno.test('Batch 9D-D F-03 direct PostgREST lifecycle errors preserve safe busin
   const overdueHandler = await read('../daily-overdue/index.ts');
   assert(!/result\.errors\.push\([^\n]*\.message/.test(overdueHandler));
   assert(!overdueHandler.includes('result.errors.push(error instanceof Error ? error.message'));
-  assert(overdueHandler.includes("result.errors.push('Daily overdue task failed')"));
-  assert(overdueHandler.includes("console.error('[DAILY-OVERDUE] Fatal error:', error)"));
+  assert(/result\.errors\.push\(["']Daily overdue task failed["']\)/.test(overdueHandler));
+  assert(/console\.error\(["']\[DAILY-OVERDUE\] Fatal error:["'], error\)/.test(overdueHandler));
 
   const invoiceService = await read('../invoices/service.ts');
   assert(!invoiceService.includes(".from('invoice_lines')\n      .insert"));

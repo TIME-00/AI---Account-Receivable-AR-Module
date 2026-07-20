@@ -26,7 +26,7 @@ export default function LoginPage() {
       } else {
         router.push("/");
       }
-    } catch (err) {
+    } catch {
       setError("Login failed. Please try again later.");
     } finally {
       setIsLoading(false);

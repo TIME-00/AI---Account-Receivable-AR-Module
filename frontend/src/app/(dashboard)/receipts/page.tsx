@@ -9,10 +9,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useReceipts, usePostReceipt, useCustomers } from "@/hooks/use-receipts";
+import { totalPagesFrom } from "@/hooks/use-invoices";
 import { useUserRole } from "@/hooks/use-user-role";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { ReceiptFilters } from "@/components/features/receipts/receipt-filters";
 import { ReceiptTable } from "@/components/features/receipts/receipt-table";
+import { MoneySummary } from "@/components/ui/money-summary";
 import { FileSpreadsheet, Plus, Wallet } from "lucide-react";
 
 const PAGE_SIZE = 15;
@@ -26,7 +28,7 @@ export default function ReceiptsListPage() {
 
   // ── Data ──────────────────────────────────────────────────────────
   const { data: customers = [] } = useCustomers();
-  const { data: receipts = [], isLoading, isError } = useReceipts({
+  const { data, isLoading, isError } = useReceipts({
     status: statusFilter || undefined,
     customer_id: customerFilter || undefined,
     search: searchQuery || undefined,
@@ -34,10 +36,16 @@ export default function ReceiptsListPage() {
     page_size: PAGE_SIZE,
   });
 
-  // useApi returns raw Receipt[] — meta.total is not available.
-  // Client-side count for prototype.
-  const totalCount = receipts.length;
-  const totalPages = 1; // No server-side total — single page view
+  // Rows for the CURRENT PAGE (backend-scoped; no client re-filtering).
+  const receipts = data?.rows ?? [];
+  // Batch 9D-D authoritative aggregation (per-currency subtotals + base total).
+  const summary = data?.summary;
+
+  // B9DD-FEIR-001: real backend pagination — `total` is the filtered
+  // COLLECTION size, not this page's row count.
+  const pagination = data?.pagination;
+  const totalCount = pagination?.total ?? 0;
+  const totalPages = totalPagesFrom(pagination);
 
   // ── Role gating ────────────────────────────────────────────────────
   const { canPostReceipt, canCreateReceipt } = useUserRole();
@@ -51,7 +59,7 @@ export default function ReceiptsListPage() {
     try {
       const result = await postMutation.mutateAsync({ id });
       toast.success("Receipt Posted", {
-        description: `${receiptNo}${(result as any).je_no ? ` · JE: ${(result as any).je_no}` : ""}`,
+        description: `${receiptNo}${result.je_no ? ` · JE: ${result.je_no}` : ""}`,
       });
     } catch {
       // Error handled by useApi
@@ -97,6 +105,14 @@ export default function ReceiptsListPage() {
         customers={customers}
         onResetPage={() => setPage(1)}
       />
+
+      {/* Authoritative multi-currency aggregation (Batch 9D-D) */}
+      {summary && receipts.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <MoneySummary summary={summary.document_total_summary} title="Received" />
+          <MoneySummary summary={summary.current_balance_summary} title="Unapplied" />
+        </div>
+      )}
 
       {/* Table */}
       <ReceiptTable

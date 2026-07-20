@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { formatCurrency } from "@/lib/utils";
+import { formatMoneySafe } from "@/lib/currency";
 
 interface Customer {
   id: string;
@@ -87,7 +87,7 @@ export function CustomerSearchOverlay({
                     {c.credit_rating}
                   </span>
                   <p className="mt-0.5 text-[10px] text-slate-500">
-                    Limit: {formatCurrency(c.credit_limit)}
+                    Limit: {formatMoneySafe(c.credit_limit, c.default_currency)}
                   </p>
                 </div>
               </button>

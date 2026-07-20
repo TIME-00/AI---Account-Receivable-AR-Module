@@ -1,7 +1,7 @@
 "use client";
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { formatAmount } from "@/lib/utils";
+import { formatMoneySafe } from "@/lib/currency";
 import { TOOLTIP_STYLE } from "./chart-tooltip";
 import { ShieldAlert } from "lucide-react";
 
@@ -14,11 +14,12 @@ interface CreditRiskEntry {
 
 interface CreditRiskChartProps {
   data: CreditRiskEntry[];
-  currency?: string;
+  /** Company base currency (values are company-base); null when unavailable. */
+  currency: string | null;
   isLoading?: boolean;
 }
 
-export function CreditRiskChart({ data, currency = "MYR", isLoading = false }: CreditRiskChartProps) {
+export function CreditRiskChart({ data, currency, isLoading = false }: CreditRiskChartProps) {
   const hasData = data.some((entry) => entry.count > 0 || entry.amount > 0);
 
   return (
@@ -47,7 +48,7 @@ export function CreditRiskChart({ data, currency = "MYR", isLoading = false }: C
             <XAxis type="number" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
             <YAxis type="category" dataKey="rating" tick={{ fill: "#64748b", fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} width={40} />
             <Tooltip
-              formatter={(value: number) => [`${currency} ${formatAmount(value)}`, "Outstanding"]}
+              formatter={(value: number) => [formatMoneySafe(value, currency), "Outstanding"]}
               contentStyle={TOOLTIP_STYLE}
             />
             <Bar dataKey="amount" radius={[0, 6, 6, 0]}>

@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -19,16 +19,17 @@ import {
 import {
   useCustomers,
   useBankAccounts,
-  useCustomerOutstanding,
+  useCustomerExposure,
   useCreateReceipt,
   usePostReceipt,
 } from "@/hooks/use-receipts";
+import { useSeedBaseCurrency } from "@/hooks/use-seed-base-currency";
 
 import { ReceiptFormCustomer } from "@/components/features/receipts/receipt-form-customer";
 import { ReceiptFormPayment } from "@/components/features/receipts/receipt-form-payment";
 import { ReceiptFormAmount } from "@/components/features/receipts/receipt-form-amount";
 import { ReceiptSummaryBar } from "@/components/features/receipts/receipt-summary-bar";
-import { Receipt, FileText } from "lucide-react";
+import { Receipt, FileText, Info } from "lucide-react";
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
@@ -43,6 +44,22 @@ export default function NewReceiptPage() {
     mode: "onChange",
   });
 
+  // B9DD-RR-003: seed the currency from the authenticated company base once it
+  // is known. The form default is "" — never a fabricated "MYR" — and a user's
+  // own selection is never overwritten.
+  // Only the availability flag is needed here: the child components read the
+  // base currency itself from `useBaseCurrency()` where they render it.
+  const { isUnavailable: baseCurrencyUnavailable } = useSeedBaseCurrency(
+    useMemo(
+      () => ({
+        getCurrency: () => form.getValues("currency"),
+        setCurrency: (currency: string) =>
+          form.setValue("currency", currency, { shouldValidate: true, shouldDirty: false }),
+      }),
+      [form],
+    ),
+  );
+
   const watchCustomerId = form.watch("customer_id");
   const watchPaymentMethod = form.watch("payment_method");
   const watchCurrency = form.watch("currency");
@@ -52,7 +69,12 @@ export default function NewReceiptPage() {
   // ── Data Queries ──────────────────────────────────────────────────
   const { data: customers = [] } = useCustomers();
   const { data: bankAccounts = [], isLoading: isLoadingBankAccounts } = useBankAccounts();
-  const { data: outstanding } = useCustomerOutstanding(watchCustomerId);
+  // B9DD-FEIR-005: authoritative, multi-currency customer exposure.
+  const {
+    data: exposure,
+    isLoading: exposureLoading,
+    isError: exposureError,
+  } = useCustomerExposure(watchCustomerId);
 
   // ── Mutations ─────────────────────────────────────────────────────
   const createMutation = useCreateReceipt();
@@ -92,11 +114,11 @@ export default function NewReceiptPage() {
       if (isPostMode && receipt?.id) {
         const posted = await postMutation.mutateAsync({ id: receipt.id });
         toast.success("Receipt Created & Posted", {
-          description: `${(posted as any).receipt_no ?? receipt.receipt_no}${(posted as any).je_no ? ` · JE: ${(posted as any).je_no}` : ""}`,
+          description: `${posted.receipt_no ?? receipt.receipt_no}${posted.je_no ? ` · JE: ${posted.je_no}` : ""}`,
         });
       } else {
         toast.success("Receipt Draft Saved", {
-          description: `${(receipt as any).receipt_no ?? "Saved"}`,
+          description: `${receipt.receipt_no ?? "Saved"}`,
         });
       }
 
@@ -119,14 +141,31 @@ export default function NewReceiptPage() {
       </div>
 
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        {/* B9DD-RR-003: when the company base currency cannot be resolved we say
+            so plainly. Nothing is defaulted to MYR, and the schema keeps the
+            form unsubmittable until a supported currency is chosen. */}
+        {baseCurrencyUnavailable && (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-medium text-amber-800">Company base currency unavailable</p>
+              <p className="text-xs text-amber-600">
+                The receipt currency has not been pre-filled. Select a currency before saving; the
+                company-base preview stays hidden until the base currency is known.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Section 1: Customer & Date */}
         <ReceiptFormCustomer
           form={form}
           customers={customers}
-          outstanding={outstanding}
+          exposure={exposure}
+          exposureLoading={exposureLoading}
+          exposureError={exposureError}
           selectedCustomer={selectedCustomer}
           watchCustomerId={watchCustomerId}
-          watchCurrency={watchCurrency}
         />
 
         {/* Section 2: Payment Method & Bank */}

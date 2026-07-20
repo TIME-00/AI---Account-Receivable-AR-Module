@@ -1,7 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { formatAmount, formatDate, pct } from "@/lib/utils";
+import { formatDate, pct } from "@/lib/utils";
+import { formatMoneySafe } from "@/lib/currency";
 import type { AllocationInvoice } from "@/hooks/use-allocation-logic";
 import { LoadingButton } from "@/components/ui/loading-button";
 import {
@@ -35,6 +36,21 @@ interface AllocationTableProps {
   invoices: AllocationInvoice[];
   isFifoPreview: boolean;
   validation: Validation;
+  /**
+   * B9DD-RR-004: the transaction currency of EVERY amount in this table.
+   *
+   * Allocation is same-currency by construction: the backend lists candidate
+   * invoices with `.eq('currency', receipt.currency)`
+   * (allocations/service.ts ~445), so invoice totals, outstanding, allocation
+   * amounts, discounts and the balance bar all share the receipt's currency.
+   */
+  receiptCurrency: string;
+  /**
+   * Company base currency, used ONLY to label forex gain/loss — which migration
+   * 028 defines as `allocated_amount * (receipt_rate - invoice_rate)`, a
+   * company-base amount. `null` is a real state and is shown as such.
+   */
+  baseCurrency: string | null;
   onUpdateAmount: (invoiceId: string, amount: number) => void;
   onUpdateDiscount: (invoiceId: string, amount: number) => void;
   onFillMax: (invoiceId: string) => void;
@@ -47,10 +63,13 @@ interface AllocationTableProps {
 
 export function AllocationTable({
   lines, invoices, isFifoPreview, validation,
+  receiptCurrency, baseCurrency,
   onUpdateAmount, onUpdateDiscount, onFillMax,
   onRemoveInvoice, onClearLines, onRunFifo,
   onSubmit, isSubmitting,
 }: AllocationTableProps) {
+  // Every transaction-currency amount in this table shares one basis.
+  const tx = (value: number) => formatMoneySafe(value, receiptCurrency);
   return (
     <div className="glass-card overflow-hidden animate-fade-in">
       {/* Toolbar */}
@@ -87,13 +106,20 @@ export function AllocationTable({
             <table className="w-full min-w-[750px]">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  {/* B9DD-RR-004: every monetary column names its basis.
+                      Transaction columns are in the receipt's currency; Forex
+                      G/L is a company-base amount (migration 028). */}
                   <th className="px-4 py-2.5 text-left">Invoice No.</th>
                   <th className="px-3 py-2.5 text-left">Type</th>
-                  <th className="px-3 py-2.5 text-right">Invoice Total</th>
-                  <th className="px-3 py-2.5 text-right">Outstanding</th>
-                  <th className="px-3 py-2.5 text-right w-36">Allocate <span className="text-red-400">*</span></th>
-                  <th className="px-3 py-2.5 text-right w-24">Discount</th>
-                  <th className="px-3 py-2.5 text-right">Forex G/L</th>
+                  <th className="px-3 py-2.5 text-right">Invoice Total ({receiptCurrency})</th>
+                  <th className="px-3 py-2.5 text-right">Outstanding ({receiptCurrency})</th>
+                  <th className="px-3 py-2.5 text-right w-36">
+                    Allocate ({receiptCurrency}) <span className="text-red-400">*</span>
+                  </th>
+                  <th className="px-3 py-2.5 text-right w-24">Discount ({receiptCurrency})</th>
+                  <th className="px-3 py-2.5 text-right">
+                    Forex G/L {baseCurrency ? `(${baseCurrency}, company base)` : "(company base — unavailable)"}
+                  </th>
                   <th className="px-3 py-2.5 text-center w-20">Actions</th>
                 </tr>
               </thead>
@@ -112,8 +138,8 @@ export function AllocationTable({
                       <td className="px-3 py-2.5">
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">{line.doc_type}</span>
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-sm text-slate-400">{inv ? formatAmount(inv.total_amount) : "-"}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-sm text-slate-900">{formatAmount(line.max_amount)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-sm text-slate-400">{inv ? tx(inv.total_amount) : "-"}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-sm text-slate-900">{tx(line.max_amount)}</td>
                       <td className="px-3 py-2">
                         <div className="relative">
                           <input
@@ -147,13 +173,23 @@ export function AllocationTable({
                           )}
                         />
                       </td>
+                      {/* Forex G/L: a COMPANY-BASE amount. Never rendered as a
+                          bare number, and never in the transaction currency. */}
                       <td className="px-3 py-2.5 text-right">
                         {Math.abs(line.forex_gain_loss) < 0.01 ? (
                           <span className="text-xs text-slate-400">—</span>
+                        ) : baseCurrency === null ? (
+                          <span className="text-[10px] italic text-amber-700" title="The company base currency is unavailable, so this gain/loss cannot be denominated.">
+                            Basis not specified
+                          </span>
                         ) : line.forex_gain_loss > 0 ? (
-                          <span className="flex items-center justify-end gap-1 font-mono text-xs text-emerald-500"><TrendingUp className="h-3 w-3" />+{formatAmount(line.forex_gain_loss)}</span>
+                          <span className="flex items-center justify-end gap-1 font-mono text-xs text-emerald-500">
+                            <TrendingUp className="h-3 w-3" />+{formatMoneySafe(line.forex_gain_loss, baseCurrency)}
+                          </span>
                         ) : (
-                          <span className="flex items-center justify-end gap-1 font-mono text-xs text-red-500"><TrendingDown className="h-3 w-3" />{formatAmount(line.forex_gain_loss)}</span>
+                          <span className="flex items-center justify-end gap-1 font-mono text-xs text-red-500">
+                            <TrendingDown className="h-3 w-3" />{formatMoneySafe(line.forex_gain_loss, baseCurrency)}
+                          </span>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-center">
@@ -173,19 +209,25 @@ export function AllocationTable({
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-6">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Receipt unallocated</p>
-                  <p className="mt-0.5 font-mono text-base font-bold text-slate-900">{formatAmount(validation.availableBalance)}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Receipt unallocated ({receiptCurrency})
+                  </p>
+                  <p className="mt-0.5 font-mono text-base font-bold text-slate-900">{tx(validation.availableBalance)}</p>
                 </div>
                 <span className="text-slate-400">−</span>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Allocating</p>
-                  <p className={cn("mt-0.5 font-mono text-base font-bold", validation.isBalanceValid ? "text-brand-500" : "text-red-500")}>{formatAmount(validation.totalAllocating)}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Allocating ({receiptCurrency})
+                  </p>
+                  <p className={cn("mt-0.5 font-mono text-base font-bold", validation.isBalanceValid ? "text-brand-500" : "text-red-500")}>{tx(validation.totalAllocating)}</p>
                 </div>
                 <span className="text-slate-400">=</span>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Unapplied receipt balance</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Unapplied receipt balance ({receiptCurrency})
+                  </p>
                   <p className={cn("mt-0.5 font-mono text-base font-bold", validation.remainingBalance < -0.005 ? "text-red-500" : validation.remainingBalance < 0.01 ? "text-emerald-500" : "text-slate-500")}>
-                    {formatAmount(Math.max(0, validation.remainingBalance))}
+                    {tx(Math.max(0, validation.remainingBalance))}
                   </p>
                 </div>
               </div>
@@ -194,13 +236,19 @@ export function AllocationTable({
                 {!validation.isBalanceValid && (
                   <div className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5">
                     <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-                    <span className="text-xs font-medium text-red-500">Total allocation cannot exceed receipt unallocated amount</span>
+                    {/* A validation message about money states the amounts. */}
+                    <span className="text-xs font-medium text-red-500">
+                      Total allocation ({tx(validation.totalAllocating)}) cannot exceed the receipt&apos;s
+                      unallocated amount ({tx(validation.availableBalance)})
+                    </span>
                   </div>
                 )}
                 {validation.isBalanceValid && validation.totalAllocating > 0 && validation.remainingBalance > 0.005 && (
                   <div className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5">
                     <Info className="h-3.5 w-3.5 text-amber-500" />
-                    <span className="text-xs font-medium text-amber-700">This receipt will retain an unapplied balance</span>
+                    <span className="text-xs font-medium text-amber-700">
+                      This receipt will retain an unapplied balance of {tx(validation.remainingBalance)}
+                    </span>
                   </div>
                 )}
                 {validation.canSubmit && (
@@ -227,7 +275,12 @@ export function AllocationTable({
             <div className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-500">
               <Info className="h-3 w-3" />
               Receipt balance utilized: {pct(validation.totalAllocating, validation.availableBalance)}
-              {" · "}Precision: roundTo2 (Round Half Up) · Forex shown is preview only; final values recalculated by backend from DB snapshot
+              {" · "}Precision: roundTo2 (Round Half Up)
+              {" · "}Allocation is same-currency: only {receiptCurrency} invoices can be allocated to this
+              {" "}{receiptCurrency} receipt
+              {" · "}Forex G/L is a company-base
+              {baseCurrency ? ` (${baseCurrency})` : ""} preview only; final values are recalculated by the
+              backend from its own snapshot
             </div>
           </div>
         </>

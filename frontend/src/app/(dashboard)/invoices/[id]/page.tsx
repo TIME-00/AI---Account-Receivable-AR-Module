@@ -6,7 +6,7 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useInvoice, usePostInvoice, useCancelInvoice } from "@/hooks/use-invoices";
@@ -14,10 +14,20 @@ import { useUserRole } from "@/hooks/use-user-role";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { AllocationHistoryTable } from "@/components/allocation-history-table";
-import { formatCurrency, formatAmount, formatDate, cn } from "@/lib/utils";
+import { formatAmount, formatDate, cn } from "@/lib/utils";
+import { formatMoney, formatMoneySafe, normalizeCurrency } from "@/lib/currency";
+import { FxChip } from "@/components/ui/fx-chip";
 import {
-  FileText, ChevronRight, Send, XCircle, ArrowLeft,
-  AlertCircle, BookOpen, MessageSquare, Loader2,
+  fxSourcePresentation,
+  fxDecisionStatePresentation,
+  resolveFxRateDisplay,
+  isPostedDocumentStatus,
+} from "@/lib/fx-presentation";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
+import type { InvoiceLine } from "@/types";
+import {
+  ChevronRight, Send, XCircle, ArrowLeft,
+  AlertCircle, BookOpen, MessageSquare,
 } from "lucide-react";
 
 const DOC_TYPE_COLORS: Record<string, string> = {
@@ -28,10 +38,11 @@ const DOC_TYPE_COLORS: Record<string, string> = {
 
 export default function InvoiceDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
 
   const { data: invoice, isLoading, isError } = useInvoice(id);
+  // Fallback company base currency when the document row omits base_currency.
+  const { baseCurrency } = useBaseCurrency();
   const postMutation = usePostInvoice();
   const cancelMutation = useCancelInvoice();
   const [isPosting, setIsPosting] = useState(false);
@@ -44,7 +55,7 @@ export default function InvoiceDetailPage() {
     try {
       const result = await postMutation.mutateAsync({ invoiceId: id });
       toast.success("Invoice Posted", {
-        description: `${invoice.invoice_no}${(result as any).je_no ? ` · JE: ${(result as any).je_no}` : ""}`,
+        description: `${invoice.invoice_no}${result.je_no ? ` · JE: ${result.je_no}` : ""}`,
       });
     } catch {
       // Error handled by useApi
@@ -118,7 +129,7 @@ export default function InvoiceDetailPage() {
         <p className="mt-4 text-lg font-semibold text-slate-700">
           {isError ? "Failed to load invoice" : "Invoice not found"}
         </p>
-        <p className="mt-1 text-sm text-slate-500">The invoice may have been deleted or you don't have access.</p>
+        <p className="mt-1 text-sm text-slate-500">The invoice may have been deleted or you don&apos;t have access.</p>
         <Link
           href="/invoices"
           className="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 transition-colors"
@@ -130,10 +141,21 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  // Support both `lines` (expected) and `invoice_lines` (fallback)
-  // in case backend response shape varies between deployed versions.
-  const lines = invoice.lines ?? (invoice as any).invoice_lines ?? [];
+  // Support both `lines` (expected) and `invoice_lines` (fallback) in case the
+  // deployed backend response shape varies. Narrowed explicitly, not cast to any.
+  const lines: InvoiceLine[] =
+    invoice.lines ?? (invoice as { invoice_lines?: InvoiceLine[] }).invoice_lines ?? [];
   const isDraft = invoice.status === "Draft";
+  // B9DD-FEIR-007: lifecycle-aware rate. A posted invoice without an FX booking
+  // decision resolves to "Booked rate not available" — the raw `exchange_rate`
+  // column is never promoted to a booked rate.
+  const fxRate = resolveFxRateDisplay({
+    currency: invoice.currency,
+    baseCurrency: invoice.base_currency ?? baseCurrency,
+    documentPosted: isPostedDocumentStatus(invoice.status),
+    decision: invoice.fx_decision,
+    draftExchangeRate: invoice.exchange_rate,
+  });
   // Issue 6: Conservative — allow cancel only for 'Open' status.
   // Backend may not support cancelling 'Overdue' invoices.
   const canCancel = invoice.status === "Open";
@@ -201,7 +223,14 @@ export default function InvoiceDetailPage() {
           <DetailField label="Customer" value={invoice.customer_name} />
           <DetailField label="Invoice Date" value={formatDate(invoice.invoice_date)} />
           <DetailField label="Due Date" value={invoice.due_date ? formatDate(invoice.due_date) : "—"} />
-          <DetailField label="Currency" value={`${invoice.currency} (Rate: ${invoice.exchange_rate})`} />
+          <DetailField
+            label="Currency"
+            value={
+              fxRate.directionLabel
+                ? `${invoice.currency} — ${fxRate.caption}: ${fxRate.directionLabel}`
+                : `${invoice.currency} — ${fxRate.caption}`
+            }
+          />
           {invoice.reference_no && <DetailField label="Reference No." value={invoice.reference_no} />}
           {invoice.posting_period && <DetailField label="Posting Period" value={invoice.posting_period} />}
           {invoice.posted_by && <DetailField label="Posted By" value={invoice.posted_by} />}
@@ -241,12 +270,14 @@ export default function InvoiceDetailPage() {
                   <th className="px-3 py-2.5 text-left w-20">Item Code</th>
                   <th className="px-3 py-2.5 text-right w-16">Qty</th>
                   <th className="px-3 py-2.5 text-center w-14">UOM</th>
-                  <th className="px-3 py-2.5 text-right w-24">Unit Price</th>
+                  {/* B9DD-RR-004: monetary columns name the document's own
+                      transaction currency, so no line cell is codeless. */}
+                  <th className="px-3 py-2.5 text-right w-24">Unit Price ({invoice.currency})</th>
                   <th className="px-3 py-2.5 text-right w-16">Disc %</th>
-                  <th className="px-3 py-2.5 text-right w-20">Disc Amt</th>
+                  <th className="px-3 py-2.5 text-right w-20">Disc Amt ({invoice.currency})</th>
                   <th className="px-3 py-2.5 text-right w-16">Tax %</th>
-                  <th className="px-3 py-2.5 text-right w-20">Tax Amt</th>
-                  <th className="px-3 py-2.5 text-right w-24">Line Total</th>
+                  <th className="px-3 py-2.5 text-right w-20">Tax Amt ({invoice.currency})</th>
+                  <th className="px-3 py-2.5 text-right w-24">Line Total ({invoice.currency})</th>
                 </tr>
               </thead>
               <tbody>
@@ -293,22 +324,26 @@ export default function InvoiceDetailPage() {
             <div className="w-72 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Subtotal</span>
-                <span className="font-mono font-medium text-slate-800">{formatCurrency(invoice.subtotal, invoice.currency)}</span>
+                <span className="font-mono font-medium text-slate-800">{formatMoney(invoice.subtotal, invoice.currency)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Tax Total</span>
-                <span className="font-mono font-medium text-slate-800">{formatCurrency(invoice.tax_total, invoice.currency)}</span>
+                <span className="font-mono font-medium text-slate-800">{formatMoney(invoice.tax_total, invoice.currency)}</span>
               </div>
               <div className="flex justify-between border-t border-slate-300 pt-2 text-sm">
                 <span className="font-semibold text-slate-900">Grand Total</span>
                 <span className="font-mono text-lg font-bold text-slate-900">
-                  {formatCurrency(invoice.total_amount, invoice.currency)}
+                  {formatMoney(invoice.total_amount, invoice.currency)}
                 </span>
               </div>
-              {invoice.currency !== "MYR" && (
+              {normalizeCurrency(invoice.currency) !== normalizeCurrency(invoice.base_currency) && (
                 <div className="flex justify-between text-xs text-slate-400">
-                  <span>Base Total (MYR)</span>
-                  <span className="font-mono">{formatCurrency(invoice.base_total)}</span>
+                  <span>{isDraft ? "Estimated base" : "Booked base"} ({normalizeCurrency(invoice.base_currency)})</span>
+                  <span className="font-mono">
+                    {invoice.base_available !== false
+                      ? `${isDraft ? "≈ " : ""}${formatMoneySafe(invoice.base_total, invoice.base_currency)}`
+                      : "Not available"}
+                  </span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
@@ -317,9 +352,44 @@ export default function InvoiceDetailPage() {
                   "font-mono font-semibold",
                   invoice.outstanding > 0 ? "text-amber-600" : "text-emerald-600"
                 )}>
-                  {formatCurrency(invoice.outstanding, invoice.currency)}
+                  {formatMoney(invoice.outstanding, invoice.currency)}
                 </span>
               </div>
+
+              {/* FX booking provenance (Batch 9D-D) — posted, non-base documents */}
+              {normalizeCurrency(invoice.currency) !== normalizeCurrency(invoice.base_currency) &&
+                (invoice.fx_decision || invoice.fx_posting_eligibility) && (
+                <div className="flex flex-wrap items-center justify-end gap-1.5 border-t border-slate-200 pt-2">
+                  <span className="mr-auto text-[11px] uppercase tracking-wide text-slate-400">FX booking</span>
+                  {/* B9DD-FEIR-007: explicit direction + lifecycle, never a bare rate. */}
+                  {fxRate.directionLabel ? (
+                    <span
+                      title={fxRate.description}
+                      className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-slate-500"
+                    >
+                      {fxRate.caption}: {fxRate.directionLabel}
+                    </span>
+                  ) : (
+                    <span
+                      title={fxRate.description}
+                      className="inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700 ring-1 ring-inset ring-amber-200"
+                    >
+                      {fxRate.caption}
+                    </span>
+                  )}
+                  {invoice.fx_decision?.deviation_pct != null && (
+                    <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-mono tabular-nums text-slate-500">
+                      Δ {Number(invoice.fx_decision.deviation_pct).toFixed(2)}%
+                    </span>
+                  )}
+                  {invoice.fx_decision?.source_category && (
+                    <FxChip presentation={fxSourcePresentation(invoice.fx_decision.source_category)} />
+                  )}
+                  {invoice.fx_posting_eligibility?.reason && (
+                    <FxChip presentation={fxDecisionStatePresentation(invoice.fx_posting_eligibility.reason)} />
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -2,9 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { formatCurrency, formatAmount, formatDate, pct } from "@/lib/utils";
+import { formatDate, pct } from "@/lib/utils";
+import { formatMoney } from "@/lib/currency";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { MoneyCell } from "@/components/ui/money-cell";
+import { resolveFxRateDisplay, isPostedDocumentStatus } from "@/lib/fx-presentation";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
+import type { FxReadEnrichment } from "@/types";
 import { Send, Eye, ChevronLeft, ChevronRight, AlertCircle, Wallet } from "lucide-react";
 
 const PM_NAMES: Record<string, string> = {
@@ -12,7 +17,7 @@ const PM_NAMES: Record<string, string> = {
   GIRO: "GIRO", OFST: "Offset", ONLN: "Online",
 };
 
-interface ReceiptRow {
+interface ReceiptRow extends FxReadEnrichment {
   id: string;
   receipt_no: string;
   reference_no?: string | null;
@@ -20,6 +25,8 @@ interface ReceiptRow {
   receipt_date: string;
   payment_method: string;
   currency: string;
+  base_currency?: string;
+  exchange_rate?: number;
   receipt_amount: number;
   base_amount: number;
   allocated_amount: number;
@@ -50,6 +57,8 @@ export function ReceiptTable({
 }: ReceiptTableProps) {
   const router = useRouter();
   const PAGE_SIZE = 15;
+  // Fallback company base currency for rows whose own base_currency is absent.
+  const { baseCurrency } = useBaseCurrency();
 
   return (
     <div className="glass-card overflow-hidden">
@@ -107,10 +116,23 @@ export function ReceiptTable({
                         </span>
                       </td>
                       <td className="px-3 py-3 text-right">
-                        <p className="font-mono text-sm font-semibold text-slate-900">{formatCurrency(r.receipt_amount, r.currency)}</p>
-                        {r.currency !== "MYR" && (
-                          <p className="font-mono text-[10px] text-slate-400">≈ {formatCurrency(r.base_amount)}</p>
-                        )}
+                        <MoneyCell
+                          amount={r.receipt_amount}
+                          currency={r.currency}
+                          baseAmount={r.base_amount}
+                          baseCurrency={r.base_currency}
+                          baseAvailable={r.base_available}
+                          baseBasis={isDraft ? "estimated" : "booked"}
+                          fxRate={resolveFxRateDisplay({
+                            currency: r.currency,
+                            baseCurrency: r.base_currency ?? baseCurrency,
+                            documentPosted: isPostedDocumentStatus(r.status),
+                            decision: r.fx_decision,
+                            draftExchangeRate: r.exchange_rate,
+                          })}
+                          decisionReason={r.fx_posting_eligibility?.reason}
+                          align="right"
+                        />
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-2">
@@ -128,8 +150,9 @@ export function ReceiptTable({
                           </span>
                         </div>
                         <div className="mt-0.5 flex justify-between text-[9px] text-slate-400">
-                          <span>Applied: {formatAmount(r.allocated_amount)}</span>
-                          <span>Unapplied: {formatAmount(r.unallocated_amount)}</span>
+                          {/* B9DD-RR-004: in the receipt's own currency. */}
+                          <span>Applied: {formatMoney(r.allocated_amount, r.currency)}</span>
+                          <span>Unapplied: {formatMoney(r.unallocated_amount, r.currency)}</span>
                         </div>
                       </td>
                       <td className="px-3 py-3 text-center"><StatusBadge status={r.status} /></td>

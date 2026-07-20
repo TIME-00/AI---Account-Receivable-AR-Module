@@ -20,7 +20,12 @@ import {
 } from '../_shared/errors.ts';
 import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
-import { requireAnyRole, requireRole, requireCustomerAccess } from '../_shared/auth.ts';
+import {
+  requireAnyRole,
+  requireOperationalRole,
+  requireRole,
+  requireCustomerAccess,
+} from '../_shared/auth.ts';
 import { assertCustomerVisible } from '../_shared/visibility.ts';
 import { validateUUID } from '../_shared/validators.ts';
 import type {
@@ -70,6 +75,154 @@ export interface AllocationDetailFull extends AllocationDetail {
   invoice_total_amount: number;
   invoice_outstanding: number;
   invoice_due_date: string | null;
+}
+
+export const ALLOCATION_CANDIDATE_CONTRACT_VERSION = 'allocation_candidates.v1' as const;
+export const ALLOCATION_CANDIDATE_MAX = 5000;
+
+export interface GovernedAllocationCandidate {
+  id: string;
+  invoice_no: string;
+  doc_type: 'Invoice' | 'Debit Note';
+  invoice_date: string;
+  due_date: string | null;
+  currency: string;
+  exchange_rate: number;
+  total_amount: number;
+  outstanding: number;
+  status: 'Open' | 'Overdue' | 'Partially Paid';
+  version: number;
+}
+
+export interface AllocationCandidateReceipt {
+  id: string;
+  receipt_no: string;
+  receipt_date: string;
+  customer_id: string;
+  customer_name: string;
+  currency: string;
+  exchange_rate: number;
+  receipt_amount: number;
+  allocated_amount: number;
+  unallocated_amount: number;
+  payment_method: string;
+  status: 'Posted';
+  version: number;
+}
+
+export interface AllocationCandidateResult {
+  contract_version: typeof ALLOCATION_CANDIDATE_CONTRACT_VERSION;
+  complete: true;
+  max_candidates: typeof ALLOCATION_CANDIDATE_MAX;
+  ordering: string[];
+  receipt: AllocationCandidateReceipt;
+  customer_id: string;
+  currency: string;
+  total: number;
+  candidates: GovernedAllocationCandidate[];
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+// PostgreSQL's uuid type accepts every canonical 128-bit UUID value, including
+// legacy deterministic fixtures that do not encode an RFC version/variant.
+// Keep this identical in breadth to the shared request UUID validator.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function invalidCandidateContract(): never {
+  throw new Error('Allocation candidate RPC returned an invalid completeness contract.');
+}
+
+function parseAllocationCandidateResult(
+  value: unknown,
+  expectedReceiptId: string,
+): AllocationCandidateResult {
+  if (!isRecord(value)) invalidCandidateContract();
+
+  const receipt = value.receipt;
+  const candidates = value.candidates;
+  const ordering = value.ordering;
+  if (
+    value.contract_version !== ALLOCATION_CANDIDATE_CONTRACT_VERSION ||
+    value.complete !== true ||
+    value.max_candidates !== ALLOCATION_CANDIDATE_MAX ||
+    !Number.isInteger(value.total) ||
+    (value.total as number) < 0 ||
+    (value.total as number) > ALLOCATION_CANDIDATE_MAX ||
+    !Array.isArray(candidates) ||
+    candidates.length !== value.total ||
+    !Array.isArray(ordering) ||
+    ordering.length !== 3 ||
+    ordering[0] !== 'due_date ASC NULLS LAST' ||
+    ordering[1] !== 'invoice_no ASC' ||
+    ordering[2] !== 'id ASC' ||
+    !isRecord(receipt)
+  ) {
+    invalidCandidateContract();
+  }
+
+  if (
+    receipt.id !== expectedReceiptId ||
+    !UUID_PATTERN.test(String(receipt.id)) ||
+    !UUID_PATTERN.test(String(receipt.customer_id)) ||
+    receipt.customer_id !== value.customer_id ||
+    receipt.currency !== value.currency ||
+    receipt.status !== 'Posted' ||
+    !isFiniteNumber(receipt.unallocated_amount) ||
+    receipt.unallocated_amount <= 0 ||
+    typeof receipt.receipt_no !== 'string' ||
+    typeof receipt.receipt_date !== 'string' ||
+    typeof receipt.customer_name !== 'string' ||
+    typeof receipt.currency !== 'string' ||
+    !/^[A-Z]{3}$/.test(receipt.currency) ||
+    typeof receipt.payment_method !== 'string' ||
+    !isFiniteNumber(receipt.exchange_rate) ||
+    receipt.exchange_rate <= 0 ||
+    !isFiniteNumber(receipt.receipt_amount) ||
+    receipt.receipt_amount <= 0 ||
+    !isFiniteNumber(receipt.allocated_amount) ||
+    receipt.allocated_amount < 0 ||
+    !Number.isInteger(receipt.version) ||
+    (receipt.version as number) < 1
+  ) {
+    invalidCandidateContract();
+  }
+
+  const seenIds = new Set<string>();
+  for (const candidate of candidates) {
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.id !== 'string' ||
+      !UUID_PATTERN.test(candidate.id) ||
+      seenIds.has(candidate.id) ||
+      typeof candidate.invoice_no !== 'string' ||
+      (candidate.doc_type !== 'Invoice' && candidate.doc_type !== 'Debit Note') ||
+      typeof candidate.invoice_date !== 'string' ||
+      (candidate.due_date !== null && typeof candidate.due_date !== 'string') ||
+      candidate.currency !== value.currency ||
+      !isFiniteNumber(candidate.exchange_rate) ||
+      candidate.exchange_rate <= 0 ||
+      !isFiniteNumber(candidate.total_amount) ||
+      !isFiniteNumber(candidate.outstanding) ||
+      candidate.outstanding <= 0 ||
+      !['Open', 'Overdue', 'Partially Paid'].includes(String(candidate.status)) ||
+      !Number.isInteger(candidate.version) ||
+      (candidate.version as number) < 1
+    ) {
+      invalidCandidateContract();
+    }
+    seenIds.add(candidate.id);
+  }
+
+  return value as unknown as AllocationCandidateResult;
 }
 
 // ─── Allocation Service ─────────────────────────────────────────────────────
@@ -157,6 +310,29 @@ export class AllocationService {
   // No executable service method exists for automatic allocation. The HTTP
   // route remains a hard 403. FIFO/AmountMatch are retained only for read-only
   // preview and user-confirmed manual allocation assistance.
+
+  /**
+   * Return the complete governed allocation candidate set for one Receipt.
+   *
+   * The RPC is the read authority: it binds tenant/customer/currency from the
+   * Receipt, applies AR Clerk assignment scope, counts and aggregates under one
+   * PostgreSQL statement snapshot, and rejects overflow instead of truncating.
+   */
+  async getAllocationCandidates(
+    auth: AuthContext,
+    receiptId: string,
+  ): Promise<AllocationCandidateResult> {
+    requireOperationalRole(auth);
+    validateUUID(receiptId, 'receipt_id');
+
+    const result = await callRpc<unknown>(this.client, 'get_allocation_candidates', {
+      p_receipt_id: receiptId,
+      p_user_id: auth.userId,
+      p_company_id: auth.companyId,
+    });
+
+    return parseAllocationCandidateResult(result, receiptId);
+  }
 
   // ════════════════════════════════════════════════════════════════════════
   // PREVIEW AUTO ALLOCATION (Dry run — no changes)

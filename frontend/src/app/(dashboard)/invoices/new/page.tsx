@@ -16,7 +16,7 @@ import { LoadingButton } from "@/components/ui/loading-button";
 import { InvoiceHeaderForm } from "@/components/features/invoices/invoice-header-form";
 import { InvoiceLineTable } from "@/components/features/invoices/invoice-line-table";
 import { InvoiceReview } from "@/components/features/invoices/invoice-review";
-import { ArrowLeft, ArrowRight, AlertCircle, User, Calculator, Send } from "lucide-react";
+import { ArrowLeft, ArrowRight, AlertCircle, User, Calculator, Send, Info } from "lucide-react";
 
 // ─── Step Configuration ─────────────────────────────────────────────────────
 
@@ -55,6 +55,22 @@ export default function NewInvoicePage() {
         <StepIndicator steps={STEPS} currentStep={inv.currentStep} />
       </div>
 
+      {/* B9DD-RR-003: an unresolvable company base currency is stated plainly.
+          Nothing is defaulted to MYR, and the schema keeps the form
+          unsubmittable until a supported currency is chosen. */}
+      {inv.baseCurrencyUnavailable && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-medium text-amber-800">Company base currency unavailable</p>
+            <p className="text-xs text-amber-600">
+              The document currency has not been pre-filled. Select a currency before saving; the
+              company-base total stays hidden until the base currency is known.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── Form Error Banner ────────────────────────────────────────── */}
       {inv.fieldErrors["_form"] && (
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
@@ -72,7 +88,6 @@ export default function NewInvoicePage() {
           form={inv.form}
           customers={inv.customers}
           paymentTerms={inv.paymentTerms}
-          customerSearch={inv.customerSearch}
           setCustomerSearch={inv.setCustomerSearch}
           selectedCustomerName={inv.selectedCustomerName}
           setSelectedCustomerName={inv.setSelectedCustomerName}

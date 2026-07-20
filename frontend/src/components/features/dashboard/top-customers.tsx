@@ -1,12 +1,13 @@
 "use client";
 
-import { formatCurrency } from "@/lib/utils";
+import { formatMoneySafe } from "@/lib/currency";
 import { Users } from "lucide-react";
 import type { DashboardTopCustomer } from "@/types";
 
 interface TopCustomersProps {
   data: DashboardTopCustomer[];
-  currency: string;
+  /** Company base currency (values are company-base); null when unavailable. */
+  currency: string | null;
   isLoading?: boolean;
 }
 
@@ -16,7 +17,7 @@ export function TopCustomers({ data, currency, isLoading = false }: TopCustomers
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Top Outstanding Customers</h3>
-          <p className="text-xs text-slate-500">By outstanding balance (base {currency})</p>
+          <p className="text-xs text-slate-500">By outstanding balance (company base{currency ? ` — ${currency}` : ""})</p>
         </div>
         <Users className="h-4 w-4 text-slate-400" />
       </div>
@@ -49,10 +50,10 @@ export function TopCustomers({ data, currency, isLoading = false }: TopCustomers
                     <p className="text-xs text-slate-400">{row.customer_code}</p>
                   </td>
                   <td className="px-2 py-2.5 text-right font-semibold text-slate-900">
-                    {formatCurrency(row.outstanding_base, currency)}
+                    {formatMoneySafe(row.outstanding_base, currency)}
                   </td>
                   <td className="px-2 py-2.5 text-right text-red-600">
-                    {row.overdue_base > 0 ? formatCurrency(row.overdue_base, currency) : "—"}
+                    {row.overdue_base > 0 ? formatMoneySafe(row.overdue_base, currency) : "—"}
                   </td>
                   <td className="px-2 py-2.5 text-right text-slate-600">
                     {row.overdue_invoice_count}

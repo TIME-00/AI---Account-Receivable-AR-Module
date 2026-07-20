@@ -128,7 +128,7 @@ export function ReceiptFormPayment({
                 <span className="mx-1">·</span>
                 Account no. {getMaskedAccountNo(selectedBankAccount.account_no)}
               </p>
-              <p className="text-slate-400">This is the company receiving account, not the customer's payer bank.</p>
+              <p className="text-slate-400">This is the company receiving account, not the customer&apos;s payer bank.</p>
             </div>
           )}
           {form.formState.errors.bank_account_id && (

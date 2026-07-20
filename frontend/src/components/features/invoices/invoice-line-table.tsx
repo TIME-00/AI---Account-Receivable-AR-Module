@@ -1,7 +1,9 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { formatAmount, formatCurrency } from "@/lib/utils";
+import { formatAmount } from "@/lib/utils";
+import { formatMoneySafe } from "@/lib/currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { defaultLineValues } from "@/lib/invoice-schema";
 import type { UseFormReturn, UseFieldArrayReturn } from "react-hook-form";
 import type { InvoiceFormValues } from "@/lib/invoice-schema";
@@ -29,6 +31,16 @@ export function InvoiceLineTable({
   taxCodes,
   fieldErrors,
 }: InvoiceLineTableProps) {
+  // Draft previews show an ESTIMATED company-base amount; the base currency is
+  // authoritative (from /auth/me) and renders as unavailable rather than "MYR".
+  const { baseCurrency } = useBaseCurrency();
+  // B9DD-RR-003: the document's own transaction currency, used to label every
+  // running total explicitly. Empty until the user (or the base-currency seed)
+  // selects one — in which case the totals say so rather than implying MYR.
+  const documentCurrency = form.watch("currency");
+  // Column-header currency marker. When no currency is selected yet it states
+  // that explicitly rather than implying one.
+  const currencySuffix = documentCurrency ? `(${documentCurrency})` : "(currency not selected)";
   return (
     <div className="animate-fade-in space-y-4">
       {/* Line Items Table */}
@@ -61,12 +73,14 @@ export function InvoiceLineTable({
                 <th className="px-3 py-2.5 text-left w-20">Item Code</th>
                 <th className="px-3 py-2.5 text-right w-20">Qty *</th>
                 <th className="px-3 py-2.5 text-left w-14">UOM</th>
-                <th className="px-3 py-2.5 text-right w-24">Unit Price *</th>
+                {/* B9DD-RR-003: monetary columns name the document's currency in
+                    the header, so no per-line amount is rendered codeless. */}
+                <th className="px-3 py-2.5 text-right w-24">Unit Price * {currencySuffix}</th>
                 <th className="px-3 py-2.5 text-right w-16">Disc %</th>
                 <th className="px-3 py-2.5 text-left w-28">Tax Code</th>
-                <th className="px-3 py-2.5 text-right w-24">Line Amt</th>
-                <th className="px-3 py-2.5 text-right w-20">Tax</th>
-                <th className="px-3 py-2.5 text-right w-24">Line Total</th>
+                <th className="px-3 py-2.5 text-right w-24">Line Amt {currencySuffix}</th>
+                <th className="px-3 py-2.5 text-right w-20">Tax {currencySuffix}</th>
+                <th className="px-3 py-2.5 text-right w-24">Line Total {currencySuffix}</th>
                 <th className="px-3 py-2.5 text-center w-10"></th>
               </tr>
             </thead>
@@ -242,25 +256,34 @@ export function InvoiceLineTable({
           <div className="rounded-lg bg-slate-50 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Subtotal</p>
             <p className="mt-1 text-lg font-bold text-slate-900 font-mono">
-              {formatAmount(calc.totals.subtotal)}
+              {formatMoneySafe(calc.totals.subtotal, documentCurrency)}
             </p>
           </div>
           <div className="rounded-lg bg-slate-50 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500">Tax Total</p>
             <p className="mt-1 text-lg font-bold text-amber-500 font-mono">
-              {formatAmount(calc.totals.tax_total)}
+              {formatMoneySafe(calc.totals.tax_total, documentCurrency)}
             </p>
           </div>
           <div className="rounded-lg bg-slate-50 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Grand Total</p>
             <p className="mt-1 text-lg font-bold text-slate-900 font-mono">
-              {formatCurrency(calc.totals.total_amount, form.watch("currency"))}
+              {formatMoneySafe(calc.totals.total_amount, documentCurrency)}
             </p>
           </div>
           <div className="rounded-lg bg-slate-50 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Base Total (MYR)</p>
+            {/* The base label names the REAL company base currency. */}
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              {baseCurrency ? `Base Total (${baseCurrency})` : "Base Total"}
+            </p>
             <p className="mt-1 text-lg font-bold text-brand-500 font-mono">
-              {formatCurrency(calc.totals.base_total)}
+              {baseCurrency ? (
+                formatMoneySafe(calc.totals.base_total, baseCurrency)
+              ) : (
+                <span className="text-sm font-medium italic text-amber-700">
+                  Base currency unavailable
+                </span>
+              )}
             </p>
           </div>
         </div>

@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useAuthContext } from "@/hooks/use-auth-context";
-import { cn } from "@/lib/utils";
 import {
   User,
   Building2,

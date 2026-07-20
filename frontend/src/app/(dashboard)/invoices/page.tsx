@@ -9,11 +9,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { useInvoiceList, usePostInvoice } from "@/hooks/use-invoices";
+import { useInvoiceList, usePostInvoice, totalPagesFrom } from "@/hooks/use-invoices";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
+import { resolveFxRateDisplay, isPostedDocumentStatus } from "@/lib/fx-presentation";
 import { useUserRole } from "@/hooks/use-user-role";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { MoneyCell } from "@/components/ui/money-cell";
+import { MoneySummary } from "@/components/ui/money-summary";
+import { formatMoney } from "@/lib/currency";
+import { formatDate, cn } from "@/lib/utils";
 import {
   FileText, Plus, Search, Send, Eye, ChevronLeft, ChevronRight,
   AlertCircle, Filter, X, Upload,
@@ -35,17 +40,26 @@ export default function InvoicesPage() {
   const [page, setPage] = useState(1);
 
   // ── Data ────────────────────────────────────────────────────────────
-  const { data: invoices = [], isLoading, isError, refetch } = useInvoiceList({
+  const { data, isLoading, isError, refetch } = useInvoiceList({
     status: statusFilter || undefined,
     search: searchQuery || undefined,
     page,
     page_size: PAGE_SIZE,
   });
 
-  // useApi returns raw Invoice[] — meta.total is not available.
-  // Client-side count for prototype.
-  const totalCount = invoices.length;
-  const totalPages = 1; // No server-side total — single page view for now
+  // Rows for the CURRENT PAGE (backend-scoped; no client re-filtering).
+  const invoices = data?.rows ?? [];
+  // Batch 9D-D authoritative aggregation over the ENTIRE filtered collection
+  // (not just this page) — per-currency subtotals + company-base total.
+  const summary = data?.summary;
+  const { baseCurrency } = useBaseCurrency();
+
+  // B9DD-FEIR-001: real backend pagination. `totalCount` is the filtered
+  // COLLECTION size from meta.total; the previous code used the page length and
+  // forced totalPages = 1, which hid every page after the first.
+  const pagination = data?.pagination;
+  const totalCount = pagination?.total ?? 0;
+  const totalPages = totalPagesFrom(pagination);
 
   // ── Role gating ────────────────────────────────────────────────────
   const { canPostInvoice, canCreateInvoice } = useUserRole();
@@ -60,7 +74,7 @@ export default function InvoicesPage() {
     try {
       const result = await postMutation.mutateAsync({ invoiceId: id });
       toast.success("Invoice Posted", {
-        description: `${invoiceNo}${(result as any).je_no ? ` · JE: ${(result as any).je_no}` : ""}`,
+        description: `${invoiceNo}${result.je_no ? ` · JE: ${result.je_no}` : ""}`,
       });
     } catch {
       // Error handled by useApi
@@ -172,6 +186,22 @@ export default function InvoicesPage() {
         </div>
       </div>
 
+      {/* Authoritative multi-currency aggregation (Batch 9D-D).
+          These totals cover the whole filtered collection, NOT just this page —
+          the heading says so explicitly so a collection total is never mistaken
+          for a page subtotal. */}
+      {summary && invoices.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+            Totals for all {totalCount} matching document(s) — not just this page
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MoneySummary summary={summary.current_balance_summary} title="Outstanding" />
+            <MoneySummary summary={summary.document_total_summary} title="Invoiced (document total)" />
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="glass-card overflow-hidden">
         {isLoading ? (
@@ -271,23 +301,32 @@ export default function InvoicesPage() {
                           )}
                         </td>
                         <td className="px-3 py-3 text-right">
-                          <p className="font-mono text-sm font-semibold text-slate-900">
-                            {formatCurrency(inv.total_amount, inv.currency)}
-                          </p>
-                          {inv.currency !== "MYR" && (
-                            <p className="font-mono text-[10px] text-slate-400">
-                              ≈ {formatCurrency(inv.base_total)}
-                            </p>
-                          )}
+                          <MoneyCell
+                            amount={inv.total_amount}
+                            currency={inv.currency}
+                            baseAmount={inv.base_total}
+                            baseCurrency={inv.base_currency}
+                            baseAvailable={inv.base_available}
+                            baseBasis={isDraft ? "estimated" : "booked"}
+                            fxRate={resolveFxRateDisplay({
+                              currency: inv.currency,
+                              baseCurrency: inv.base_currency ?? baseCurrency,
+                              documentPosted: isPostedDocumentStatus(inv.status),
+                              decision: inv.fx_decision,
+                              draftExchangeRate: inv.exchange_rate,
+                            })}
+                            decisionReason={inv.fx_posting_eligibility?.reason}
+                            align="right"
+                          />
                         </td>
                         <td className="px-3 py-3 text-right">
                           <p
                             className={cn(
-                              "font-mono text-sm font-semibold",
+                              "font-mono text-sm font-semibold tabular-nums",
                               inv.outstanding > 0 ? "text-amber-600" : "text-slate-400"
                             )}
                           >
-                            {formatCurrency(inv.outstanding, inv.currency)}
+                            {formatMoney(inv.outstanding, inv.currency)}
                           </p>
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -328,7 +367,7 @@ export default function InvoicesPage() {
             {/* Pagination */}
             <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3">
               <p className="text-xs text-slate-500">
-                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} records
+                Showing {totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} records
               </p>
               <div className="flex items-center gap-1">
                 <button

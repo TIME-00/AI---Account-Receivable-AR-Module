@@ -365,6 +365,18 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 2
 
+# These functions authenticate with their existing scheduler/custom-auth contracts.
+# Persist the deployed setting so a targeted CLI redeploy cannot silently enable
+# platform JWT verification ahead of those function-level checks.
+[functions.fx-rate-sync]
+verify_jwt = false
+
+[functions.fx-rates]
+verify_jwt = false
+
+[functions.daily-overdue]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

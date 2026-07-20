@@ -1,6 +1,7 @@
 "use client";
 
-import { formatCurrency } from "@/lib/utils";
+import { formatMoney, formatMoneySafe } from "@/lib/currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { roundTo2 } from "@/lib/invoice-calculator";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { ArrowRight, Save, Send, Info } from "lucide-react";
@@ -23,7 +24,18 @@ export function ReceiptSummaryBar({
   selectedCustomer, isPostMode, setIsPostMode,
   isCreating, isPosting,
 }: ReceiptSummaryBarProps) {
+  // Draft previews show an ESTIMATED company-base amount; the base currency is
+  // authoritative (from /auth/me) and renders as unavailable rather than "MYR".
+  const { baseCurrency } = useBaseCurrency();
   const baseAmount = roundTo2(watchAmount * watchExchangeRate);
+
+  // B9DD-RR-003: parity is transaction currency == the AUTHORITATIVE company
+  // base currency. The previous `watchCurrency !== "MYR"` hard-coded the base,
+  // so an SGD-base company saw a bogus "conversion" for its own base currency
+  // and no preview at all for MYR.
+  const isParity = baseCurrency !== null && watchCurrency === baseCurrency;
+  // With an unknown base currency there is no defensible conversion to show.
+  const canShowBasePreview = baseCurrency !== null && !isParity && watchAmount > 0;
 
   return (
     <div className="glass-card overflow-hidden">
@@ -34,15 +46,36 @@ export function ReceiptSummaryBar({
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Receipt Amount</p>
               <p className="mt-0.5 font-mono text-xl font-bold text-slate-900">
-                {watchAmount > 0 ? formatCurrency(watchAmount, watchCurrency) : "—"}
+                {watchAmount > 0 ? formatMoney(watchAmount, watchCurrency) : "—"}
               </p>
             </div>
-            {watchCurrency !== "MYR" && watchAmount > 0 && (
+            {canShowBasePreview && (
               <>
                 <ArrowRight className="h-4 w-4 text-slate-400" />
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Base Currency (MYR)</p>
-                  <p className="mt-0.5 font-mono text-lg font-bold text-emerald-500">{formatCurrency(baseAmount)}</p>
+                  {/* The base label names the REAL base currency. */}
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Base Currency ({baseCurrency})
+                  </p>
+                  <p className="mt-0.5 font-mono text-lg font-bold text-emerald-500">
+                    {formatMoneySafe(baseAmount, baseCurrency)}
+                  </p>
+                  <p className="text-[9px] text-slate-400">
+                    Estimate — the rate is booked when the receipt is posted
+                  </p>
+                </div>
+              </>
+            )}
+            {baseCurrency === null && watchAmount > 0 && (
+              <>
+                <ArrowRight className="h-4 w-4 text-slate-400" />
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Company base
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium italic text-amber-700">
+                    Base currency unavailable
+                  </p>
                 </div>
               </>
             )}

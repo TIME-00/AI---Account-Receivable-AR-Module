@@ -5,11 +5,14 @@ import { Settings, Building2, Landmark, ShieldCheck, Cog, Loader2, User } from "
 import { useCompanyStore } from "@/stores/company-store";
 import { useUserRole } from "@/hooks/use-user-role";
 import { useBankAccounts } from "@/hooks/use-receipts";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 
 export default function SettingsPage() {
   const companyName = useCompanyStore((s) => s.companyName);
-  const baseCurrency = useCompanyStore((s) => s.baseCurrency);
   const companyId = useCompanyStore((s) => s.companyId);
+  // Batch 9D-D: base currency comes from authoritative company context, and is
+  // shown as an explicit loading/unavailable state rather than a default.
+  const { baseCurrency, isLoading: baseCurrencyLoading } = useBaseCurrency();
 
   const { role, isLoading: roleLoading, email } = useUserRole();
   const { data: bankAccounts, isLoading: bankLoading, isError: bankError } = useBankAccounts();
@@ -84,7 +87,12 @@ export default function SettingsPage() {
           {[
             { label: "Company Name", value: companyName },
             { label: "Company ID", value: companyId, mono: true },
-            { label: "Base Currency", value: baseCurrency },
+            {
+              label: "Base Currency",
+              value: baseCurrencyLoading
+                ? "Loading…"
+                : baseCurrency ?? "Not available",
+            },
           ].map((row) => (
             <div key={row.label} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0">
               <span className="text-sm text-slate-500">{row.label}</span>

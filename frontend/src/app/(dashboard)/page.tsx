@@ -3,7 +3,7 @@
 import { useDashboardMetrics } from "@/hooks/use-dashboard";
 import { ApiError } from "@/hooks/use-api";
 import { KpiCard } from "@/components/ui/kpi-card";
-import { formatCurrency } from "@/lib/utils";
+import { formatMoneySafe } from "@/lib/currency";
 import {
   DollarSign,
   AlertTriangle,
@@ -67,7 +67,9 @@ export default function DashboardPage() {
   const { metrics, isLoading, isError, error, refetch } = useDashboardMetrics(6);
 
   const meta = metrics?.meta;
-  const currency = meta?.base_currency ?? "MYR";
+  // Batch 9D-D: the dashboard contract is company-base. Use the backend base
+  // currency verbatim — never fall back to an assumed "MYR".
+  const currency = meta?.base_currency ?? null;
   const kpis = metrics?.kpis;
   const statusCounts = metrics?.invoice_status_counts;
 
@@ -150,7 +152,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Total Outstanding AR"
-          value={formatCurrency(totalOutstanding, currency)}
+          value={formatMoneySafe(totalOutstanding, currency)}
           subtitle="Open, partially paid & overdue"
           icon={DollarSign}
           variant="info"
@@ -158,7 +160,7 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="Overdue Outstanding"
-          value={formatCurrency(overdueOutstanding, currency)}
+          value={formatMoneySafe(overdueOutstanding, currency)}
           subtitle={`${kpis?.overdue_invoice_count ?? 0} overdue invoice(s)`}
           icon={AlertTriangle}
           variant="danger"
@@ -166,7 +168,7 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="Unapplied Cash"
-          value={formatCurrency(unappliedCash, currency)}
+          value={formatMoneySafe(unappliedCash, currency)}
           subtitle="Posted receipts not yet applied"
           icon={Wallet}
           variant="warning"
@@ -174,7 +176,7 @@ export default function DashboardPage() {
         />
         <KpiCard
           title="Collections This Month"
-          value={formatCurrency(kpis?.current_month_collections ?? 0, currency)}
+          value={formatMoneySafe(kpis?.current_month_collections ?? 0, currency)}
           subtitle="Receipts posted this month"
           icon={TrendingUp}
           variant="success"
@@ -206,7 +208,7 @@ export default function DashboardPage() {
 
       {/* ─── Charts Row 1: Aging + Composition ────────────────────── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <AgingChart data={agingChartData} isLoading={isLoading} />
+        <AgingChart data={agingChartData} isLoading={isLoading} currency={currency} />
         <CompositionChart data={donutData} currency={currency} isLoading={isLoading} />
       </div>
 

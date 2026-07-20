@@ -1,6 +1,8 @@
 "use client";
 
-import { formatAmount, formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { formatMoney, formatMoneySafe } from "@/lib/currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { SummaryRow } from "@/components/ui/summary-row";
 import { LoadingButton } from "@/components/ui/loading-button";
 import type { UseFormReturn } from "react-hook-form";
@@ -33,6 +35,9 @@ export function InvoiceReview({
   isSubmitting,
   submittingAction,
 }: InvoiceReviewProps) {
+  // Draft previews show an ESTIMATED company-base amount; the base currency is
+  // authoritative (from /auth/me) and renders as unavailable rather than "MYR".
+  const { baseCurrency } = useBaseCurrency();
   return (
     <div className="animate-fade-in space-y-4">
       {/* Summary Card */}
@@ -65,22 +70,27 @@ export function InvoiceReview({
             <div className="rounded-lg bg-slate-50 p-4">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Subtotal ({calc.totals.line_count} lines)</span>
-                <span className="font-mono text-slate-900">{formatAmount(calc.totals.subtotal)}</span>
+                {/* B9DD-RR-003/004: in the document's transaction currency. */}
+                <span className="font-mono text-slate-900">
+                  {formatMoneySafe(calc.totals.subtotal, form.watch("currency"))}
+                </span>
               </div>
               <div className="mt-2 flex justify-between text-sm">
                 <span className="text-amber-500">Tax</span>
-                <span className="font-mono text-amber-500">{formatAmount(calc.totals.tax_total)}</span>
+                <span className="font-mono text-amber-500">
+                  {formatMoneySafe(calc.totals.tax_total, form.watch("currency"))}
+                </span>
               </div>
               <div className="mt-3 border-t border-slate-200 pt-3 flex justify-between">
                 <span className="text-sm font-semibold text-slate-900">Grand Total</span>
                 <span className="text-lg font-bold text-slate-900 font-mono">
-                  {formatCurrency(calc.totals.total_amount, form.watch("currency"))}
+                  {formatMoney(calc.totals.total_amount, form.watch("currency"))}
                 </span>
               </div>
               {form.watch("exchange_rate") !== 1 && (
                 <div className="mt-1 flex justify-between text-xs text-slate-500">
                   <span>Base Currency Total</span>
-                  <span className="font-mono">{formatCurrency(calc.totals.base_total)}</span>
+                  <span className="font-mono">{formatMoneySafe(calc.totals.base_total, baseCurrency)}</span>
                 </div>
               )}
             </div>

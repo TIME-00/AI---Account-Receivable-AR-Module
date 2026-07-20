@@ -10,11 +10,27 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useInvoiceList } from "@/hooks/use-invoices";
+import { useInvoiceList, totalPagesFrom } from "@/hooks/use-invoices";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
-import { CreditCard, Search, Eye, AlertCircle, X, Info } from "lucide-react";
+import { MoneyCell } from "@/components/ui/money-cell";
+import { MoneySummary } from "@/components/ui/money-summary";
+import { resolveFxRateDisplay, isPostedDocumentStatus } from "@/lib/fx-presentation";
+import { formatDate, cn } from "@/lib/utils";
+import { CreditCard, Search, Eye, AlertCircle, X, Info, ChevronLeft, ChevronRight } from "lucide-react";
+
+const PAGE_SIZE = 20;
+
+/**
+ * The backend `doc_type` filter (ar_invoice_collection `p_doc_type`) accepts a
+ * SINGLE value, so this page filters by one note type at a time on the SERVER
+ * rather than fetching a generic capped invoice page and filtering client-side
+ * (B9DD-FEIR-001). Each view therefore gets real pagination and an authoritative
+ * summary scoped to exactly the rows it shows.
+ */
+const NOTE_DOC_TYPES = ["Credit Note", "Debit Note"] as const;
+type NoteDocType = (typeof NOTE_DOC_TYPES)[number];
 
 const DOC_TYPE_COLORS: Record<string, string> = {
   "Credit Note": "bg-purple-50 text-purple-600",
@@ -24,17 +40,23 @@ const DOC_TYPE_COLORS: Record<string, string> = {
 export default function CreditNotesPage() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
+  const [docType, setDocType] = useState<NoteDocType>("Credit Note");
+  const [page, setPage] = useState(1);
+  const { baseCurrency } = useBaseCurrency();
 
-  // Fetch a generous page and filter to credit/debit notes client-side.
-  const { data: allDocs = [], isLoading, isError, refetch } = useInvoiceList({
+  // Server-side doc_type filter — no client-side document-type filtering.
+  const { data, isLoading, isError, refetch } = useInvoiceList({
     search: searchQuery || undefined,
-    page: 1,
-    page_size: 100,
+    doc_type: docType,
+    page,
+    page_size: PAGE_SIZE,
   });
 
-  const notes = allDocs.filter(
-    (d) => d.doc_type === "Credit Note" || d.doc_type === "Debit Note"
-  );
+  const notes = data?.rows ?? [];
+  const summary = data?.summary;
+  const pagination = data?.pagination;
+  const totalCount = pagination?.total ?? 0;
+  const totalPages = totalPagesFrom(pagination);
 
   const hasSearch = searchQuery.length > 0;
 
@@ -47,7 +69,7 @@ export default function CreditNotesPage() {
           Credit &amp; Debit Notes
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          {notes.length} note record{notes.length !== 1 ? "s" : ""} — read-only view
+          {totalCount} {docType.toLowerCase()} record{totalCount !== 1 ? "s" : ""} — read-only view
         </p>
       </div>
 
@@ -61,6 +83,39 @@ export default function CreditNotesPage() {
         </p>
       </div>
 
+      {/* Document type — a SERVER filter, one type at a time */}
+      <div className="flex flex-wrap items-center gap-2">
+        {NOTE_DOC_TYPES.map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => { setDocType(t); setPage(1); }}
+            aria-pressed={docType === t}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              docType === t
+                ? "border-brand-200 bg-brand-50 text-brand-700"
+                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+            )}
+          >
+            {t}s
+          </button>
+        ))}
+      </div>
+
+      {/* Authoritative aggregation for the whole filtered collection */}
+      {summary && notes.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+            Totals for all {totalCount} matching {docType.toLowerCase()}(s) — not just this page
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MoneySummary summary={summary.document_total_summary} title="Note total" />
+            <MoneySummary summary={summary.current_balance_summary} title="Outstanding" />
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <div className="glass-card p-4">
         <div className="flex items-center gap-3">
@@ -70,7 +125,7 @@ export default function CreditNotesPage() {
               type="text"
               placeholder="Search note no. or customer..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
               className="input-premium w-full pl-9"
             />
           </div>
@@ -108,7 +163,7 @@ export default function CreditNotesPage() {
           <div className="flex flex-col items-center justify-center py-20">
             <CreditCard className="h-10 w-10 text-slate-300" />
             <p className="mt-3 text-sm font-medium text-slate-600">
-              {hasSearch ? "No notes match your search" : "No credit or debit notes yet"}
+              {hasSearch ? "No notes match your search" : "No " + docType.toLowerCase() + "s yet"}
             </p>
             <p className="mt-1 text-xs text-slate-400">
               {hasSearch
@@ -152,8 +207,24 @@ export default function CreditNotesPage() {
                       <p className="max-w-[180px] truncate text-sm text-slate-700">{n.customer_name}</p>
                     </td>
                     <td className="px-3 py-3 text-sm text-slate-600">{formatDate(n.invoice_date)}</td>
-                    <td className="px-3 py-3 text-right font-mono text-sm font-semibold text-slate-900">
-                      {formatCurrency(n.total_amount, n.currency)}
+                    <td className="px-3 py-3 text-right">
+                      <MoneyCell
+                        amount={n.total_amount}
+                        currency={n.currency}
+                        baseAmount={n.base_total}
+                        baseCurrency={n.base_currency}
+                        baseAvailable={n.base_available}
+                        baseBasis={n.status === "Draft" ? "estimated" : "booked"}
+                        fxRate={resolveFxRateDisplay({
+                          currency: n.currency,
+                          baseCurrency: n.base_currency ?? baseCurrency,
+                          documentPosted: isPostedDocumentStatus(n.status),
+                          decision: n.fx_decision,
+                          draftExchangeRate: n.exchange_rate,
+                        })}
+                        decisionReason={n.fx_posting_eligibility?.reason}
+                        align="right"
+                      />
                     </td>
                     <td className="px-3 py-3 text-center">
                       <StatusBadge status={n.status} />
@@ -172,6 +243,34 @@ export default function CreditNotesPage() {
                 ))}
               </tbody>
             </table>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3">
+                <p className="text-xs text-slate-500">
+                  Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount}
+                </p>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPage(Math.max(1, page - 1))}
+                    disabled={page <= 1}
+                    aria-label="Previous page"
+                    className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <span className="px-3 text-xs text-slate-600">{page} / {totalPages}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPage(Math.min(totalPages, page + 1))}
+                    disabled={page >= totalPages}
+                    aria-label="Next page"
+                    className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

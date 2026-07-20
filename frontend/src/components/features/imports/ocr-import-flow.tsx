@@ -25,6 +25,7 @@ import {
 } from "@/hooks/use-ocr-import";
 import { useUserRole } from "@/hooks/use-user-role";
 import { LoadingButton } from "@/components/ui/loading-button";
+import { ImportGovernanceCell } from "@/components/features/imports/import-governance-cell";
 import { cn } from "@/lib/utils";
 import {
   Upload, FileText, Image as ImageIcon, ShieldCheck, Eye, Loader2,
@@ -243,6 +244,20 @@ export function OcrImportFlow({ importType = "invoice" }: { importType?: OcrImpo
                     <ScanPill scanStatus={file.scan_status} />
                     <OcrPill ocrStatus={file.ocr_status} />
                     <ReviewPill status={row.status} lowConfidence={lowConfidence} />
+                  </div>
+                  {/* B9DD-FR-003: the SAME governance presentation the CSV/XLSX
+                      review tables use. Origin is resolved from this batch's
+                      authoritative envelope (import_type + file_type), which the
+                      OCR upload route populates (imports/service.ts ~494), so a
+                      PDF/image intake is labelled from real backend data rather
+                      than from the UI's local mode. No company-base amount is
+                      shown: FX is booked at POSTING time, and this channel never
+                      posts. */}
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Import provenance &amp; FX governance
+                    </p>
+                    <ImportGovernanceCell mappedData={row.mapped_data} batch={batch} />
                   </div>
                 </div>
               </div>

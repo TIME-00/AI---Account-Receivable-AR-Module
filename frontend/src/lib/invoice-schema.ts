@@ -129,12 +129,21 @@ export function defaultLineValues(): InvoiceLineFormValues {
   };
 }
 
+/**
+ * B9DD-RR-003: currency starts UNSELECTED — never a fabricated "MYR".
+ *
+ * The form initializes it from the authenticated company's base currency once
+ * `/auth/me` resolves (see `use-invoice-form.ts`). If the base currency is
+ * unavailable the field stays empty, and the `min(3)` validator above blocks
+ * submission until the user picks a supported currency. An empty string is
+ * therefore a real "not yet known" state, not a silent default.
+ */
 export function defaultInvoiceValues(): InvoiceFormValues {
   return {
     doc_type: "Invoice",
     invoice_date: new Date().toISOString().slice(0, 10),
     customer_id: "",
-    currency: "MYR",
+    currency: "",
     exchange_rate: 1,
     reference_no: "",
     internal_remarks: "",

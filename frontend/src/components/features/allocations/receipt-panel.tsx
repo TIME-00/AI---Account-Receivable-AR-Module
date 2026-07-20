@@ -1,7 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { formatCurrency, formatAmount, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { formatMoney } from "@/lib/currency";
 import type { AllocationReceipt } from "@/hooks/use-allocation-logic";
 import { Wallet } from "lucide-react";
 
@@ -63,8 +64,18 @@ export function ReceiptPanel({
                       <p className="text-[11px] text-slate-500">{r.customer_name} · {formatDate(r.receipt_date)}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-mono text-sm font-semibold text-slate-900">{formatCurrency(r.receipt_amount, r.currency)}</p>
-                      <p className="font-mono text-[11px] text-emerald-500">Unapplied: {formatAmount(r.unallocated_amount)}</p>
+                      {/* B9DD-RR-004: every receipt figure carries the
+                          receipt's own currency — including the unapplied
+                          balance, which was previously codeless. */}
+                      <p className="font-mono text-sm font-semibold text-slate-900">{formatMoney(r.receipt_amount, r.currency)}</p>
+                      <p className="font-mono text-[11px] text-emerald-500">
+                        Unapplied: {formatMoney(r.unallocated_amount, r.currency)}
+                      </p>
+                      {/* `committed` is receipt_amount − unallocated_amount:
+                          a single-currency subtraction within one receipt. */}
+                      <p className="font-mono text-[10px] text-slate-400">
+                        Allocated: {formatMoney(committed, r.currency)}
+                      </p>
                     </div>
                   </div>
                   <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">

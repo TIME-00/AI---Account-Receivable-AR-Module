@@ -5,8 +5,7 @@
 
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useReceipt, useCancelReceipt } from "@/hooks/use-receipts";
@@ -14,19 +13,29 @@ import { useUserRole } from "@/hooks/use-user-role";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { AllocationHistoryTable } from "@/components/allocation-history-table";
-import { formatCurrency, formatAmount, formatDate, pct, cn } from "@/lib/utils";
+import { formatDate, pct, cn } from "@/lib/utils";
+import { formatMoney, formatMoneySafe, normalizeCurrency } from "@/lib/currency";
+import { FxChip } from "@/components/ui/fx-chip";
+import {
+  fxSourcePresentation,
+  fxDecisionStatePresentation,
+  resolveFxRateDisplay,
+  isPostedDocumentStatus,
+} from "@/lib/fx-presentation";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { PAYMENT_METHOD_NAMES } from "@/types";
 import {
-  Wallet, ChevronRight, XCircle, ArrowLeft, AlertCircle,
+  ChevronRight, XCircle, ArrowLeft, AlertCircle,
   Banknote, PiggyBank, CreditCard, MessageSquare, BookOpen,
 } from "lucide-react";
 
 export default function ReceiptDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
 
   const { data: receipt, isLoading, isError } = useReceipt(id);
+  // Fallback company base currency when the document row omits base_currency.
+  const { baseCurrency } = useBaseCurrency();
   const cancelMutation = useCancelReceipt();
   const { canCancelReceipt } = useUserRole();
 
@@ -80,7 +89,7 @@ export default function ReceiptDetailPage() {
         <p className="mt-4 text-lg font-semibold text-slate-700">
           {isError ? "Failed to load receipt" : "Receipt not found"}
         </p>
-        <p className="mt-1 text-sm text-slate-500">The receipt may have been deleted or you don't have access.</p>
+        <p className="mt-1 text-sm text-slate-500">The receipt may have been deleted or you don&apos;t have access.</p>
         <Link
           href="/receipts"
           className="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 transition-colors"
@@ -93,6 +102,14 @@ export default function ReceiptDetailPage() {
   }
 
   const allocPct = receipt.receipt_amount > 0 ? (receipt.allocated_amount / receipt.receipt_amount) * 100 : 0;
+  // B9DD-FEIR-007: lifecycle-aware rate (see invoice detail for rationale).
+  const fxRate = resolveFxRateDisplay({
+    currency: receipt.currency,
+    baseCurrency: receipt.base_currency ?? baseCurrency,
+    documentPosted: isPostedDocumentStatus(receipt.status),
+    decision: receipt.fx_decision,
+    draftExchangeRate: receipt.exchange_rate,
+  });
   const canCancel = receipt.status === "Posted";
 
   return (
@@ -150,7 +167,14 @@ export default function ReceiptDetailPage() {
             <DetailField label="Cheque Date" value={formatDate(receipt.cheque_date)} />
           )}
           <DetailField label="Bank Account" value={receipt.bank_account_name || "—"} />
-          <DetailField label="Currency" value={`${receipt.currency} (Rate: ${receipt.exchange_rate})`} />
+          <DetailField
+            label="Currency"
+            value={
+              fxRate.directionLabel
+                ? `${receipt.currency} — ${fxRate.caption}: ${fxRate.directionLabel}`
+                : `${receipt.currency} — ${fxRate.caption}`
+            }
+          />
           <DetailField label="Created At" value={formatDate(receipt.created_at)} />
           {receipt.posted_by && <DetailField label="Posted By" value={receipt.posted_by} />}
           {receipt.posted_at && <DetailField label="Posted At" value={formatDate(receipt.posted_at)} />}
@@ -168,10 +192,42 @@ export default function ReceiptDetailPage() {
             <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Receipt Amount</p>
           </div>
           <p className="text-xl font-bold font-mono text-slate-900">
-            {formatCurrency(receipt.receipt_amount, receipt.currency)}
+            {formatMoney(receipt.receipt_amount, receipt.currency)}
           </p>
-          {receipt.currency !== "MYR" && (
-            <p className="mt-0.5 text-xs font-mono text-slate-400">≈ {formatCurrency(receipt.base_amount)}</p>
+          {normalizeCurrency(receipt.currency) !== normalizeCurrency(receipt.base_currency) && (
+            <p className="mt-0.5 text-xs font-mono text-slate-400">
+              {receipt.status === "Draft" ? "Estimated base" : "Booked base"} ({normalizeCurrency(receipt.base_currency)}):{" "}
+              {receipt.base_available !== false
+                ? `${receipt.status === "Draft" ? "≈ " : ""}${formatMoneySafe(receipt.base_amount, receipt.base_currency)}`
+                : "Not available"}
+            </p>
+          )}
+          {normalizeCurrency(receipt.currency) !== normalizeCurrency(receipt.base_currency) &&
+            (receipt.fx_decision || receipt.fx_posting_eligibility) && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              {/* B9DD-FEIR-007: explicit direction + lifecycle, never a bare rate. */}
+              {fxRate.directionLabel ? (
+                <span
+                  title={fxRate.description}
+                  className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-slate-500"
+                >
+                  {fxRate.caption}: {fxRate.directionLabel}
+                </span>
+              ) : (
+                <span
+                  title={fxRate.description}
+                  className="inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700 ring-1 ring-inset ring-amber-200"
+                >
+                  {fxRate.caption}
+                </span>
+              )}
+              {receipt.fx_decision?.source_category && (
+                <FxChip presentation={fxSourcePresentation(receipt.fx_decision.source_category)} />
+              )}
+              {receipt.fx_posting_eligibility?.reason && (
+                <FxChip presentation={fxDecisionStatePresentation(receipt.fx_posting_eligibility.reason)} />
+              )}
+            </div>
           )}
         </div>
 
@@ -184,7 +240,7 @@ export default function ReceiptDetailPage() {
             <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Allocated</p>
           </div>
           <p className="text-xl font-bold font-mono text-emerald-700">
-            {formatCurrency(receipt.allocated_amount, receipt.currency)}
+            {formatMoney(receipt.allocated_amount, receipt.currency)}
           </p>
         </div>
 
@@ -197,7 +253,7 @@ export default function ReceiptDetailPage() {
             <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Unapplied Receipt Balance</p>
           </div>
           <p className={cn("text-xl font-bold font-mono", receipt.unallocated_amount > 0 ? "text-amber-600" : "text-slate-400")}>
-            {formatCurrency(receipt.unallocated_amount, receipt.currency)}
+            {formatMoney(receipt.unallocated_amount, receipt.currency)}
           </p>
           {receipt.unallocated_amount > 0.005 && (
             <p className="mt-1 text-xs text-amber-700">Remaining amount is retained as unapplied cash.</p>
@@ -227,8 +283,9 @@ export default function ReceiptDetailPage() {
           />
         </div>
         <div className="mt-2 flex justify-between text-xs text-slate-400">
-          <span>Applied: {formatAmount(receipt.allocated_amount)}</span>
-          <span>Unapplied: {formatAmount(receipt.unallocated_amount)}</span>
+          {/* B9DD-RR-004: both figures are in the receipt's own currency. */}
+          <span>Applied: {formatMoney(receipt.allocated_amount, receipt.currency)}</span>
+          <span>Unapplied: {formatMoney(receipt.unallocated_amount, receipt.currency)}</span>
         </div>
       </div>
 

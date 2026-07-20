@@ -4,6 +4,35 @@
 // All amount fields are `number`, formatted to 2 decimals on display
 // ============================================================================
 
+import type {
+  MonetaryCollectionSummary,
+  CurrencyTotal,
+  MonetaryAggregationMeta,
+  NormalizationBasis,
+  FxReadEnrichment,
+} from "./monetary";
+
+// Re-export the full monetary contract surface for consumers importing from
+// "@/types". Names used locally are imported above; the rest are re-exported.
+export type {
+  MonetaryCollectionSummary,
+  MonetarySummary,
+  CurrencyTotal,
+  MonetaryAggregationMeta,
+  NormalizationBasis,
+  SummaryAmountBasis,
+  StatementCurrencyBalance,
+  StatementLine,
+  CustomerStatement,
+  FxReadEnrichment,
+  FxDecisionReadSummary,
+  FxPostingEligibility,
+  FxPostingEligibilityReason,
+  FxSourceCategory,
+  FxApprovalStatus,
+  FxLifecycleStatus,
+} from "./monetary";
+
 // ─── Enums ──────────────────────────────────────────────────────────────────
 
 export type CustomerType = "Corporate" | "Individual" | "Government" | "Intercompany";
@@ -82,6 +111,13 @@ export interface APIMeta {
   page?: number;
   page_size?: number;
   has_next?: boolean;
+  /**
+   * Batch 9D-D authoritative monetary aggregation for invoice/receipt
+   * collections. Present on list endpoints; supplies per-currency subtotals
+   * and the company-base total. Never derive a mixed-currency base total in
+   * the browser — use this.
+   */
+  summary?: MonetaryCollectionSummary;
 }
 
 export interface PaginationParams {
@@ -165,7 +201,7 @@ export interface CustomerCreditUtilization {
 
 // ─── Invoice ────────────────────────────────────────────────────────────────
 
-export interface Invoice {
+export interface Invoice extends FxReadEnrichment {
   id: string;
   company_id: string;
   invoice_no: string;
@@ -225,7 +261,7 @@ export interface InvoiceLine {
 
 // ─── Receipt ────────────────────────────────────────────────────────────────
 
-export interface Receipt {
+export interface Receipt extends FxReadEnrichment {
   id: string;
   company_id: string;
   receipt_no: string;
@@ -383,7 +419,17 @@ export interface AgingBucketResult {
   from_days: number;
   to_days: number | null;
   invoice_count: number;
+  /**
+   * Back-compat alias now populated with company-base current outstanding.
+   * Same basis as `base_total`, so summing it across buckets/rows is a
+   * same-basis (company-base) sum — NOT a cross-currency sum.
+   */
   total_outstanding: number;
+  // B9DD-FEIR-009: required in backend reports/service.ts AgingBucketResult.
+  base_total: number;
+  base_currency: string;
+  by_currency: CurrencyTotal[];
+  normalization_basis: NormalizationBasis;
   percentage: number;
 }
 
@@ -393,13 +439,25 @@ export interface CustomerAgingRow {
   customer_code: string;
   credit_limit: number;
   credit_rating: string;
+  /** Back-compat alias now populated with company-base current outstanding. */
   total_outstanding: number;
+  // B9DD-FEIR-009: required in backend reports/service.ts CustomerAgingRow.
+  base_total: number;
+  base_currency: string;
+  by_currency: CurrencyTotal[];
+  meta: MonetaryAggregationMeta;
+  /** Aging buckets are company-base amounts (migration 027 sums outstanding_base). */
   current_amount: number;
   bucket_1_30: number;
   bucket_31_60: number;
   bucket_61_90: number;
   bucket_over_90: number;
 }
+
+// ─── Customer Statement (Batch 9D-D multi-currency) ─────────────────────────
+// Defined once in ./monetary.ts (mirroring reports/service.ts) and re-exported
+// here so "@/types" consumers keep working. A second local copy previously
+// drifted from the backend contract (B9DD-FEIR-009), so it has been removed.
 
 /**
  * @deprecated Legacy flat dashboard shape. Superseded by {@link LiveDashboardMetrics}
@@ -518,9 +576,15 @@ export interface LiveDashboardMetrics {
 
 export interface ARSummary {
   total_customers: number;
+  /** Back-compat alias now populated with company-base current outstanding. */
   total_outstanding: number;
   total_overdue: number;
   overdue_percentage: number;
+  // B9DD-FEIR-009: required in backend reports/service.ts ARSummary.
+  base_total: number;
+  base_currency: string;
+  by_currency: CurrencyTotal[];
+  meta: MonetaryAggregationMeta;
   aging_summary: AgingBucketResult[];
 }
 

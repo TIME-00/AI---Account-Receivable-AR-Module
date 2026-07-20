@@ -47,42 +47,48 @@ export function throwDatabaseError(
 
 let _adminClient: SupabaseClient | null = null;
 
-type AdminKeySource = 'legacy_service_role' | 'secret_keys_default';
+export const ADMIN_API_KEY_NAME = 'batch_9d_d_edge_admin_20260718';
+export const PUBLISHABLE_API_KEY_NAME = 'default';
+
+/**
+ * Resolve one API key from Supabase's hosted Edge Function key dictionaries.
+ * Values are never logged, and malformed/missing dictionaries fail closed.
+ */
+export function resolveNamedApiKey(
+  rawDictionary: string | undefined,
+  keyName: string,
+  environmentName: 'SUPABASE_SECRET_KEYS' | 'SUPABASE_PUBLISHABLE_KEYS',
+): string {
+  if (rawDictionary) {
+    try {
+      const dictionary = JSON.parse(rawDictionary) as Record<string, unknown>;
+      const value = dictionary[keyName];
+      if (typeof value === 'string' && value.length > 0) return value;
+    } catch {
+      // Fall through to a non-sensitive configuration error.
+    }
+  }
+
+  throw new Error(`Missing ${environmentName}.${keyName} API key configuration`);
+}
 
 function resolveAdminKey(): {
   supabaseUrl: string;
   serviceKey: string;
-  keySource: AdminKeySource;
 } {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const legacyServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const secretKeysJson = Deno.env.get('SUPABASE_SECRET_KEYS');
-
-  let serviceKey = legacyServiceKey;
-  let keySource: AdminKeySource | null = legacyServiceKey ? 'legacy_service_role' : null;
-
-  if (!serviceKey && secretKeysJson) {
-    try {
-      const secretKeys = JSON.parse(secretKeysJson) as { default?: unknown };
-      if (typeof secretKeys.default === 'string' && secretKeys.default.length > 0) {
-        serviceKey = secretKeys.default;
-        keySource = 'secret_keys_default';
-      }
-    } catch {
-      // Fall through to the clear configuration error below without logging secrets.
-    }
-  }
 
   if (!supabaseUrl) {
     throw new Error('Missing SUPABASE_URL environment variable');
   }
-  if (!serviceKey || !keySource) {
-    throw new Error(
-      'Missing Supabase admin key. Expected SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEYS.default.',
-    );
-  }
+  const serviceKey = resolveNamedApiKey(
+    secretKeysJson,
+    ADMIN_API_KEY_NAME,
+    'SUPABASE_SECRET_KEYS',
+  );
 
-  return { supabaseUrl, serviceKey, keySource };
+  return { supabaseUrl, serviceKey };
 }
 
 /**
@@ -106,13 +112,18 @@ export function getAdminClient(): SupabaseClient {
  */
 export function getUserClient(authHeader: string): SupabaseClient {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  const publishableKeysJson = Deno.env.get('SUPABASE_PUBLISHABLE_KEYS');
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing SUPABASE_URL or SUPABASE_ANON_KEY environment variables');
+  if (!supabaseUrl) {
+    throw new Error('Missing SUPABASE_URL environment variable');
   }
+  const publishableKey = resolveNamedApiKey(
+    publishableKeysJson,
+    PUBLISHABLE_API_KEY_NAME,
+    'SUPABASE_PUBLISHABLE_KEYS',
+  );
 
-  return createClient(supabaseUrl, supabaseAnonKey, {
+  return createClient(supabaseUrl, publishableKey, {
     global: { headers: { Authorization: authHeader } },
     auth: { autoRefreshToken: false, persistSession: false },
   });

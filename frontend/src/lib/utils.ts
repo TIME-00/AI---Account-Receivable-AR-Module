@@ -8,21 +8,25 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/**
- * Format a number as currency with 2 decimal places.
- * @example formatCurrency(1234.5) → "MYR 1,234.50"
- * @example formatCurrency(1234.5, "USD") → "USD 1,234.50"
- */
-export function formatCurrency(amount: number, currency: string = "MYR"): string {
-  const formatted = new Intl.NumberFormat("en-MY", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-  return `${currency} ${formatted}`;
-}
+// Batch 9D-D (B9DD-FEIR-006): the default-MYR `formatCurrency(amount, currency = "MYR")`
+// helper has been REMOVED rather than deprecated. A runtime default silently
+// mislabels foreign-currency and company-base amounts, and a doc comment cannot
+// prevent that. The canonical money formatters now live in `@/lib/currency`:
+//
+//   formatMoney(amount, currency)      — currency is a REQUIRED parameter
+//   formatMoneySafe(amount, currency)  — renders an explicit unavailable state
+//
+// Both make the currency part of the function signature, so a codeless monetary
+// render is a compile-time type error rather than a silent "MYR" assumption.
 
 /**
- * Format a number as plain currency (no currency code).
+ * Format a number as a plain amount with NO currency code.
+ *
+ * Use ONLY where the currency is unambiguously supplied by the immediate
+ * surrounding context (e.g. a column header or row that already states the
+ * transaction currency). For any standalone monetary value, use `formatMoney`
+ * or `formatMoneySafe` from `@/lib/currency` so the currency travels with the
+ * number.
  */
 export function formatAmount(amount: number): string {
   return new Intl.NumberFormat("en-MY", {

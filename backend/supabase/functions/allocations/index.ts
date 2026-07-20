@@ -5,6 +5,7 @@
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
+import type { AuthContext } from '../_shared/auth.ts';
 import { errorResponse, successResponse, ValidationError } from '../_shared/errors.ts';
 import { parseRequestBody, parsePagination, validateUUID, requireString } from '../_shared/validators.ts';
 import { AllocationService } from './service.ts';
@@ -12,6 +13,7 @@ import { AllocationService } from './service.ts';
 const ROUTES: Record<string, RegExp> = {
   manual:    /^\/manual\/?$/,
   auto:      /^\/auto\/?$/,
+  candidates:/^\/candidates\/?$/,
   preview:   /^\/preview\/?$/,
   reverse:   /^\/([0-9a-f\-]{36})\/reverse\/?$/i,
   single:    /^\/([0-9a-f\-]{36})\/?$/i,
@@ -35,15 +37,28 @@ function matchRoute(url: URL): { route: string; params: Record<string, string> }
   return { route: 'notFound', params: {} };
 }
 
-Deno.serve(async (req: Request): Promise<Response> => {
+export interface AllocationHandlerDependencies {
+  authenticate(req: Request, companyId: string): Promise<AuthContext>;
+  createService(): AllocationService;
+}
+
+const productionDependencies: AllocationHandlerDependencies = {
+  authenticate: getAuthContext,
+  createService: () => new AllocationService(),
+};
+
+export async function handleAllocationRequest(
+  req: Request,
+  dependencies: AllocationHandlerDependencies = productionDependencies,
+): Promise<Response> {
   if (req.method === 'OPTIONS') return handleCORS();
 
   try {
     const url = new URL(req.url);
     const { route, params } = matchRoute(url);
     const companyId = extractCompanyId(req);
-    const auth = await getAuthContext(req, companyId);
-    const service = new AllocationService();
+    const auth = await dependencies.authenticate(req, companyId);
+    const service = dependencies.createService();
 
     // ── Manual allocation ──
     if (route === 'manual' && req.method === 'POST') {
@@ -93,6 +108,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }, 403);
     }
 
+    // Complete allocation candidates (GET - governed read, no side effects).
+    if (route === 'candidates' && req.method === 'GET') {
+      const receiptId = url.searchParams.get('receipt_id');
+      if (!receiptId) throw new ValidationError('receipt_id is required.');
+      validateUUID(receiptId, 'receipt_id');
+      const result = await service.getAllocationCandidates(auth, receiptId);
+      return jsonResponse(successResponse(result));
+    }
+
     // ── Preview auto allocation (GET — no side effects) ──
     if (route === 'preview' && req.method === 'GET') {
       const receiptId = url.searchParams.get('receipt_id');
@@ -131,4 +155,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { status, body } = errorResponse(error);
     return jsonResponse(body, status);
   }
-});
+}
+
+export function createAllocationHandler(
+  dependencies: AllocationHandlerDependencies = productionDependencies,
+): (req: Request) => Promise<Response> {
+  return (req) => handleAllocationRequest(req, dependencies);
+}
+
+export const handler = createAllocationHandler();
+
+if (import.meta.main) {
+  Deno.serve(handler);
+}
