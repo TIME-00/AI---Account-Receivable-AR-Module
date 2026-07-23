@@ -1140,3 +1140,19 @@ Gate 9D-E2 remains **NOT AUTHORIZED — requires separate user approval**. Migra
 commit and push remain unauthorized and were not performed.
 
 `PASS  B9DE-E1-005 PRODUCTION USER_ROLES RLS REMEDIATION AND FINAL GATE E1 CLOSURE COMPLETE`
+
+## 28. Later consolidated Production rollout cross-reference
+
+Gate E1 remains closed and its entry-state evidence is preserved. A later separately authorized
+consolidated E2/E3/E4 gate installed the exact missing migrations, deployed all 16 approved Edge
+Functions and the Vercel Production frontend, activated the locked FX scheduler, passed a fresh
+four-identity backend/frontend smoke, returned temporary identity residue to zero and completed final
+financial/RLS/Storage certification.
+
+Migration 022's authorized governance backfill adds document governance columns and updates the same 27
+document timestamps; consequently the E1 pre-migration full-row JSONB hash is an entry fingerprint, not a
+schema-comparable post-migration invariant. Counts, graph membership, exact `NUMERIC` totals, relationships,
+anomaly checks and the unchanged Storage hash certify the retained business state across the rollout.
+
+The authoritative execution record is
+`docs/evidence/SPRINT_BATCH_9D_E_CONSOLIDATED_PRODUCTION_ROLLOUT_EVIDENCE.md`.

@@ -1,10 +1,10 @@
-# Batch 9D-E — Production Rollout and Verification — Plan (Rev 3.9, Gate E1 Closed)
+# Batch 9D-E — Production Rollout and Verification — Plan (Rev 4.0, Production Rollout Complete)
 
 - **Batch:** 9D-E — Production Rollout and Verification (final Batch 9D batch).
-- **Type:** Planning and documentation only. **No production, staging, Git, deployment, migration, credential, scheduler, Vercel or network action is performed or authorized by this document.**
+- **Type:** Production rollout plan and completed execution record. Historical planning-only and gate-specific authorization boundaries remain preserved in their dated sections.
 - **Author:** Claude Code (planning). **Rev 2** closed Codex findings **B9DE-PR-001 … B9DE-PR-010**; **Rev 3** closed **B9DE-FPR-001 … B9DE-FPR-006**; **Rev 3.1** corrects the commit-identity **Git self-reference** defect only.
-- **Revision:** **Rev 3.9**, 2026-07-23 — records the bounded Mode A removal of `public.user_roles."Temp Allow All"`, authenticated exact-set verification, immutable-state certification, closure of `B9DE-E1-005` and whole Gate E1. Rev 3.8 remains the historical pre-remediation NO-GO checkpoint.
-- **Status:** **Gate 9D-E1 `PASS / GO`; findings `B9DE-E1-001` through `B9DE-E1-005` CLOSED.** Gate 9D-E2 remains not authorized and requires separate user approval.
+- **Revision:** **Rev 4.0**, 2026-07-23 — records the user-authorized consolidated E2/E3/E4 Production rollout, migration/Edge/frontend deployment, fresh role smoke, FX scheduler activation and final certification. Rev 3.9 remains the Gate E1 closure checkpoint.
+- **Status:** **Gates 9D-E1 through 9D-E4 CLOSED; Batch 9D-E CLOSED. Batch 9D is Production-deployed pending independent closure review.**
 - **`BATCH_9D_D_CODE_COMMIT`:** `233005146f7e9551e45fc437fc7fcade678a9f62` (`feat(ar): complete Batch 9D-D multi-currency allocation closure`) — the **immutable accepted implementation**. See §0.1.
 - **`BATCH_9D_E_ROLLOUT_HEAD`:** a **symbolic** identity — the clean local `main` HEAD **resolved at Gate 9D-E1 runtime** after the authorized Batch 9D-E planning commit exists. Its concrete SHA is **never written into this document**. See §0.1.
 - **`origin/main` at planning time:** `d5c9c0a0125b7ab0cb0b767424a4a2b8e01ab87d`.
@@ -1612,3 +1612,34 @@ This checkpoint supersedes §19.2 as the current `B9DE-E1-002` decision while re
 - **Decision:** `B9DE-E1-005` is **CLOSED**; 002–004 remain CLOSED; `B9DE-E1-001` closes under the
   whole-gate rule. Gate 9D-E1 is **PASS / GO**. Gate 9D-E2 remains **NOT AUTHORIZED — requires separate
   user approval**. Migration 027, deployment, stage, commit and push were not performed.
+
+## 20. Consolidated Gates 9D-E2, 9D-E3 and 9D-E4 execution — PASS
+
+On 2026-07-23 the user separately authorized one end-to-end Production rollout. The immutable rollout
+candidate was `c978bce5a14cc020ddbc349f7f91d08855006f2a`.
+
+- Production inventory classified migrations 017–030 as the exact missing manifest; all were installed
+  in ascending order and verified. Migration 022 produced only its expected 27-document governance
+  backfill; Migration 027 installed six aggregation routines; Migration 030 retained the service-only
+  allocation-candidate boundary.
+- The required named Secret API key and hosted key dictionaries resolved without exposing values. All 16
+  approved Edge Functions are active from the rollout candidate. `daily-overdue` fails closed and has no
+  Production cron job.
+- The locked MAS provider completed manual and scheduler-path sync verification. Exactly one approved FX
+  scheduler is active at the locked cadence; no conflicting job exists.
+- `origin/main` and Vercel Production received the rollout candidate. Vercel deployment
+  `dpl_J3g9cnk6LWPs6VgumHi6zqMnixWr` reached `READY` from the exact rollout SHA.
+- A fresh four-identity Production run passed the corrected backend/RLS matrix and deployed-frontend
+  route matrix. Exact cleanup left Auth/users/roles/assignments `5/5/2`, ephemeral residue zero, refresh
+  reuse zero and old-token protected access zero.
+- Final graph/count/`NUMERIC`/relationship certification passed; Storage remains six objects with the
+  accepted hash; RLS remains `20/20/20` with unconditional SELECT/write `0/0`; automatic allocation
+  remains disabled.
+
+The pre-Migration-022 full-row hash is retained as the verified entry fingerprint, but it is not
+schema-comparable after new governance columns and the expected pointer-triggered `updated_at` changes.
+The final new-schema fingerprint and all independent business invariants are recorded in
+`docs/evidence/SPRINT_BATCH_9D_E_CONSOLIDATED_PRODUCTION_ROLLOUT_EVIDENCE.md`.
+
+**Decision:** Gates 9D-E2, 9D-E3 and 9D-E4 are CLOSED; Batch 9D-E is CLOSED. Batch 9D is fully deployed
+to Production pending only independent closure review. No new feature batch begins automatically.
