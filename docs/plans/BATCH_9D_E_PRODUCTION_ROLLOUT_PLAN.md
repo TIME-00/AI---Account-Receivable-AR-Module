@@ -1,14 +1,15 @@
-# Batch 9D-E — Production Rollout and Verification — Plan (Rev 3.1, Commit-Identity Self-Reference Correction)
+# Batch 9D-E — Production Rollout and Verification — Plan (Rev 3.9, Gate E1 Closed)
 
 - **Batch:** 9D-E — Production Rollout and Verification (final Batch 9D batch).
 - **Type:** Planning and documentation only. **No production, staging, Git, deployment, migration, credential, scheduler, Vercel or network action is performed or authorized by this document.**
 - **Author:** Claude Code (planning). **Rev 2** closed Codex findings **B9DE-PR-001 … B9DE-PR-010**; **Rev 3** closed **B9DE-FPR-001 … B9DE-FPR-006**; **Rev 3.1** corrects the commit-identity **Git self-reference** defect only.
-- **Revision:** Rev 3.1, 2026-07-20. Rev 1 → `RETURN TO CLAUDE CODE — BATCH 9D-E PLAN REMEDIATION REQUIRED`; Rev 2 → `RETURN TO CLAUDE CODE — MATERIAL BATCH 9D-E PLAN DEFECT REMAINS`; Rev 3 → micro identity correction. **All Rev 2 and Rev 3 corrections are preserved unchanged.**
-- **Status:** **REMEDIATED DRAFT (Rev 3.1) — NOT YET INDEPENDENTLY APPROVED.** Not implementation-ready until the final independent confirmation passes.
+- **Revision:** **Rev 3.9**, 2026-07-23 — records the bounded Mode A removal of `public.user_roles."Temp Allow All"`, authenticated exact-set verification, immutable-state certification, closure of `B9DE-E1-005` and whole Gate E1. Rev 3.8 remains the historical pre-remediation NO-GO checkpoint.
+- **Status:** **Gate 9D-E1 `PASS / GO`; findings `B9DE-E1-001` through `B9DE-E1-005` CLOSED.** Gate 9D-E2 remains not authorized and requires separate user approval.
 - **`BATCH_9D_D_CODE_COMMIT`:** `233005146f7e9551e45fc437fc7fcade678a9f62` (`feat(ar): complete Batch 9D-D multi-currency allocation closure`) — the **immutable accepted implementation**. See §0.1.
 - **`BATCH_9D_E_ROLLOUT_HEAD`:** a **symbolic** identity — the clean local `main` HEAD **resolved at Gate 9D-E1 runtime** after the authorized Batch 9D-E planning commit exists. Its concrete SHA is **never written into this document**. See §0.1.
 - **`origin/main` at planning time:** `d5c9c0a0125b7ab0cb0b767424a4a2b8e01ab87d`.
 - **Worktree at Rev 2 authoring time (pre-planning-commit):** HEAD at `BATCH_9D_D_CODE_COMMIT`, ahead **1** / behind **0**, 0 staged; **1 modified tracked file** (the Batch 9D master plan) and **1 untracked file** (this plan), plus 18 unrelated untracked paths under `social-media/`.
+- **Current F3-document remediation worktree:** HEAD remains `c24249f037164edd8e08b3cf15f7180973a78c4d`, ahead **2** / behind **0**, staged **0**; two tracked plan files are modified and the E1 evidence plus F3 plan are untracked Batch documents; 18 unrelated untracked `social-media/` paths remain untouched. This is not the historical clean E1 entry state.
 - **Production Supabase project ref:** `kusseuycqgdilychphpq`.
 - **Staging Supabase project ref:** `gcdsdyegwjdcskpukqlq`.
 - **Production frontend URL:** `https://account-receivable-module.vercel.app/`.
@@ -16,6 +17,33 @@
 > ## Authorization statement
 >
 > **This plan grants NO authorization.** Every gate is a *proposal* requiring separate, explicit user approval before any execution. Reading this document does not permit contacting `kusseuycqgdilychphpq` or `gcdsdyegwjdcskpukqlq`, pushing to GitHub, or deploying anything.
+
+> ## Gate 9D-E1 CLOSED — authoritative current status (updated 2026-07-23)
+>
+> A separately authorized bounded Production operator removed only `public.user_roles."Temp Allow All"`.
+> The source-backed `ur_select` policy remains unchanged and provides self-or-active-same-company
+> visibility. Rollback-only and installed-state `authenticated` simulations matched exact expected role-row
+> sets for all five existing identities; random user and random-company results were zero. The 20-table
+> RLS scan now returns unconditional SELECT/write `0/0`, with all other policy, grant and helper
+> fingerprints unchanged. Business graph/hash/totals, Storage and identity state remain exact. Findings
+> 001–005 are CLOSED and Gate 9D-E1 is **PASS / GO**. Gate E2 remains separately unauthorized. See
+> E1 evidence §27 and the `B9DE-E1-005` runbook.
+>
+> ## Historical pre-remediation blocking status (Rev 3.8; superseded by the closure above)
+>
+> Gate 9D-E1 was **executed read-only** and returned **`NO-GO — BATCH 9D-E1 PRODUCTION PREFLIGHT BLOCKED`**. Gate 9D-E1A then returned **`PASS — BATCH 9D-E1A READ-ONLY BLOCKER DIAGNOSIS COMPLETE`**. F3-P4/F3-P5 passed the data reset and financial/integrity certification; the corrected four-identity lifecycle and independent review closed `B9DE-E1-002`. On 2026-07-23 the owner credential-revocation attestation and clean scans closed `B9DE-E1-004`, but fresh catalog inspection found a tenant-unbound authenticated `SELECT` policy on `public.user_roles`; new High finding `B9DE-E1-005` keeps overall E1 at NO-GO. Evidence: `docs/evidence/SPRINT_BATCH_9D_E1_PRODUCTION_READ_ONLY_PREFLIGHT_EVIDENCE.md` §§13–26.
+>
+> | Finding | Severity | Status |
+> |---|---|---|
+> | `B9DE-E1-001` — F3 production data defect | **High** | **OPEN by whole-gate closure rule; technically remediated** — F3-P4 removed the defective populations and F3-P5 financial/integrity certification has zero unexplained mismatch; overall E1 remains NO-GO |
+> | `B9DE-E1-002` — Production identity/RLS runtime readiness | **Material Medium** | **CLOSED** — corrected ephemeral four-identity create/authenticate/read-only-test/destroy lifecycle passed with zero residue; T1 remains accepted and no second tenant is required |
+> | `B9DE-E1-003` — authorized Vercel interface did not expose environment-variable names | **Material Medium** | **CLOSED** — all four required Production environment-variable names manually verified **PRESENT** with Production target **YES** (§4.1.6.1), sanitized name-only, 2026-07-20 18:56 MYT |
+> | `B9DE-E1-004` — Supabase personal access token disclosed in conversation before F3-P5 | **High** | **CLOSED** — owner attests PAT revocation and dedicated ephemeral Secret-key deletion; environment/runner removed; credential and full-synthetic-email scan returned zero |
+> | `B9DE-E1-005` — authenticated tenant-unbound read policy on `public.user_roles` | **High** | **OPEN** — Production policy `Temp Allow All` grants `authenticated` `SELECT` with `USING (true)`; this read-only gate did not alter it |
+>
+> **Gate 9D-E1 remains `NO-GO`.** Findings 002–004 are closed, but `B9DE-E1-005` is High/Open and `B9DE-E1-001` remains open by the whole-gate rule. No automatic progression to E2 is permitted.
+>
+> **Gate 9D-E2 must not begin** until `B9DE-E1-005` is separately remediated and independently verified, `B9DE-E1-001` closes through a whole-gate E1 PASS, findings 002–004 remain closed, and a later separately authorized repeated E1 produces PASS. The vulnerable production `daily-overdue` bundle remains a mandatory first-order E2 security remediation and is **not** advanced here.
 
 > ## Rev 2 governing principle
 >
@@ -498,6 +526,19 @@ Run read-only preflights for all manifest entries in either category. **A constr
 
 > `027` and `028` contain **no migration-time DML** (§2.1), so they carry no backfill risk — but they remain in the preflight set because they introduce integrity/aggregation constraints evaluated against existing rows. The reason is stated accurately rather than by assuming they mutate data.
 
+> ### Migration 027 and the F3 cohort — CORRECTED (Gate 9D-E1A, evidence §15.5)
+>
+> The earlier label **"Migration 027 compatibility FAIL"** is **superseded** and must not be used. The precise position is:
+>
+> - Migration 027 **does not validate** and does not depend on the settlement equation.
+> - It **does not rewrite** the 128 historical `Paid` rows; it contains no migration-time update of invoices or settlement rows and does not recompute `Paid` invoices.
+> - Its aging/dashboard paths select stored `outstanding` **only** for Open/Overdue/Partially Paid Invoice/Debit Note rows with **positive** outstanding (`database/027_batch_9d_d_authoritative_monetary_aggregation.sql:136-155`), so the zero-outstanding cohort never enters those totals. Its invoice-report aggregation separately reports stored current outstanding and stored document totals (same file, `495-544`).
+> - Migration 028 adds lifecycle enforcement **prospectively** without rewriting historical status or financial data (`database/028_linked_credit_note_reference_integrity.sql:41-55`).
+> - **Therefore the 128 rows do NOT technically block Migration 027 application**, and Migration 027 would install successfully assuming its ordinary schema prerequisites pass.
+> - **The 128 rows nevertheless BLOCK overall Gate 9D-E1 financial certification** as **F3 — PRODUCTION DATA DEFECT** (finding `B9DE-E1-001`, High).
+>
+> **This correction authorizes nothing.** Applying Migration 027 remains unauthorized, and a wording-only preflight correction is **insufficient** under F3 — controlled data-resolution planning is required first. See `docs/plans/BATCH_9D_E1_F3_PRODUCTION_FINANCIAL_REMEDIATION_PLAN.md`.
+
 **`daily-overdue` caller inventory (B9DE-PR-002).** E1 must determine whether **any** production caller currently invokes `daily-overdue`, checking: `pg_cron`, `pg_net`, Database Webhooks, external schedulers, Vercel cron, CI/automation, manual runbooks, and any other caller.
 
 Record for each:
@@ -523,31 +564,97 @@ Record for each:
 
 **The caller record and the server-secret state *together* select the E2 branch (§4.2.3).** Neither alone is sufficient.
 
-### 4.1.5 Production identity readiness (B9DE-PR-008)
+### 4.1.5 Production identity readiness and tenant assurance — **T1 (AMENDED, Gate 9D-E1A §15.6)**
 
-E1 must safely identify **existing** controlled accounts covering:
+> **Accepted model: T1 — STRUCTURAL PRODUCTION + STAGING RUNTIME PROOF.**
+>
+> **Production legitimately has one active company.** Creating a second production tenant solely for testing would add disproportionate production identity and financial-data risk for this project. **A second production company must NOT be created to satisfy this gate.** This supersedes the earlier "cross-tenant isolation pair" production requirement.
 
-| Identity | Purpose |
-|---|---|
-| Authenticated general user | Row B smoke |
-| Finance Manager | Row C smoke |
-| AR Clerk **assigned** to a customer | Row D smoke |
-| AR Clerk **unassigned** to that customer | Row D negative smoke |
-| Cross-tenant isolation pair | Row D tenant isolation |
+**T1 required E1 criteria — structural (production, read-only):**
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | **Production RLS and ACL inspection** — RLS enabled on companies, customers, invoices, receipts, allocation details, CN allocations, journals, imports, roles, assignments | Catalog inspection |
+| 2 | **Production company-scope predicates** — `rls_has_operational_read_access` checks authenticated active company membership | `database/015_financial_mutation_boundary_hardening.sql:25-90` |
+| 3 | **Production AR Clerk assignment predicates** — `rls_can_access_customer` additionally checks company ownership, visible/non-deleted state, and AR Clerk assignment; read policies compose those helpers | `database/015_financial_mutation_boundary_hardening.sql:127-148` |
+| 4 | **Service-only financial mutation boundaries** — direct authenticated `INSERT`/`UPDATE`/`DELETE` remains removed from protected financial tables | Catalog inspection |
+| 5 | **Zero production ownership anomalies**, recorded **per relationship** — invoice/customer, receipt/customer, allocation receipt/invoice/customer, assignment/customer | Read-only counts |
+
+**T1 required — runtime (substituted, not skipped):**
+
+| # | Criterion | Source |
+|---|---|---|
+| 6 | **Accepted staging two-company runtime evidence** reused as the cross-tenant runtime proof (candidate/RPC tenant-negative matrix; assigned/unassigned Clerk rules) | `docs/evidence/SPRINT_BATCH_9D_D_MULTI_CURRENCY_UX_AND_MONETARY_AGGREGATION_EVIDENCE.md:1644-1648,1677-1685` |
+| 7 | **Later approved production Finance Manager smoke** | Deferred to an authorized authenticated smoke |
+| 8 | **Assigned and unassigned AR Clerk smoke within the existing company** | Deferred to the same authorized smoke |
+| 9 | **Explicit account-owner and credential-custody approval before any login** | Recorded before the smoke |
+
+**Authoritative production smoke identity set under T1 — exactly four, existing accounts only, all within the single production company:**
+
+| # | Identity | Purpose |
+|---|---|---|
+| 1 | Authenticated general user | Row B smoke |
+| 2 | Finance Manager | Row C smoke |
+| 3 | AR Clerk **assigned** to a customer | Row D smoke |
+| 4 | AR Clerk **unassigned** to that customer | Row D negative smoke |
+
+> **No fifth "cross-tenant isolation pair" identity is required.** *(Superseded: the earlier production cross-tenant identity-pair row is removed as an active requirement.)* Cross-tenant assurance is supplied instead by production **structural** RLS/ACL/company-scope proof, **zero production ownership anomalies**, and the **accepted staging two-company runtime evidence** — which remains **staging runtime evidence and must never be described as production runtime evidence**.
 
 For each, confirm: the account **already exists**; it is safe for smoke testing; expected company and role metadata; the token acquisition method; token lifetime.
 
-**Constraints:**
+**Constraints — unchanged and reinforced:**
 - Credentials and tokens are **never** printed, logged, or stored in Git or evidence.
 - **No production account is created under E1.**
-- **No password reset and no user mutation** occurs.
+- **No login, no password reset, no user creation, and no identity mutation** is authorized by this plan.
 - **No real customer-facing user is used without approval.**
 
-**If required identities do not exist: E1 returns NO-GO**, requests separate explicit authorization for the minimum safe identity setup, and **does not create users from this plan alone**. **Tenant/role smoke coverage must not be silently reduced.**
+**T1 boundary.** T1 resolves the need for a second production tenant. It does **not** itself authorize authenticated smoke, and it does **not** establish custody of an existing account. **Missing account custody may remain a readiness blocker** (`B9DE-E1-002`, material Medium): if custody cannot be approved, E1 records the gap honestly rather than reducing coverage. **Tenant/role smoke coverage must not be silently reduced**, and structural proof must not be presented as runtime proof.
 
 ### 4.1.6 Vercel readiness (B9DE-PR-010)
 
 E1 confirms read-only: Vercel project identity; connected Git repository; production branch; **automatic production deployment setting**; current deployed commit; production environment variable **names**; and — decisively — **whether pushing `main` will trigger a production deployment.**
+
+#### 4.1.6.1 Vercel production environment-variable NAME-ONLY checkpoint (Gate 9D-E1A §15.7)
+
+> **Connector limitation — not variable absence.** Gate 9D-E1A performed exactly one authorized read-only project-metadata retrieval against Vercel project `prj_w67qhKtacmd8QBLstmEhha5V2pcf`. Project identity was confirmed, but **the connected tool response does not expose environment-variable names**, and no Vercel CLI or local Vercel credential is available. **This is a connector-capability limitation. It is NOT evidence that any variable is absent, and must never be recorded as absence.** No repeated retrieval was attempted.
+
+**Manual sanitized name-only procedure:**
+
+1. Open the Vercel Dashboard and select team/project `account-receivable-module` / `prj_w67qhKtacmd8QBLstmEhha5V2pcf`.
+2. Open **Settings → Environment Variables**.
+3. Filter/inspect the **Production** target only.
+4. Verify that each exact name exists and includes Production.
+5. **Do not reveal, copy, expand, export, or return any value. Do not provide a screenshot containing a value.**
+6. Return only the sanitized checklist below.
+
+**Recorded fields — exactly these, and nothing more:** exact name; `PRESENT`/`ABSENT`; Production target `YES`/`NO`; verification time; sanitized reviewer identity/role.
+
+> **Never** request or record: values, value prefixes or suffixes, screenshots containing values, hashes of values, exports, or any other value-bearing artifact.
+
+**Result table — COMPLETED (sanitized manual verification):**
+
+| # | Variable name | PRESENT / ABSENT | Production target YES / NO |
+|---|---|---|---|
+| 1 | `NEXT_PUBLIC_SUPABASE_URL` | **PRESENT** | **YES** |
+| 2 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **PRESENT** | **YES** |
+| 3 | `NEXT_PUBLIC_API_BASE_URL` | **PRESENT** | **YES** |
+| 4 | `NEXT_PUBLIC_DEFAULT_COMPANY_ID` | **PRESENT** | **YES** |
+
+| Attestation field | Value |
+|---|---|
+| Vercel project name | `account-receivable-module` |
+| Target filter inspected | **Production** |
+| Verification time | **2026-07-20 18:56 MYT** |
+| Reviewer identity / role (sanitized) | **Project owner** |
+| Value handling | **No value was opened, copied, expanded, exported or recorded.** |
+
+The Vercel UI displayed the required variables with **Production** included in their target configuration.
+
+> **Scope note.** `NEXT_PUBLIC_DEMO_USER_ROLE` and `NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID` are **outside** this four-variable required-runtime checkpoint (§2.13). They are neither verified nor changed here, and **must not be modified or removed**.
+
+**Closure rule — SATISFIED.** All four names are recorded `PRESENT` with Production target `YES`. **`B9DE-E1-003` is CLOSED by sanitized manual name-only verification.** *(Had any been `ABSENT` or `NO`, it would have been a stop condition requiring provisioning under separate authorization before Gate 9D-E3.)*
+
+> **This closure does NOT change the overall Gate 9D-E1 decision.** `B9DE-E1-001` (F3) remains **OPEN** and Gate 9D-E1 remains **`NO-GO`**. Sanitized evidence: `docs/evidence/SPRINT_BATCH_9D_E1_PRODUCTION_READ_ONLY_PREFLIGHT_EVIDENCE.md` § *Batch 9D-E1 Manual Vercel Name-Only Verification*.
 
 ### 4.1.7 E1 governance
 
@@ -829,15 +936,16 @@ Requirements:
 | 5.2 | Project ref | Every command's explicit ref is `kusseuycqgdilychphpq` | every |
 | 5.3 | Commit identity | `RESOLVED_BATCH_9D_E_ROLLOUT_HEAD` resolved at E1 from `git rev-parse HEAD` and captured in E1 evidence (not in Git); `BATCH_9D_D_CODE_COMMIT` an ancestor; only planning docs after it; behind 0; deployed SHA compared to the E1-captured value after E3 (§0.1) | E1/E3 |
 | 5.4 | Migration manifest | Only `PRODUCTION_MISSING_MIGRATION_MANIFEST` applied, in order, atomically, once | E1/E2 |
-| 5.5 | Data compatibility | Read-only preflights pass: `022` backfill population; `021`/`027`/`028` constraint validation against existing rows | **E1** |
+| 5.5 | Data compatibility | Read-only preflights pass: `022` backfill population; `021`/`027`/`028` constraint validation against existing rows. **Migration 027 is not blocked by the F3 cohort (§4.2.2)** | **E1** |
+| 5.5a | **F3 financial defect** | The 128-row `Paid` cohort (raw delta 2,681,703.31) is **resolved truthfully** per the F3 plan. P1/P3 treatment requires the ordinary equation to reconcile; strict P2 treatment reports raw mismatch, externally explained state and unexplained state separately. In every branch, unexplained count/amount must be zero and no unsupported exclusion is allowed. **Currently FAILING** | **E1 (repeat)** |
 | 5.6 | RPC ownership & grants | `get_allocation_candidates`: STABLE, SECURITY DEFINER, `search_path=""`, EXECUTE to `service_role`/`postgres` only | E2 |
-| 5.7 | RLS & tenant isolation | RLS on 9D tables; `cust_select`/`inv_select` intact; cross-company probe 404/403 | E2/E3 |
+| 5.7 | RLS & tenant isolation | RLS on 9D tables; `cust_select`/`inv_select` intact. **T1 (§4.1.5):** cross-tenant assurance = production structural proof + zero ownership anomalies + accepted **staging** two-company runtime evidence. **No production cross-company probe is required, because production has one legitimate company** | E2/E3 |
 | 5.8 | Edge `verify_jwt` | Matches §2.7 exactly | E1/E2 |
 | 5.9 | Modern key dictionaries | Both resolve; **legacy mode stays ENABLED** | E2 |
 | 5.10 | Function secrets | FX secrets set; `CRON_SECRET` per §4.2.3 branch | E2 |
 | 5.11 | Provider & host pinning | No provider key; host pinned; `providers=MAS` + `expand=providers` | E2/E4 |
 | 5.12 | `daily-overdue` caller | Inventory complete; branch selected; no-break coordination executed | E1/E2 |
-| 5.13 | Identities | All five smoke identities exist and are safe | **E1** |
+| 5.13 | Identities & tenant assurance | **T1 model (§4.1.5):** production structural RLS/ACL/predicate/boundary proof + zero ownership anomalies + accepted staging two-company runtime evidence; four existing single-company smoke identities safe; **no second production tenant created**; custody approved before any login | **E1** |
 | 5.14 | Frontend API URL & key | `NEXT_PUBLIC_API_BASE_URL` → production functions host; anon key valid | E1/E3 |
 | 5.15 | Vercel production env | The **four** required names present; auto-deploy behavior confirmed | **E1** |
 | 5.16 | Production build | `tsc --noEmit`, ESLint, `next build`, full Vitest pass locally at `RESOLVED_BATCH_9D_E_ROLLOUT_HEAD` (source identical to `BATCH_9D_D_CODE_COMMIT`) | E3 entry |
@@ -948,7 +1056,13 @@ invoices.total_amount
   = invoices.outstanding
 ```
 
-for every invoice with `status NOT IN ('Cancelled','Draft')`. **Expected mismatch count: 0.**
+for every invoice with `status NOT IN ('Cancelled','Draft')`. This is always computed as the **raw arithmetic result**. Ordinarily its expected mismatch count is 0. The sole planned exception is a separately approved F3/P2 historical snapshot whose internal settlement detail truthfully never existed: those rows remain raw mismatches and are reported separately as externally explained only when each exact company/invoice row has authoritative, immutable provenance. The repeated E1 must report:
+
+- raw mismatch count and exact amount;
+- externally explained historical-state count and exact amount;
+- unexplained count and exact amount.
+
+`B9DE-E1-001` can close only when unexplained count and amount are both zero. Explained rows remain in invoice/document totals, revenue-related reporting, receivable history, customer statements and all other truthful financial populations; the P2 contract is not an aggregate exclusion or a claim that the equation balances.
 
 > `cn_allocations` has no discount column (schema-verified, `database/001_create_tables.sql` line 801) — only `allocation_details` carries `discount_amount`. Rev 1's equation omitted `discount_amount` entirely and would have produced false mismatches wherever a settlement discount exists.
 
@@ -1106,13 +1220,15 @@ Next.js 15.5.19; the build produces 25 static pages plus dynamic routes, rebuilt
 
 ### Row D — AR Clerk and tenant isolation (E3)
 
-| # | Check | Expected |
-|---|---|---|
-| D1 | Assigned Clerk sees only assigned scope | correct |
-| D2 | Unassigned Clerk → receipt candidates | 404 |
-| D3 | Cross-tenant receipt id | 404 — never another tenant's data |
-| D4 | Cross-company report request | 403/404 |
-| D5 | Direct RPC as `authenticated` | denied |
+| # | Check | Expected | Environment |
+|---|---|---|---|
+| D1 | Assigned Clerk sees only assigned scope | correct | **Production** (within the single company) |
+| D2 | Unassigned Clerk → receipt candidates | 404 | **Production** (within the single company) |
+| D3 | Cross-tenant receipt id | 404 — never another tenant's data | **Staging** — accepted two-company runtime evidence (T1) |
+| D4 | Cross-company report request | 403/404 | **Staging** — accepted two-company runtime evidence (T1) |
+| D5 | Direct RPC as `authenticated` | denied | **Production** (structural / privilege inspection) |
+
+> **T1 (§4.1.5).** D3 and D4 require two tenants and are therefore **not executed in production** — production has one legitimate active company and **no second production company or user is created**. They are satisfied by the accepted **staging** two-company runtime evidence, which is recorded as staging evidence and **never** presented as production runtime evidence. D1, D2 and D5 remain production checks and require approved existing-account custody plus separate authorization before any login.
 
 ### Row E — FX read surface (E2/E3, read-only)
 
@@ -1200,8 +1316,9 @@ Next.js 15.5.19; the build produces 25 static pages plus dynamic routes, rebuilt
 7. Anonymous privileged access.
 8. Deployed Vercel commit SHA ≠ the E1-captured `RESOLVED_BATCH_9D_E_ROLLOUT_HEAD`, or that SHA does not carry `BATCH_9D_D_CODE_COMMIT` as an ancestor, or a source change appears after the accepted code commit.
 9. `daily-overdue` caller `CANNOT_BE_CONFIRMED` or unable to send the header (§4.2.3 STOP path).
-10. Required smoke identities missing (§4.1.5).
-11. Any Critical, High, **or material Medium** finding (§11.0).
+10. Required smoke identities missing, or account custody unapproved before an authenticated smoke (§4.1.5, T1).
+11. **Any row failing the §6.5 settlement equation without an approved, evidence-backed explanation** — including the F3 cohort until its remediation track completes (§4.2.2; `BATCH_9D_E1_F3_PRODUCTION_FINANCIAL_REMEDIATION_PLAN.md`). **Excluding failing rows from the predicate to obtain PASS is itself a stop condition.**
+12. Any Critical, High, **or material Medium** finding (§11.0).
 
 ### 10.6 Non-blocking
 
@@ -1235,7 +1352,9 @@ Only **non-material** Medium and Low findings are recorded and deferred (§11.0)
 - ✅ E1 PASS; `PRODUCTION_MISSING_MIGRATION_MANIFEST` emitted with no `PARTIAL_OR_DIVERGENT` / `UNKNOWN`.
 - ✅ Data-compatibility preflights pass: `022` backfill population matches the expected eligible set; `021`/`027`/`028` constraint validation holds against existing production rows.
 - ✅ `daily-overdue` caller record complete; branch A or B determined (not `CANNOT_BE_CONFIRMED`).
-- ✅ All five smoke identities confirmed to exist and be safe.
+- ✅ **F3 cohort resolved:** §6.5 raw/explained/unexplained results are reported exactly; ordinary arithmetic reconciles for P1/P3-treated rows, every P2-explained row has approved immutable external provenance, unexplained count/amount are zero, and no row is excluded from monetary populations to obtain PASS (`B9DE-E1-001` closed only after F3-P5).
+- ✅ **T1 tenant assurance satisfied** (§4.1.5): production structural proof + zero ownership anomalies + accepted staging two-company runtime evidence; the four existing single-company smoke identities confirmed to exist and be safe; custody approved before any authenticated smoke (`B9DE-E1-002` closed).
+- ✅ **Vercel name-only checklist complete** — all four Production variable names `PRESENT` / target `YES` (§4.1.6.1, `B9DE-E1-003` closed).
 - ✅ Recovery point confirmed and recorded.
 - ✅ `SUPABASE_PUBLISHABLE_KEYS.default` confirmed resolvable; plan for the named secret key approved.
 - ✅ Group A/B/C baseline fingerprints captured.
@@ -1249,7 +1368,7 @@ Only **non-material** Medium and Low findings are recorded and deferred (§11.0)
 - ✅ `POST /allocations/auto` → 403.
 - ✅ `daily-overdue` Row A4 401 ×3 and Row A5 bundle content confirmed.
 - ✅ Group A unchanged; Group B matches the 022 contract; Group C per-company integrity holds.
-- ✅ Allocation equation (§6.5, **including `discount_amount`**) mismatch count = 0.
+- ✅ Allocation equation (§6.5, **including `discount_amount`**) has zero **unexplained** mismatch count/amount; any P2 raw mismatch remains explicitly reported and fully mapped to approved immutable provenance.
 - ✅ Local `tsc --noEmit`, ESLint, `next build`, full Vitest pass at `RESOLVED_BATCH_9D_E_ROLLOUT_HEAD`.
 - ✅ Local `HEAD` still exactly the E1-captured `RESOLVED_BATCH_9D_E_ROLLOUT_HEAD`; no new commit since E1; no tracked worktree change; `BATCH_9D_D_CODE_COMMIT` an ancestor; intervening commits documentation-only; behind 0; 0 staged, 0 unstaged tracked.
 - ❌ NO-GO: candidate contract unavailable; any core function failing; Group A delta; tenant-isolation failure; **any Critical, High, or material Medium finding**.
@@ -1362,8 +1481,134 @@ The plan preserves every control protecting **money, tenants, credentials, and r
 
 ## 15. Plan Status
 
-- **Status:** **REMEDIATED DRAFT (Rev 3.1) — NOT INDEPENDENTLY APPROVED.**
-- **Not implementation-ready** until the final independent confirmation passes.
+- **Status:** **Rev 3.8 — FINAL REPEATED READ-ONLY PREFLIGHT `NO-GO`.** Business/financial/Storage/identity after-state passes and the credential incident is closed; one new Production RLS blocker remains. The only Production mutation remains the separately authorized historical F3-P4 cleanup.
+- **Blocker status:** `B9DE-E1-001` **OPEN by whole-gate closure rule (High)**, with financial remediation technically verified; `B9DE-E1-002` **CLOSED**; `B9DE-E1-003` **CLOSED**; `B9DE-E1-004` **CLOSED** by owner attestation plus clean scans; `B9DE-E1-005` **OPEN (High)** for the authenticated unconditional `public.user_roles` SELECT policy.
+- **Gate 9D-E2 remains UNAUTHORIZED** until `B9DE-E1-005` is separately remediated, another authorized read-only E1 passes, and all prior closed findings remain closed.
+- **Financial remediation track:** `docs/plans/BATCH_9D_E1_F3_PRODUCTION_FINANCIAL_REMEDIATION_PLAN.md`; F3-P4 is complete, while the document authorizes no further action.
+- **Not implementation-ready** until the repeated E1 passes.
 - **Authorization granted by this document: NONE.** Production, push, migration, deployment, credentials, and schedulers all remain unauthorized. **The Batch 9D-E planning commit itself is not authorized by this document.**
 - **`BATCH_9D_E_ROLLOUT_HEAD` remains symbolic by design.** Its concrete value is resolved at Gate 9D-E1 entry from `git rev-parse HEAD` and captured in the E1 execution evidence (§0.1). It is deliberately **never** written back into this plan, because a commit cannot contain its own SHA. No additional identity-recording commit is required.
-- **Next gate:** Codex performs one consolidated final read-only confirmation of the corrected Batch 9D-E plan. Production, push, migration, deployment, credentials, and schedulers remain unauthorized.
+- **Next action:** separately authorize a bounded Production RLS remediation/review for only the `public.user_roles` unconditional SELECT policy, then independently repeat the affected catalog/RLS checks and whole E1 gate. E2, push, deployment, migrations, identities and schedulers remain unauthorized.
+
+---
+
+## 16. F3-P1/P2/P3 test-data-reset checkpoint (authoritative current state)
+
+- F3-P1 completed read-only with verdict `PASS  BATCH 9D-E1 F3-P1 PRODUCTION READ-ONLY PROVENANCE DISCOVERY COMPLETE`.
+- The owner/data custodian attests that the current Production AR business population is synthetic test/demo/smoke data; formal outcome **P1 — SYNTHETIC / DEMO DATA**.
+- F3-P2 selects an exact-manifest test-data reset: retain exactly ten principal coherent demo scenario anchors and their complete dependency graph; delete every other Production AR test-data row reachable within the reviewed graph.
+- The exact deletion manifest includes all 128 defective `Paid` invoices and, under the separately expanded owner-authorized reset scope, all 922 non-retained header-only `Open` invoices. The 922 rows were not silently folded into the original 128-row F3 diagnosis.
+- Local F3-P3 artifacts exist only under `database/operators/` and `docs/runbooks/`. Under the later separate F3-P4 authorization, the Production dry run returned `READY`, the database operator committed exactly once, and the bounded exact-key Storage phase completed.
+- No ordinary Batch 9D-E migration carries this cleanup. No P3S is presently required; the operator aborts if the future lifecycle triggers are installed. Any changed trigger state requires STOP and separate P3S review/authorization.
+- F3-P4 remained isolated from Migrations 017–030, Edge deployment, scheduler, credential, identity, push and Gate E2 work. Storage object deletion was executed as the separately bounded post-database phase.
+- `B9DE-F3-P1-001` is closed by the completed reset. The later F3-P5 result is recorded in §18.
+
+---
+
+## 17. F3-P4 controlled Production reset checkpoint (authoritative current state)
+
+- **Date and target:** 2026-07-21, Production project `kusseuycqgdilychphpq`, company `00000000-0000-0000-0000-000000000001` only.
+- **Database phase:** exact read-only dry run `READY`; the approved 2,651-row deletion manifest with SHA-256 `cfa7d6d7bc739bd190fb14a2e8bb680dc473fbe1e678db1b1235f07e9b75cb7d` committed exactly once in the guarded `SERIALIZABLE` operator. No assertion failed and recovery did not rerun the apply SQL.
+- **Database after-state:** ten principal anchors; 179 retained graph rows; 11 customers; 16 invoices; 14 invoice lines; 11 receipts; 13 allocations; 25 journal entries; 50 journal lines; import batches/files/rows/row allocations `6/6/20/7`; retained hash `36bb2ba7de358e3c0f2401db804d16ebfd7d400d7b099bbb964171ed626b90e0`; zero retained settlement mismatches. The defective 128 `Paid` and non-retained 922 header-only `Open` populations both have zero remaining rows.
+- **Storage phase:** all 63 approved exact keys were removed in bounded batches of at most five. The six retained objects remain and hash to `b5f58c7c85358da973280bf4e59f5862944e451f50cd521cd6f7c05139468620`; approved delete objects remaining are zero. No full object names are retained in Git evidence.
+- **Boundary:** no staging, Vercel, frontend, Edge Function, migration, DDL, credential, scheduler, identity, stage, commit or push action occurred. F3-P4 does not authorize F3-P5 or Gate E2.
+- **Historical exit status of F3-P4 (superseded by §18):** `B9DE-F3-P1-001` closed; `B9DE-E1-001` remained open pending the then-future F3-P5; Gate E1 remained `NO-GO`; Gate E2 remained unauthorized.
+
+---
+
+## 18. F3-P5 repeated Production read-only preflight (authoritative current state)
+
+- **After-state:** `AFTER_STATE_MATCH`; ten principal anchors, ten matching scenario hashes, 179 retained rows, exact retained database hash, zero deletion-manifest rows, zero former 128/922 rows, Storage `6 retained / 0 approved-delete` with exact retained hash.
+- **Financial certification:** all active/settled documents balance. Raw lifecycle differences are fully explained and independently validated: two Draft documents (`1700.00`) are pre-posting, one Cancelled document (`1.00`) has complete journal reversal, and one Bounced receipt (`1.00`) has complete allocation/journal/credit-control reversal. Document and receipt unexplained counts and amounts are zero.
+- **Integrity/security:** receipt, allocation, discount, CN, journal, FX and base-currency checks pass; orphan count is zero; one active company owns every scoped row; all 16 reviewed tables have RLS and tenant-bound policies with no unconditional policy.
+- **Migration 027:** deterministically `MISSING` and technically installable later: six named routines absent, no catalog conflicts, required objects present, data-assumption violations zero. It was not applied. Phase A hashes remain exact, its 12-case contract passes, and `/allocations/auto` remains disabled with `AUTO_ALLOCATION_DISABLED`.
+- **Identity/T1:** four required identity types have existing candidates and zero metadata anomalies; T1 remains accepted. No owner credential-custody attestation was supplied, so `B9DE-E1-002` remains partially resolved.
+- **Credential incident:** a Supabase personal access token was disclosed in conversation before this gate. It was not used or recorded in Git evidence. Revocation/replacement and old-token rejection are unverified, so `B9DE-E1-004` is High/Open.
+- **Decision:** `NO-GO — BATCH 9D-E1 F3-P5 REPEATED PRODUCTION PREFLIGHT BLOCKED`. `B9DE-E1-001` stays open under the whole-gate closure rule despite technical financial remediation; `B9DE-E1-003` remains closed. Gate E2 remains unauthorized.
+
+---
+
+## 19. Ephemeral Production smoke identity closure attempt — 2026-07-22
+
+This section is the authoritative Rev 3.6 identity-readiness update and supersedes the earlier long-lived credential-custody next action while preserving the historical record.
+
+- **Approved strategy:** exactly four temporary users — general authenticated, Finance Manager, assigned AR Clerk and unassigned AR Clerk — created with one run ID, authenticated independently, exercised only through read endpoints, globally signed out, stripped of exact application-identity rows, deleted with the supported Auth Admin interface and checked with the old access tokens after cleanup.
+- **Supersession boundary:** this strategy replaces the earlier long-lived existing-account credential-custody requirement for `B9DE-E1-002`; it does not relax any role/RLS assertion and does not authorize a second tenant or a fifth identity.
+- **Pre-mutation result:** Git and Production target matched. Production contained one target company, five pre-existing Auth users, five roles and two assignments; there was no prior ephemeral run, profile table or identity orphan. The retained 179-row business graph and six Storage objects matched the approved hashes and totals.
+- **Safe stop:** the available connector had no Auth Admin create/delete/revoke operation; the runner had no safely injected non-compromised server-side Admin credential; browser automation was unavailable. Direct DML to `auth.users`, use of the disclosed PAT, schema changes and secret export were prohibited and not attempted.
+- **Mutation/cleanup result:** temporary users, roles, assignments, sessions and old smoke tokens created: `0`. Consequently no cleanup mutation or old-token request existed to perform. A final aggregate scan confirmed zero ephemeral identity or Storage residue and unchanged existing identity/business hashes.
+- **Decision:** `B9DE-E1-002` remains **PARTIALLY RESOLVED**. A later gate must start a new run and complete the full lifecycle; it may not claim this read-only failed-safe attempt as runtime identity proof. `B9DE-E1-004` remains separate High/Open and Gate E2 remains unauthorized.
+- **Next safe action:** expose supported Supabase Auth Admin lifecycle operations to a bounded runner using a non-compromised credential injected only into volatile process memory, then separately authorize a fresh lifecycle. Do not use the disclosed PAT.
+- **Runbook/evidence:** `docs/runbooks/BATCH_9D_E1_EPHEMERAL_PRODUCTION_SMOKE_IDENTITIES_RUNBOOK.md`; `docs/evidence/SPRINT_BATCH_9D_E1_PRODUCTION_READ_ONLY_PREFLIGHT_EVIDENCE.md` §21.
+
+### 19.1 Second bounded attempt — injected variables present, Admin capability rejected
+
+- Both authorized process environment variables were present. No value, prefix, length, hash, partial value or header was printed or persisted.
+- The runner used the installed server-side Supabase client, disabled persistence/automatic refresh/URL detection, and obtained the publishable key only from existing local configuration in memory. Its source contained no credential literal and was removed by the outer cleanup guard.
+- Git and Production preconditions still matched: one company, 179 retained business rows, exact retained table counts and monetary totals, five existing non-ephemeral Auth users, five roles, two assignments and zero prior ephemeral Auth residue.
+- Static normalized classification returned `credential_type: unsupported`. The mandatory read-only `auth.admin.listUsers` capability probe then failed in local HTTP request construction. No Auth Admin request reached Production, so the create phase was not entered.
+- Temporary run IDs/users/roles/assignments/sessions/tokens/Storage objects created were all `0`; no general, Finance Manager, assigned-Clerk or unassigned-Clerk RLS request or old-token request existed. The runner directory was deleted.
+- **Decision remains:** `B9DE-E1-002` **PARTIALLY RESOLVED / NOT CLOSED**. A later newly authorized attempt requires a valid supported Production Secret/service-role credential. `B9DE-E1-004` remains **High / OPEN**; Gate E2 remains unauthorized.
+
+### 19.2 Third bounded attempt — full lifecycle executed; positive RLS contract failed
+
+This checkpoint is the authoritative current `B9DE-E1-002` execution result. The two earlier attempts remain historical fail-safe evidence.
+
+- **Capability/baseline:** both process variables were present; the credential was a supported modern Secret key; server-side `auth.admin.listUsers` passed. Git and Production matched. Prior ephemeral users/sessions were zero; company/business/Storage and existing identity baselines matched and were frozen.
+- **Sanitized run:** run-ID SHA-256 `2d3a0bf73f9d0da6f198549d3a6a2ae37010acb13a975e2e62b85837d39ba676`. Exactly four confirmed users were created and authenticated: general `530556c8b662`, Finance Manager `85afbb6bea7f`, assigned AR Clerk `5f53147562de`, and unassigned AR Clerk `7e52ce7d54f2` (sanitized user-ID hash prefixes only). No fifth identity or second tenant was created.
+- **Provisioning:** one active Finance Manager role, two active AR Clerk roles and exactly one active first-anchor customer assignment passed all pre-login assertions. The general user had no role; the unassigned Clerk had no assignment; no profile table/row exists.
+- **Passing runtime controls:** all four password logins returned success. General customers/invoices/receipts and roles were `0/0/0/0`. The unassigned Clerk returned protected rows `0/0/0`, self-role `1` and assignment `0`. Finance out-of-company rows were `0`. Assigned-Clerk outside-customer/customer-document rows were all `0`, and its self-role/assignment were `1/1`.
+- **Required positive RLS failures:** Finance Manager returned customers/invoices/receipts `2/7/7`, not `11/16/11`, and principal anchors `5`, not `10`. Assigned Clerk returned customers/invoices/receipts `0/0/0`, not `1/2/2`; its assigned-customer query was also `0`.
+- **Source-backed cause:** installed `rls_can_access_customer` requires the customer to have both `is_deleted = false` and `is_hidden = false` before either Finance Manager or assigned-Clerk access is considered. The retained data has only `2` eligible customers, `7` eligible invoices, `7` eligible receipts and `5` eligible anchors. The mandatory first retained anchor is not policy-eligible. Meeting the gate's positive expectations would require a separately reviewed contract decision plus an unauthorized data or RLS change; neither was attempted.
+- **Mandatory cleanup:** all four tokens returned zero protected rows after exact role/assignment deletion. Global sign-out produced no failure; all four exact Auth users were permanently deleted; all four refresh attempts failed and all twelve old-token protected reads returned zero. Passwords/tokens were erased and the runner directory was removed.
+- **Independent postcheck:** ephemeral users/sessions/roles/assignments and temporary Storage ownership are all zero; existing Auth/role/assignment fingerprints match; company count is one; business graph/counts/totals and Storage count/fingerprint match the pre-run state.
+- **Decision:** `B9DE-E1-002` remains **PARTIALLY RESOLVED / NOT CLOSED** because eight required positive RLS assertions failed. `B9DE-E1-004` remains **High / OPEN**. Gate E2 remains unauthorized. No source, schema, policy, data, Storage, migration, deployment, stage, commit or push change was made.
+
+### 19.3 Corrected visibility-contract lifecycle — PASS and closure
+
+This checkpoint supersedes §19.2 as the current `B9DE-E1-002` decision while retaining prior attempts as historical fail-safe and stale-expectation evidence.
+
+- **Authoritative contract:** installed `rls_can_access_customer`, `cust_select`, `inv_select`, `rct_select`, Migration 015, 015b tests, backend visibility helpers and current requirements agree that hidden/deleted customers are excluded before Finance Manager or Clerk authorization. Assignment never overrides that boundary.
+- **Physical versus operational state:** physical retained state remains 179 rows with the accepted database hash. Operational policy eligibility is customers/invoices/receipts/anchors `2/7/7/5`. The two eligible-customer coverage vectors are `1/6/7/4` and `1/1/0/1`.
+- **Deterministic assignment:** ordering by anchor count, invoice count, receipt count, then UUID selected customer hash `cdb24c3bfeae8c95796397752131de8f42c0c9a894d45bf87da545d512584c1b`, with exact coverage `1/6/7/4`.
+- **Sanitized run:** run-ID SHA-256 `bff6dff0bdb4c8c8c2c19994d598911cde05f1d359943da0ff9fe70991732c03`; four sanitized user-ID hash prefixes: general `4081e2d9e164`, Finance `e747ab85ac7f`, assigned Clerk `c14691c802c5`, unassigned Clerk `c818a74e5b54`. Exactly four users, three roles and one assignment were created; all pre-login assertions passed.
+- **Runtime:** all four logins passed. General returned `0/0/0` and role `0`. Finance returned `2/7/7`, five anchors, role `1`, out-of-company `0`, and all hidden/deleted customer/document controls `0`. Assigned Clerk returned `1/6/7`, four anchors, assigned customer `1`, outside eligible customer/documents `0`, hidden/deleted controls `0`, role/assignment `1/1`. Unassigned Clerk returned `0/0/0`, role/assignment `1/0`.
+- **Cleanup:** exact assignment and roles were deleted; all four existing tokens then returned zero protected rows. Global sign-out passed, all four users were permanently deleted, four refresh attempts failed, and twelve old-token protected reads returned zero. Passwords/tokens were erased and the temporary runner directory was removed.
+- **Independent postcheck:** ephemeral users/sessions/roles/assignments/temporary Storage ownership are all zero; existing identity counts/fingerprints remain `5/5/2` and unchanged; company count is one; business graph/hash/counts/totals and Storage count/hash are unchanged; former 128/922 cohorts remain zero.
+- **Decision:** `B9DE-E1-002` is **CLOSED**. `B9DE-E1-004` remains **High / OPEN** and Gate E2 remains unauthorized. No RLS, grant, schema, retained-data, Storage, migration, deployment, stage, commit or push change occurred.
+
+### 19.4 Final repeated read-only closure gate — credential incident closed; RLS blocker found
+
+- **Date/target:** 2026-07-23, Production `kusseuycqgdilychphpq`, company `00000000-0000-0000-0000-000000000001`; local `main`/HEAD/origin/ahead/behind/staged remained exact.
+- **Credential closure:** the owner attests the disclosed PAT was revoked and not reused, the dedicated ephemeral Secret key was deleted, both temporary environment variables were cleared and the bounded PowerShell session was closed. Repository/relevant-Batch scans found zero PAT/Secret/service-role/JWT/private-key/Authorization/full-synthetic-email values; no runner remains. `B9DE-E1-004` is **CLOSED**.
+- **Accepted identity proof:** the corrected lifecycle and its accepted independent evidence-based closure review remain PASS; `B9DE-E1-002` stays **CLOSED**, with Auth/roles/assignments `5/5/2` and ephemeral users/sessions/roles/assignments `0/0/0/0`.
+- **Fresh after-state:** anchors/hashes `10/10`, graph `179`, exact database/Storage hashes, business counts and exact monetary totals match; deletion-manifest, former 128/922 and approved Storage-delete populations remain zero. Raw document difference is `3 / 1701.00`, fully explained as Draft `2 / 1700.00` plus Cancelled `1 / 1.00`; raw receipt difference is Bounced `1 / 1.00`; unexplained document/receipt differences are both `0 / 0.00`. All allocation, journal, reversal, rate/base/FX, tenant and orphan anomaly counts are zero.
+- **RLS result:** 20 reviewed AR tables have RLS and policies; the three customer/document SELECT policies and `rls_can_access_customer` retain the accepted hidden/deleted and assignment contract, with unchanged function hash. However, `public.user_roles` has policy `Temp Allow All`, applied to `authenticated` for `SELECT` with `USING (true)`, and `authenticated` has table SELECT. Unconditional policy count is therefore `1`, not `0`. New finding `B9DE-E1-005` is **High / OPEN**.
+- **Migration/readiness:** Migration 027 remains `MISSING`: all six routines absent, catalog conflicts zero, required columns present and data-assumption violations zero. Four Batch 9D-D Phase A files remain byte-identical to HEAD; the candidate contract passes `12/12`; `/allocations/auto` remains disabled.
+- **Decision:** `B9DE-E1-004` closes, but the new High finding prevents whole-gate closure. `B9DE-E1-001` remains open by the whole-gate rule. Gate 9D-E1 remains **NO-GO** and Gate 9D-E2 remains unauthorized. No Production mutation, Auth action, Storage write, migration, deployment, stage, commit or push occurred.
+
+### 19.5 `B9DE-E1-005` bounded RLS remediation and final whole-gate closure — PASS
+
+- **Contract and mode:** Migration 006 and current server/frontend access patterns make `ur_select` the
+  authoritative self-or-active-same-company role visibility policy. Mode A removed only
+  `public.user_roles."Temp Allow All"`; no replacement or new authorization semantic was introduced.
+- **Operator:** one short transaction, local timeouts, transaction advisory lock, exact legacy signature,
+  RLS/grant/source-policy guards and before/after policy/grant/helper fingerprints. Catalog drift raises
+  and rolls back; a remediated rerun is assertion-only.
+- **Local proof:** operator contract `9/9`, Deno format/check PASS. The operator contains no row DML,
+  replacement policy, grant change, RLS toggle, other-policy action or wildcard drop.
+- **Runtime proof:** rollback-only candidate and installed-state `authenticated` exact-set comparisons
+  passed for all five existing identities. Each active member matched the five-row same-company source
+  scope; a random user and every random-company predicate returned zero.
+- **Catalog after-state:** target `0`; reviewed/enabled/with-policy `20/20/20`; unconditional exposed
+  SELECT/write `0/0`; core policy/helper calls `3/3`; `rls_can_access_customer` and all other policy,
+  grant and helper fingerprints unchanged.
+- **Immutable state:** anchors/hashes `10/10`, graph `179`, exact database and six-object Storage hashes,
+  exact monetary totals, unexplained mismatch `0/0.00`, financial/orphan anomalies zero, identity
+  companies/Auth/roles/assignments `1/5/5/2`, ephemeral residue `0/0/0/0`, former cohorts `0/0`.
+- **Readiness:** Migration 027 remains `MISSING`, routines `0/6`, conflicts/missing columns/assumption
+  violations `0/0/0`. Batch 9D-D Phase A files remain byte-identical to HEAD, candidate contract `12/12`,
+  and `/allocations/auto` remains disabled.
+- **Decision:** `B9DE-E1-005` is **CLOSED**; 002–004 remain CLOSED; `B9DE-E1-001` closes under the
+  whole-gate rule. Gate 9D-E1 is **PASS / GO**. Gate 9D-E2 remains **NOT AUTHORIZED — requires separate
+  user approval**. Migration 027, deployment, stage, commit and push were not performed.

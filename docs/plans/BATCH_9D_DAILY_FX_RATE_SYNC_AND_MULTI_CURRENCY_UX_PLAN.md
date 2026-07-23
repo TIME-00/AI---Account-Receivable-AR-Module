@@ -62,8 +62,69 @@
 > §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
 > history and is **not** erased.
 
-### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-20 - Batch 9D-D source implementation, local validation, Migration 030 staging runtime, allocations candidate route staging runtime, credential remediation, daily-overdue fail-closed remediation, Codex self-validation, Claude independent source review, and Claude independent staging closure confirmation are PASS. No Critical or High finding remains. The sole Medium documentation undercount is corrected to exactly three controlled `0.01` records, all `Reversed` with reversal timestamp, reason, and actor; zero active gate allocation remains and financial arithmetic reconciles. Production is NOT STARTED. Batch 9D-D is now FULLY CLOSED and committed locally as BATCH_9D_D_CODE_COMMIT `233005146f7e9551e45fc437fc7fcade678a9f62`; local `main` is ahead of `origin/main` by exactly one commit, and the Batch 9D-E planning documentation is present but UNCOMMITTED. The future BATCH_9D_E_ROLLOUT_HEAD is SYMBOLIC: it is resolved operationally from the clean local Git HEAD after the authorized planning commit and captured in Gate 9D-E1 execution evidence, never written back into its own commit, and no extra identity-recording commit is required. Frontend production deployment is NOT AUTHORIZED. Push is NOT AUTHORIZED because GitHub main may trigger a Vercel production deployment. Batch 9D-E is in DETAILED PLANNING; see §0.8 and `docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md`.)
+### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-23 - Batch 9D-D remains fully closed at local commit `233005146f7e9551e45fc437fc7fcade678a9f62`; the Batch 9D-E planning commit is `c24249f037164edd8e08b3cf15f7180973a78c4d`, with local `main` ahead two and behind zero. The separately authorized `B9DE-E1-005` gate removed only the exact Production policy `public.user_roles."Temp Allow All"` in guarded Mode A. Existing source-backed `ur_select` remained unchanged; rollback-only and installed-state authenticated exact-set simulations passed for all five existing identities, random user/company results were zero, and the complete 20-table catalog scan now returns unconditional SELECT/write `0/0` with no policy, grant or helper drift. F3-P4 retained state remains exact: anchors/hashes `10/10`, graph `179`, accepted database and Storage hashes, exact monetary totals, zero former 128/922 populations, zero unexplained financial mismatch and zero ephemeral residue. Findings `B9DE-E1-001` through `B9DE-E1-005` are CLOSED and Gate 9D-E1 is PASS / GO. Gate 9D-E2 remains NOT AUTHORIZED and requires separate user approval. Migration 027, deployment, stage, commit and push were not performed. See §0.8, `docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md`, the B9DE-E1-005 runbook and E1 evidence §27.)
 
+> **Rev 3.6 identity-readiness override (2026-07-22):** the owner approved an ephemeral four-identity
+> create/authenticate/read-only-test/destroy strategy to replace long-lived existing-account credential
+> custody. The first bounded execution attempt stopped before creating any identity: the available
+> Supabase connector exposed no supported Auth Admin lifecycle operation, no safely injected
+> non-compromised server-side Admin credential was available to the volatile runner, and browser
+> automation was unavailable. Direct `auth.users` DML and the disclosed PAT were not used. Production
+> identities, business data and Storage remained unchanged. `B9DE-E1-002` remains PARTIALLY RESOLVED
+> until a fresh supported Admin-interface lifecycle completes; `B9DE-E1-004` remains High/OPEN and Gate
+> E2 remains unauthorized. See the rollout plan §19, E1 evidence §21 and the ephemeral identity runbook.
+>
+> A second separately authorized attempt received both named process environment variables and built the
+> bounded server-side runner. Git and the immutable Production baseline matched, and the temporary runner
+> passed syntax and credential-literal checks. The normalized credential type was still unsupported, and
+> the mandatory read-only `auth.admin.listUsers` capability probe failed locally before an HTTP request
+> could be constructed. The runner therefore created no run ID, user, role, assignment, session or token;
+> its outer `finally` removed `frontend/.codex-tmp/`. This is not runtime RLS evidence and does not close
+> `B9DE-E1-002`. `B9DE-E1-004` remains separate High/Open and Gate E2 remains unauthorized.
+>
+> **Third execution checkpoint (2026-07-22; supersedes the two failed-safe attempts as current evidence):**
+> the dedicated modern Secret key passed the server-side Admin probe. Exactly four ephemeral identities
+> were created and authenticated, and general/unassigned denial, cleanup, session revocation, refresh
+> rejection and old-token negative reads all passed. Required positive RLS coverage did not: Finance
+> Manager saw `2/7/7` customers/invoices/receipts and `5/10` anchors, while the assigned Clerk saw
+> `0/0/0` instead of `1/2/2`. Installed `rls_can_access_customer` excludes hidden/deleted customers;
+> only `2/7/7` rows and five anchors are policy-eligible, and the mandatory first anchor is ineligible.
+> All four users, three roles and one assignment were then deleted with zero residue; business, Storage
+> and existing-identity fingerprints remained unchanged. `B9DE-E1-002` remains NOT CLOSED,
+> `B9DE-E1-004` remains High/Open, and Gate E2 remains unauthorized.
+>
+> **Corrected closure checkpoint (2026-07-22; authoritative):** Phase A reconciled Migration 015,
+> installed policies/functions, 015b tests, backend visibility helpers and current plans: hidden/deleted
+> customers are excluded before Finance Manager or Clerk authorization. Physical retention `179` and
+> operational visibility are distinct. Eligible coverage is `2/7/7/5`; deterministic selection by
+> anchors/invoices/receipts/UUID produced `1/6/7/4`. A fresh four-identity lifecycle passed every login,
+> corrected Finance/Clerk RLS assertion, hidden/deleted negative control, general/unassigned denial,
+> cleanup, refresh rejection and old-token negative read. Independent scans found zero residue and
+> unchanged identity/business/Storage fingerprints. `B9DE-E1-002` is **CLOSED**. `B9DE-E1-004` remains
+> High/Open and Gate E2 remains unauthorized.
+>
+> **Final repeated closure gate (2026-07-23; authoritative):** the owner attests that the disclosed PAT
+> was revoked, the dedicated ephemeral Secret key was deleted, both temporary environment variables were
+> cleared and the bounded PowerShell session was closed. Non-`social-media/` tracked files plus relevant
+> Batch artifacts contain zero credential/JWT/private-key/Authorization/full-synthetic-email values, and
+> no runner remains; `B9DE-E1-004` is **CLOSED**. Production business, financial, Storage, identity,
+> lifecycle, orphan and Migration 027 readiness checks remain exact. However, fresh catalog inspection
+> found `public.user_roles` policy `Temp Allow All`, applied to `authenticated` for `SELECT` with
+> `USING (true)` while `authenticated` retains table `SELECT`. This violates the tenant-bound policy
+> contract. `B9DE-E1-005` is **High / OPEN**, `B9DE-E1-001` stays open under the whole-gate rule, Gate E1
+> remains **NO-GO**, and Gate E2 remains unauthorized. No Production or Storage mutation occurred.
+>
+> **B9DE-E1-005 bounded remediation and whole-gate closure (2026-07-23; authoritative current):**
+> source review confirmed `ur_select` already enforces self-or-active-same-company visibility and does not
+> require unrestricted enumeration. A guarded, idempotent Mode A operator removed only `Temp Allow All`;
+> no replacement, grant, helper, other-policy or row change occurred. Rollback-only and installed-state
+> authenticated exact-set tests passed for all five identities; random user/company results were zero.
+> Twenty reviewed tables remain RLS-enabled with policies; unconditional exposed SELECT/write is `0/0`.
+> Business graph/hash/totals, Storage and identity state remain exact, Migration 027 remains missing, and
+> the Batch 9D-D candidate contract remains `12/12` with auto allocation disabled. `B9DE-E1-005` and
+> `B9DE-E1-001` are now **CLOSED**; findings 002–004 remain CLOSED. Gate 9D-E1 is **PASS / GO**. Gate
+> 9D-E2 remains separately unauthorized.
+>
 > **This block is the single authoritative current-state statement for Batch 9D and supersedes any
 > "9D-B not yet implemented / pending plan review / implementation approval not granted" wording elsewhere
 > in this document, which is retained only as clearly labeled Historical / Superseded record.**
@@ -184,24 +245,84 @@
 >   (`d5c9c0a0125b7ab0cb0b767424a4a2b8e01ab87d`) by exactly **one** commit, behind by zero; 0 staged,
 >   0 unstaged tracked; **no tracked planning delta yet**; 18 unrelated untracked files under
 >   `social-media/`.
-> - **Current planning worktree (state now, before any planning commit):** local `main` still at
->   `233005146f7e9551e45fc437fc7fcade678a9f62`, ahead 1 / behind 0; **0 staged**; **one modified tracked
->   file** (this Batch 9D master plan); **one untracked file**
->   (`docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md`); and 18 unrelated untracked files under
->   `social-media/`. **The worktree is therefore NOT limited to 18 untracked `social-media/` files** —
->   the Batch 9D-E planning documentation is present and uncommitted.
-> - **After the future authorized planning commit**, the worktree is expected to be tracked-clean
->   (0 staged, 0 unstaged tracked, `social-media/` untracked only). **No documentation update is required
->   to record the rollout HEAD** — Gate 9D-E1 resolves it at runtime and records it in the E1 execution
->   report and evidence artifact.
+> - **The Batch 9D-E planning commit is COMPLETED** at
+>   `c24249f037164edd8e08b3cf15f7180973a78c4d` (`docs(plan): finalize Batch 9D-E production rollout
+>   plan`). `BATCH_9D_D_CODE_COMMIT` is its ancestor and only approved planning documentation appears
+>   between them. Local `main` is **ahead 2 / behind 0** and **0 staged**. The historical Gate E1 entry
+>   had 0 unstaged tracked paths; the **current F3 documentation-remediation worktree has two modified
+>   tracked plan files** plus the untracked Batch 9D-E1 evidence and F3 plan, and 18 unrelated untracked
+>   `social-media/` paths. **No documentation update was required to record the rollout HEAD** — Gate 9D-E1
+>   resolved it at runtime and recorded it in the E1 execution evidence.
+> - **Gate 9D-E1 was EXECUTED read-only and returned `NO-GO — BATCH 9D-E1 PRODUCTION PREFLIGHT
+>   BLOCKED`.** Gate 9D-E1A then returned `PASS — BATCH 9D-E1A READ-ONLY BLOCKER DIAGNOSIS COMPLETE`.
+>   A later separately authorized F3-P4 exact-manifest database and Storage reset completed on 2026-07-21.
+>   F3-P5 then repeated the complete affected E1 financial, integrity, tenant-structure and readiness
+>   preflight read-only. Its technical financial result passed, but the repeated gate remains NO-GO because
+>   identity credential custody is unattested and a disclosed Supabase personal access token has not been
+>   proven revoked. Evidence: `docs/evidence/SPRINT_BATCH_9D_E1_PRODUCTION_READ_ONLY_PREFLIGHT_EVIDENCE.md`
+>   §§13–20.
+> - **Current E1 finding status:**
+>   - **`B9DE-E1-001` (High) — OPEN by the whole-gate closure rule; technically remediated.** The former
+>     128 defective `Paid` and 922 non-retained header-only `Open` populations remain absent after the
+>     authorized F3-P4 reset. F3-P5 recomputed the complete retained financial population with exact
+>     `NUMERIC` arithmetic and found zero unexplained document or receipt mismatch. The finding remains
+>     formally open only because the governing rule closes it on a complete repeated E1 PASS, which is
+>     still blocked by finding 004.
+>   - **`B9DE-E1-002` (material Medium) — tenant/identity readiness: CLOSED.** T1 remains accepted and a
+>     second Production tenant is not required. The corrected ephemeral four-identity lifecycle proved
+>     authentication, policy-eligible Finance/Clerk visibility, hidden/deleted exclusion, general and
+>     unassigned denial, exact destruction, refresh rejection, old-token denial and zero residue.
+>   - **`B9DE-E1-003` (material Medium) — Vercel environment-variable names: CLOSED** by sanitized
+>     manual name-only verification. All four required Production variable names were verified
+>     **PRESENT** with Production target **YES** (project `account-receivable-module`, Production target
+>     filter, 2026-07-20 18:56 MYT, project owner). **No value was opened, copied, expanded, exported or
+>     recorded.** The earlier connector limitation is **not** evidence of variable absence. Evidence:
+>     `docs/evidence/SPRINT_BATCH_9D_E1_PRODUCTION_READ_ONLY_PREFLIGHT_EVIDENCE.md` §16.
+>   - **`B9DE-E1-004` (High) — personal access token disclosure: OPEN.** A Supabase personal access
+>     token was disclosed in conversation before F3-P5. It was not used or copied into Git evidence;
+>     revocation/replacement and old-token rejection remain unverified and require separate authority.
+> - **Migration 027 is NOT technically blocked by the 128 rows.** It does not validate the settlement
+>   equation, does not rewrite those rows, and would install successfully assuming its ordinary schema
+>   prerequisites pass. The rows nevertheless **block overall E1 financial certification**. Applying
+>   Migration 027 remains unauthorized.
+> - **T1 — STRUCTURAL PRODUCTION + STAGING RUNTIME PROOF — is the accepted, recommended
+>   tenant-assurance model.** Production legitimately has one active company; **a second production
+>   company must not be created solely for testing**. Structural production RLS/ACL/predicate/boundary
+>   proof plus zero ownership anomalies plus the accepted **staging** two-company runtime evidence
+>   substitute for a production tenant pair — and that staging evidence is **never** described as
+>   production runtime evidence. The authoritative production smoke identity set is **exactly four**:
+>   authenticated general user, Finance Manager, assigned AR Clerk, unassigned AR Clerk. **No production
+>   cross-tenant identity pair is required**, and **no second production company or user is created.
+>   No login, user creation, password reset, or identity mutation is authorized.**
+> - **Vercel name-only verification is COMPLETE** — all four required Production variable names verified
+>   **PRESENT** with Production target **YES**, recorded as name / presence / Production target / time /
+>   sanitized reviewer role only. **No value, prefix, hash, screenshot, or export was requested or
+>   recorded.** `NEXT_PUBLIC_DEMO_USER_ROLE` and `NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID` are outside this
+>   checkpoint and were neither verified nor changed.
+> - **Gate 9D-E2 remains UNAUTHORIZED** and must not begin until `B9DE-E1-001` closes through a whole-gate
+>   E1 PASS, `B9DE-E1-002` remains closed, `B9DE-E1-003` remains closed,
+>   `B9DE-E1-004` is remediated, and a later **repeated Gate 9D-E1 produces PASS**. The vulnerable production
+>   `daily-overdue` bundle remains a mandatory first-order E2 security remediation.
+> - **F3 remediation track (governing plan plus local implementation checkpoint; authorizes no Production action):**
+>   `docs/plans/BATCH_9D_E1_F3_PRODUCTION_FINANCIAL_REMEDIATION_PLAN.md` — F3-P1 (read-only provenance
+>   discovery) → F3-P2 (remediation-plan approval) → F3-P3 (local implementation) → optional F3-P3S
+>   (separately authorized schema-only prerequisite, zero cohort mutation) → F3-P4 (data-only controlled
+>   production execution, separate explicit authorization) → F3-P5
+>   (repeated E1). Provenance outcomes P1–P5 with a deterministic treatment each; **no invented
+>   receipts, allocations, discounts, journals or users**; where provenance cannot be established,
+>   production remediation stays **blocked**.
+> - **Current state:** F3-P1/P2/P3 completed; the owner selected P1 synthetic/demo treatment; the
+>   independently reviewed F3-P4 exact-manifest Production reset completed; and F3-P5 completed its
+>   authorized read-only technical checks. The repeated gate remains NO-GO for the two governance/security
+>   blockers above. No further gate is authorized.
 > - The 18 `social-media/` paths are **unrelated to Batch 9D and must not be staged, edited, moved,
 >   deleted, or included in any Batch 9D commit**.
 > - **Push is NOT AUTHORIZED.** Pushing GitHub `main` may automatically trigger a Vercel production
 >   frontend deployment, and the committed frontend depends on `GET /allocations/candidates`, which is
 >   not yet available in production.
-> - **Production rollout is NOT STARTED.** No production migration, deployment, secret, key, scheduler
->   or Vercel action has occurred.
-> - **Batch 9D-E is in DETAILED PLANNING (planning and documentation only).** The plan is
+> - **The Batch 9D-E backend rollout is NOT STARTED.** F3-P4 was an isolated test-data reset; no production
+>   migration, deployment, secret, key, scheduler or Vercel action has occurred.
+> - **Batch 9D-E remains at E1 NO-GO after read-only preflight and local F3 planning/implementation.** The plan is
 >   `docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md`. It grants **no** authorization; it proposes four
 >   future gates (9D-E1 read-only preflight → 9D-E2 backend rollout → 9D-E3 push and frontend deployment
 >   → 9D-E4 scheduler decision and closure) and requires the **entire backend rollout to complete before
@@ -227,18 +348,24 @@
 >   mutation) and B2 (separately authorized manual sync); removes wording that could have made Migration
 >   022's expected governance rows trigger a false NO-GO; and corrects the migration DML classification to
 >   distinguish migration-time DML from stored-function-body DML.
-> - **Rev 3.1 (current) corrects one Git self-reference defect only.** Rev 3 required the planning
+> - **Rev 3.1 corrected one Git self-reference defect only.** Rev 3 required the planning
 >   commit's SHA to be written back into the same documents that commit contains, which is unsatisfiable
 >   (each write changes the documents and produces a new SHA). Rev 3.1 makes `BATCH_9D_E_ROLLOUT_HEAD`
 >   **symbolic in the committed plans** and resolves it operationally at Gate 9D-E1 from
 >   `git rev-parse HEAD`, capturing it in E1 execution evidence rather than in Git. **All Rev 2 and Rev 3
 >   security, financial, migration, function, scheduler and rollback corrections are preserved unchanged.**
-> - **The Batch 9D-E plan is NOT yet independently approved and must NOT be described as
->   implementation-ready** until the remediation passes the next independent review.
-> - **Current next gate: one consolidated final independent Codex read-only confirmation of the
->   corrected (Rev 3.1) Batch 9D-E production rollout plan.** Production, push, migration, deployment,
->   credentials, and schedulers remain unauthorized until that confirmation passes and a specific gate is
->   separately approved. **The Batch 9D-E planning commit is itself not yet authorized.**
+> - **The Batch 9D-E plan reached Rev 3.5.** Rev 3.2 added the post-execution amendments recorded above:
+>   the Migration 027 correction, the T1 tenant-assurance criteria, the Vercel name-only checkpoint,
+>   and the F3 blocker status. Rev 3.3 adds the exact F3 manifest/Decimal/locking/P2-explained-state/
+>   RLS/test/P3S technical contract. Rev 3.4 records F3-P4; Rev 3.5 records the F3-P5 financial PASS and
+>   overall E1 NO-GO. The Batch 9D-E Production rollout remains **NOT** implementation-ready.
+> - **F3-P4 is COMPLETE and F3-P5 financial/integrity certification PASSED.** Exact retained state,
+>   monetary totals, lifecycle explanations, Storage, tenant structure, RLS, dependencies and Migration 027
+>   readiness all pass. `B9DE-F3-P1-001` is closed.
+> - **Overall E1 remains NO-GO.** Four-identity credential custody lacks explicit owner attestation and
+>   the disclosed personal access token lacks verified revocation. Resolve those under separate authority,
+>   then repeat E1 read-only. **Gate 9D-E2, push, deployment, migrations, identities, schedulers and any
+>   further Production mutation remain unauthorized.**
 
 ### 0.1 Batch 9D-A closure status
 
@@ -465,10 +592,25 @@ reference-sync smoke; production booking-governance verification where applicabl
 production smoke; **zero financial regression** verification; rollback/containment plan; final production
 evidence. **No production deployment occurs in this task.**
 
-**Detailed plan (2026-07-20, Rev 3.1 — remediated twice plus one micro identity correction, awaiting final
-independent confirmation):**
+**Detailed plan (2026-07-21, Rev 3.5 — F3-P5 financial/integrity certification passed; repeated Gate 9D-E1 remains `NO-GO`; finding statuses: 001 OPEN by whole-gate rule, 002 PARTIALLY RESOLVED, 003 CLOSED, 004 High/OPEN):**
 `docs/plans/BATCH_9D_E_PRODUCTION_ROLLOUT_PLAN.md` — planning-only, granting no authorization, and
-**not to be described as implementation-ready until the next independent review passes**. Rev 1 received
+**not to be described as implementation-ready**. Rev 3.2 added the post-execution amendments: the
+Migration 027 correction (the 128 rows do not technically block it), the **T1** tenant-assurance criteria
+(no second production company), the Vercel name-only checkpoint, and the F3 blocker status. Rev 3.3 adds
+the F3 exact-manifest, Decimal, atomic-locking, strict explained-state, RLS/ACL, test-matrix and optional
+schema-prerequisite contracts without authorizing any gate.
+
+**F3 remediation track (2026-07-21, Rev 2 plus execution checkpoints — F3-P4 and F3-P5 completed; authorizes nothing further):**
+`docs/plans/BATCH_9D_E1_F3_PRODUCTION_FINANCIAL_REMEDIATION_PLAN.md` — F3-P1 read-only provenance
+discovery → F3-P2 remediation-plan approval → F3-P3 local implementation → optional separately authorized
+F3-P3S schema prerequisite → F3-P4 data-only controlled production execution under separate explicit
+authorization → F3-P5 repeated E1, with a
+P1–P5 provenance decision tree with one deterministic treatment each, and an implementation safety
+contract. **No invented receipts, allocations, discounts, journals or users.** Where provenance cannot be
+established, production remediation remains **blocked** — the rows are never excluded from the financial
+gate to obtain a PASS.
+
+Rev 1 received
 `RETURN TO CLAUDE CODE — BATCH 9D-E PLAN REMEDIATION REQUIRED`; Rev 2 closes findings `B9DE-PR-001`
 through `B9DE-PR-010`.
 
