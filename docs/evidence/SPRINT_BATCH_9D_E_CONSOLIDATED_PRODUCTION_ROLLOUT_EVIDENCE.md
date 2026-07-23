@@ -137,6 +137,20 @@ The rollout commit was pushed non-force to `origin/main`. Vercel Production depl
 four required Production environment names were present and no value was inspected or recorded. Vercel
 reported no runtime error cluster in the rollout verification window.
 
+The first closure-documentation push surfaced a fresh dependency advisory summary from GitHub. A local
+registry audit confirmed actionable High findings in the deployed frontend dependency tree. The gate did
+not ignore or defer them. A bounded security recovery upgraded `next` and `eslint-config-next` from
+`15.5.19` to `15.5.21`, applied npm's non-breaking transitive fixes, and pinned only Next's vulnerable
+child resolutions to `postcss 8.5.10` and `sharp 0.35.0`. No application behavior or product feature was
+changed.
+
+The recovery commit is `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05`. Post-fix audit reported
+zero vulnerabilities. Lint, type-check, `28/28` test files, `530/530` tests and the Production build all
+passed. Vercel Production deployment `dpl_G8BMC3UMatggS6Y79WfzgiiBBCyV` reached `READY` from that exact
+commit; the canonical login route returned HTTP 200 and Vercel reported no runtime errors in the
+post-deployment window. Backend Edge bundle provenance remains the frozen rollout candidate because this
+recovery changed only frontend dependency manifests.
+
 A fresh four-identity run used one run ID; its sanitized run hash was
 `3fd3c3806374aa2bfa6cc18545d11848070da54751e4757d3e7476d5f233c086`. Exactly four confirmed users,
 three roles and one assignment were provisioned. All four authenticated.

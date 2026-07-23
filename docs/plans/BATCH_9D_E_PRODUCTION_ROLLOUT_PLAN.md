@@ -1629,6 +1629,10 @@ candidate was `c978bce5a14cc020ddbc349f7f91d08855006f2a`.
   scheduler is active at the locked cadence; no conflicting job exists.
 - `origin/main` and Vercel Production received the rollout candidate. Vercel deployment
   `dpl_J3g9cnk6LWPs6VgumHi6zqMnixWr` reached `READY` from the exact rollout SHA.
+- A later push receipt exposed current dependency advisories. The gate applied the bounded frontend
+  security recovery `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05`: Next.js patch-line upgrade plus
+  patched transitive/child resolutions only. Audit is zero, lint/type-check/tests/build pass, and Vercel
+  Production deployment `dpl_G8BMC3UMatggS6Y79WfzgiiBBCyV` is `READY` from the recovery commit.
 - A fresh four-identity Production run passed the corrected backend/RLS matrix and deployed-frontend
   route matrix. Exact cleanup left Auth/users/roles/assignments `5/5/2`, ephemeral residue zero, refresh
   reuse zero and old-token protected access zero.

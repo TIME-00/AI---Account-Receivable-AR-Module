@@ -64,6 +64,11 @@
 
 ### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-23 - Batch 9D is fully deployed to Production and pending only independent closure review. The consolidated 9D-E2/E3/E4 rollout candidate is `c978bce5a14cc020ddbc349f7f91d08855006f2a`. Production migrations 017–030 are installed, all 16 approved Edge Functions are active, the Vercel Production deployment from that SHA is healthy, the locked MAS provider and the single approved FX scheduler are operational, and no `daily-overdue` cron exists. A fresh corrected four-role smoke matrix passed on backend and deployed frontend and returned to zero identity residue. Final business counts and exact `NUMERIC` totals remain unchanged; the 179-row retained graph and six-object Storage fingerprint remain certified. Migration 022's expected 27-document governance backfill is recorded separately because its new columns and triggered `updated_at` changes make the pre-migration full-row JSONB hash non-comparable. RLS remains `20/20/20` with unconditional SELECT/write `0/0`, `Temp Allow All` absent and auto-allocation disabled. Gates 9D-E2, 9D-E3 and 9D-E4 and Batch 9D-E are closed. See the consolidated Production rollout evidence and Production FX scheduler runbook.)
 
+> **Final frontend security recovery (2026-07-23):** the rollout's backend bundle remains pinned to
+> `c978bce5a14cc020ddbc349f7f91d08855006f2a`; the final frontend runtime includes bounded dependency
+> remediation `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05`. Audit is zero and the corresponding Vercel
+> Production deployment is healthy. No application feature or business contract changed.
+
 > **Rev 3.6 identity-readiness override (2026-07-22):** the owner approved an ephemeral four-identity
 > create/authenticate/read-only-test/destroy strategy to replace long-lived existing-account credential
 > custody. The first bounded execution attempt stopped before creating any identity: the available
