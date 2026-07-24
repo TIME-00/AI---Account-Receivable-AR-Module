@@ -137,19 +137,20 @@ The rollout commit was pushed non-force to `origin/main`. Vercel Production depl
 four required Production environment names were present and no value was inspected or recorded. Vercel
 reported no runtime error cluster in the rollout verification window.
 
-The first closure-documentation push surfaced a fresh dependency advisory summary from GitHub. A local
-registry audit confirmed actionable High findings in the deployed frontend dependency tree. The gate did
-not ignore or defer them. A bounded security recovery upgraded `next` and `eslint-config-next` from
-`15.5.19` to `15.5.21`, applied npm's non-breaking transitive fixes, and pinned only Next's vulnerable
-child resolutions to `postcss 8.5.10` and `sharp 0.35.0`. No application behavior or product feature was
-changed.
+### Historical dependency-recovery checkpoint — superseded
 
-The recovery commit is `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05`. Post-fix audit reported
-zero vulnerabilities. Lint, type-check, `28/28` test files, `530/530` tests and the Production build all
-passed. Vercel Production deployment `dpl_G8BMC3UMatggS6Y79WfzgiiBBCyV` reached `READY` from that exact
-commit; the canonical login route returned HTTP 200 and Vercel reported no runtime errors in the
-post-deployment window. Backend Edge bundle provenance remains the frozen rollout candidate because this
-recovery changed only frontend dependency manifests.
+The first closure-documentation push surfaced a fresh dependency advisory summary from GitHub. A bounded
+recovery upgraded `next` and `eslint-config-next` from `15.5.19` to `15.5.21`, applied npm's non-breaking
+transitive fixes, and pinned Next's child resolutions to `postcss 8.5.10` and `sharp 0.35.0`. Recovery
+commit `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05` and Vercel deployment
+`dpl_G8BMC3UMatggS6Y79WfzgiiBBCyV` were healthy at runtime.
+
+The statement previously recorded here that this recovery produced a zero-vulnerability audit was
+incorrect. Independent closure review reproduced `2 High` findings for
+`GHSA-6g55-p6wh-862q`: the nested `next -> postcss` override forced vulnerable `postcss 8.5.10`, even
+though a safe top-level PostCSS existed. This historical result is retained for traceability and is
+superseded by the remediation checkpoint in §9. Backend Edge bundle provenance remains the frozen
+rollout candidate because both dependency recovery and remediation are frontend-only.
 
 A fresh four-identity run used one run ID; its sanitized run hash was
 `3fd3c3806374aa2bfa6cc18545d11848070da54751e4757d3e7476d5f233c086`. Exactly four confirmed users,
@@ -212,3 +213,22 @@ remains. No second company, permanent smoke identity, automatic allocation, `dai
 staging action, unrelated feature or credential artifact was introduced.
 
 `PASS  BATCH 9D-E CONSOLIDATED PRODUCTION ROLLOUT AND FINAL VERIFICATION COMPLETE`
+
+## 9. PostCSS independent-review remediation checkpoint — 2026-07-24
+
+Independent review reproduced both lockfile-only and installed-tree audits at `2 High`, with the vulnerable
+path `next 15.5.21 -> postcss 8.5.10`. Removing only the override (preferred Mode A) was tested first, but
+Next resolved its declared child dependency to vulnerable `postcss 8.4.31`; Mode A therefore could not
+satisfy the advisory boundary.
+
+The exact compatible fallback (Mode B) pins only Next's PostCSS child to `8.5.19` and retains the accepted
+Next `15.5.21` and Sharp `0.35.0` resolutions. The final tree contains Next's child at `8.5.19` and all
+other PostCSS paths deduplicated at `8.5.22`; no installed PostCSS is `<= 8.5.11`, and there is no invalid,
+extraneous or unmet dependency.
+
+Both `npm audit --package-lock-only --json` and `npm audit --json` now report total/critical/high/moderate/low
+`0/0/0/0/0`. ESLint, TypeScript, `28/28` test files, `530/530` tests and the Production build pass. This
+checkpoint changes only `frontend/package.json`, `frontend/package-lock.json` and closure documentation.
+It performs no database, migration, RLS, Edge Function, secret, FX scheduler, Auth, Storage or business-data
+operation. Commit, Vercel Production deployment and final sanitized deployment evidence follow in the
+authorized remediation gate.

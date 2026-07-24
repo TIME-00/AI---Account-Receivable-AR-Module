@@ -62,13 +62,16 @@
 > §20, **§0 governs** and the earlier ordering is marked superseded. Earlier content is retained for
 > history and is **not** erased.
 
-### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-23 - Batch 9D is fully deployed to Production and pending only independent closure review. The consolidated 9D-E2/E3/E4 rollout candidate is `c978bce5a14cc020ddbc349f7f91d08855006f2a`. Production migrations 017–030 are installed, all 16 approved Edge Functions are active, the Vercel Production deployment from that SHA is healthy, the locked MAS provider and the single approved FX scheduler are operational, and no `daily-overdue` cron exists. A fresh corrected four-role smoke matrix passed on backend and deployed frontend and returned to zero identity residue. Final business counts and exact `NUMERIC` totals remain unchanged; the 179-row retained graph and six-object Storage fingerprint remain certified. Migration 022's expected 27-document governance backfill is recorded separately because its new columns and triggered `updated_at` changes make the pre-migration full-row JSONB hash non-comparable. RLS remains `20/20/20` with unconditional SELECT/write `0/0`, `Temp Allow All` absent and auto-allocation disabled. Gates 9D-E2, 9D-E3 and 9D-E4 and Batch 9D-E are closed. See the consolidated Production rollout evidence and Production FX scheduler runbook.)
+### 0.0 AUTHORITATIVE CURRENT STATE (updated 2026-07-24 - Gates 9D-E2/E3/E4 were executed and the Production rollout remains deployed. Independent review found that the prior frontend recovery had forced vulnerable `postcss 8.5.10` and that the recorded audit-zero statement was incorrect. The remediation gate now resolves Next 15.5.21 to PostCSS 8.5.19, keeps Sharp 0.35.0, resolves other PostCSS paths at 8.5.22, and passes lockfile and installed-tree audits, lint, type-check, 28/28 test files, 530/530 tests and Production build. The corrected frontend is pending its exact remediation commit and Production redeployment before final independent remediation closure review. The backend rollout candidate remains `c978bce5a14cc020ddbc349f7f91d08855006f2a`; migrations 017–030, all 16 Edge Functions, the locked MAS provider and the single approved FX scheduler remain deployed, and no `daily-overdue` cron exists. The accepted role smoke returned to zero identity residue. Business counts and exact `NUMERIC` totals, the 179-row retained graph, six-object Storage fingerprint, RLS `20/20/20`, unconditional SELECT/write `0/0`, absent `Temp Allow All` and disabled auto-allocation remain the accepted backend baseline. Batch 9D is Production-deployed and awaits only completion of this frontend redeployment plus final independent remediation closure review. See the consolidated Production rollout evidence and Production FX scheduler runbook.)
 
-> **Final frontend security recovery (2026-07-23):** the rollout's backend bundle remains pinned to
-> `c978bce5a14cc020ddbc349f7f91d08855006f2a`; the final frontend runtime includes bounded dependency
-> remediation `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05`. Audit is zero and the corresponding Vercel
-> Production deployment is healthy. No application feature or business contract changed.
+> **Historical frontend security recovery (2026-07-23; superseded):** the rollout's backend bundle
+> remained pinned to `c978bce5a14cc020ddbc349f7f91d08855006f2a`; frontend recovery
+> `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05` deployed successfully, but its nested
+> `next -> postcss 8.5.10` override remained vulnerable. The former audit-zero claim was incorrect and
+> is superseded by the 2026-07-24 remediation checkpoint above.
 
+> **Historical Gate E1 chronology (superseded by the 2026-07-24 current-state paragraph above):**
+>
 > **Rev 3.6 identity-readiness override (2026-07-22):** the owner approved an ephemeral four-identity
 > create/authenticate/read-only-test/destroy strategy to replace long-lived existing-account credential
 > custody. The first bounded execution attempt stopped before creating any identity: the available
@@ -85,7 +88,8 @@
 > the mandatory read-only `auth.admin.listUsers` capability probe failed locally before an HTTP request
 > could be constructed. The runner therefore created no run ID, user, role, assignment, session or token;
 > its outer `finally` removed `frontend/.codex-tmp/`. This is not runtime RLS evidence and does not close
-> `B9DE-E1-002`. `B9DE-E1-004` remains separate High/Open and Gate E2 remains unauthorized.
+> `B9DE-E1-002`. At that historical checkpoint, `B9DE-E1-004` remained separate High/Open and Gate E2
+> was unauthorized.
 >
 > **Third execution checkpoint (2026-07-22; supersedes the two failed-safe attempts as current evidence):**
 > the dedicated modern Secret key passed the server-side Admin probe. Exactly four ephemeral identities
@@ -96,9 +100,9 @@
 > only `2/7/7` rows and five anchors are policy-eligible, and the mandatory first anchor is ineligible.
 > All four users, three roles and one assignment were then deleted with zero residue; business, Storage
 > and existing-identity fingerprints remained unchanged. `B9DE-E1-002` remains NOT CLOSED,
-> `B9DE-E1-004` remains High/Open, and Gate E2 remains unauthorized.
+> `B9DE-E1-004` remained High/Open, and Gate E2 was unauthorized at that historical checkpoint.
 >
-> **Corrected closure checkpoint (2026-07-22; authoritative):** Phase A reconciled Migration 015,
+> **Historical corrected E1 closure checkpoint (2026-07-22; superseded by the consolidated rollout):** Phase A reconciled Migration 015,
 > installed policies/functions, 015b tests, backend visibility helpers and current plans: hidden/deleted
 > customers are excluded before Finance Manager or Clerk authorization. Physical retention `179` and
 > operational visibility are distinct. Eligible coverage is `2/7/7/5`; deterministic selection by
@@ -106,9 +110,9 @@
 > corrected Finance/Clerk RLS assertion, hidden/deleted negative control, general/unassigned denial,
 > cleanup, refresh rejection and old-token negative read. Independent scans found zero residue and
 > unchanged identity/business/Storage fingerprints. `B9DE-E1-002` is **CLOSED**. `B9DE-E1-004` remains
-> High/Open and Gate E2 remains unauthorized.
+> High/Open and Gate E2 was unauthorized at that historical checkpoint.
 >
-> **Final repeated closure gate (2026-07-23; authoritative):** the owner attests that the disclosed PAT
+> **Historical final repeated E1 closure gate (2026-07-23; superseded by later E1 remediation and rollout):** the owner attests that the disclosed PAT
 > was revoked, the dedicated ephemeral Secret key was deleted, both temporary environment variables were
 > cleared and the bounded PowerShell session was closed. Non-`social-media/` tracked files plus relevant
 > Batch artifacts contain zero credential/JWT/private-key/Authorization/full-synthetic-email values, and
@@ -117,9 +121,10 @@
 > found `public.user_roles` policy `Temp Allow All`, applied to `authenticated` for `SELECT` with
 > `USING (true)` while `authenticated` retains table `SELECT`. This violates the tenant-bound policy
 > contract. `B9DE-E1-005` is **High / OPEN**, `B9DE-E1-001` stays open under the whole-gate rule, Gate E1
-> remains **NO-GO**, and Gate E2 remains unauthorized. No Production or Storage mutation occurred.
+> remained **NO-GO**, and Gate E2 was unauthorized at that historical checkpoint. No Production or
+> Storage mutation occurred.
 >
-> **B9DE-E1-005 bounded remediation and whole-gate closure (2026-07-23; authoritative current):**
+> **Historical B9DE-E1-005 bounded remediation and whole-gate closure (2026-07-23; superseded by the consolidated rollout):**
 > source review confirmed `ur_select` already enforces self-or-active-same-company visibility and does not
 > require unrestricted enumeration. A guarded, idempotent Mode A operator removed only `Temp Allow All`;
 > no replacement, grant, helper, other-policy or row change occurred. Rollback-only and installed-state
@@ -128,7 +133,7 @@
 > Business graph/hash/totals, Storage and identity state remain exact, Migration 027 remains missing, and
 > the Batch 9D-D candidate contract remains `12/12` with auto allocation disabled. `B9DE-E1-005` and
 > `B9DE-E1-001` are now **CLOSED**; findings 002–004 remain CLOSED. Gate 9D-E1 is **PASS / GO**. Gate
-> 9D-E2 remains separately unauthorized.
+> 9D-E2 still required separate authorization at that historical checkpoint.
 >
 > **This block is the single authoritative current-state statement for Batch 9D and supersedes any
 > "9D-B not yet implemented / pending plan review / implementation approval not granted" wording elsewhere
@@ -304,7 +309,8 @@
 >   sanitized reviewer role only. **No value, prefix, hash, screenshot, or export was requested or
 >   recorded.** `NEXT_PUBLIC_DEMO_USER_ROLE` and `NEXT_PUBLIC_DEMO_BANK_ACCOUNT_ID` are outside this
 >   checkpoint and were neither verified nor changed.
-> - **Gate 9D-E2 remains UNAUTHORIZED** and must not begin until `B9DE-E1-001` closes through a whole-gate
+> - **Historical E1 stop condition:** Gate 9D-E2 was unauthorized and could not begin until
+>   `B9DE-E1-001` closed through a whole-gate
 >   E1 PASS, `B9DE-E1-002` remains closed, `B9DE-E1-003` remains closed,
 >   `B9DE-E1-004` is remediated, and a later **repeated Gate 9D-E1 produces PASS**. The vulnerable production
 >   `daily-overdue` bundle remains a mandatory first-order E2 security remediation.

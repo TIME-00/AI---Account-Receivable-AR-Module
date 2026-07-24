@@ -1,10 +1,10 @@
-# Batch 9D-E — Production Rollout and Verification — Plan (Rev 4.0, Production Rollout Complete)
+# Batch 9D-E — Production Rollout and Verification — Plan (Rev 4.1, PostCSS Remediation)
 
 - **Batch:** 9D-E — Production Rollout and Verification (final Batch 9D batch).
 - **Type:** Production rollout plan and completed execution record. Historical planning-only and gate-specific authorization boundaries remain preserved in their dated sections.
 - **Author:** Claude Code (planning). **Rev 2** closed Codex findings **B9DE-PR-001 … B9DE-PR-010**; **Rev 3** closed **B9DE-FPR-001 … B9DE-FPR-006**; **Rev 3.1** corrects the commit-identity **Git self-reference** defect only.
-- **Revision:** **Rev 4.0**, 2026-07-23 — records the user-authorized consolidated E2/E3/E4 Production rollout, migration/Edge/frontend deployment, fresh role smoke, FX scheduler activation and final certification. Rev 3.9 remains the Gate E1 closure checkpoint.
-- **Status:** **Gates 9D-E1 through 9D-E4 CLOSED; Batch 9D-E CLOSED. Batch 9D is Production-deployed pending independent closure review.**
+- **Revision:** **Rev 4.1**, 2026-07-24 — records independent review's PostCSS advisory finding, transparent correction of the former audit-zero statement, exact compatible remediation and Production frontend redeployment readiness. Rev 4.0 remains the consolidated rollout checkpoint.
+- **Status:** **Gates 9D-E2/E3/E4 were executed and the Production rollout remains deployed. PostCSS remediation is locally complete and awaiting its exact Production redeployment; Batch 9D then awaits final independent remediation closure review.**
 - **`BATCH_9D_D_CODE_COMMIT`:** `233005146f7e9551e45fc437fc7fcade678a9f62` (`feat(ar): complete Batch 9D-D multi-currency allocation closure`) — the **immutable accepted implementation**. See §0.1.
 - **`BATCH_9D_E_ROLLOUT_HEAD`:** a **symbolic** identity — the clean local `main` HEAD **resolved at Gate 9D-E1 runtime** after the authorized Batch 9D-E planning commit exists. Its concrete SHA is **never written into this document**. See §0.1.
 - **`origin/main` at planning time:** `d5c9c0a0125b7ab0cb0b767424a4a2b8e01ab87d`.
@@ -18,7 +18,7 @@
 >
 > **This plan grants NO authorization.** Every gate is a *proposal* requiring separate, explicit user approval before any execution. Reading this document does not permit contacting `kusseuycqgdilychphpq` or `gcdsdyegwjdcskpukqlq`, pushing to GitHub, or deploying anything.
 
-> ## Gate 9D-E1 CLOSED — authoritative current status (updated 2026-07-23)
+> ## Historical Gate 9D-E1 closure boundary (updated 2026-07-23; superseded by the executed consolidated rollout)
 >
 > A separately authorized bounded Production operator removed only `public.user_roles."Temp Allow All"`.
 > The source-backed `ur_select` policy remains unchanged and provides self-or-active-same-company
@@ -26,7 +26,8 @@
 > sets for all five existing identities; random user and random-company results were zero. The 20-table
 > RLS scan now returns unconditional SELECT/write `0/0`, with all other policy, grant and helper
 > fingerprints unchanged. Business graph/hash/totals, Storage and identity state remain exact. Findings
-> 001–005 are CLOSED and Gate 9D-E1 is **PASS / GO**. Gate E2 remains separately unauthorized. See
+> 001–005 are CLOSED and Gate 9D-E1 is **PASS / GO**. At that historical checkpoint Gate E2 still
+> required separate authorization; that authorization was later granted and E2/E3/E4 were executed. See
 > E1 evidence §27 and the `B9DE-E1-005` runbook.
 >
 > ## Historical pre-remediation blocking status (Rev 3.8; superseded by the closure above)
@@ -43,7 +44,10 @@
 >
 > **Gate 9D-E1 remains `NO-GO`.** Findings 002–004 are closed, but `B9DE-E1-005` is High/Open and `B9DE-E1-001` remains open by the whole-gate rule. No automatic progression to E2 is permitted.
 >
-> **Gate 9D-E2 must not begin** until `B9DE-E1-005` is separately remediated and independently verified, `B9DE-E1-001` closes through a whole-gate E1 PASS, findings 002–004 remain closed, and a later separately authorized repeated E1 produces PASS. The vulnerable production `daily-overdue` bundle remains a mandatory first-order E2 security remediation and is **not** advanced here.
+> **Historical stop condition (satisfied and superseded):** Gate 9D-E2 could not begin until
+> `B9DE-E1-005` was remediated and E1 passed. Those conditions were later satisfied, the user separately
+> authorized the consolidated E2/E3/E4 rollout, and all three gates were executed. This paragraph is not
+> a current authorization restriction.
 
 > ## Rev 2 governing principle
 >
@@ -1479,9 +1483,9 @@ The plan preserves every control protecting **money, tenants, credentials, and r
 
 ---
 
-## 15. Plan Status
+## 15. Historical Rev 3.8 Plan Status — superseded by §20 and the Rev 4.1 header
 
-- **Status:** **Rev 3.8 — FINAL REPEATED READ-ONLY PREFLIGHT `NO-GO`.** Business/financial/Storage/identity after-state passes and the credential incident is closed; one new Production RLS blocker remains. The only Production mutation remains the separately authorized historical F3-P4 cleanup.
+- **Historical status:** **Rev 3.8 — FINAL REPEATED READ-ONLY PREFLIGHT `NO-GO`.** Business/financial/Storage/identity after-state passed and the credential incident closed; one Production RLS blocker then remained. This dated checkpoint is retained as evidence and does not describe current rollout state.
 - **Blocker status:** `B9DE-E1-001` **OPEN by whole-gate closure rule (High)**, with financial remediation technically verified; `B9DE-E1-002` **CLOSED**; `B9DE-E1-003` **CLOSED**; `B9DE-E1-004` **CLOSED** by owner attestation plus clean scans; `B9DE-E1-005` **OPEN (High)** for the authenticated unconditional `public.user_roles` SELECT policy.
 - **Gate 9D-E2 remains UNAUTHORIZED** until `B9DE-E1-005` is separately remediated, another authorized read-only E1 passes, and all prior closed findings remain closed.
 - **Financial remediation track:** `docs/plans/BATCH_9D_E1_F3_PRODUCTION_FINANCIAL_REMEDIATION_PLAN.md`; F3-P4 is complete, while the document authorizes no further action.
@@ -1505,7 +1509,7 @@ The plan preserves every control protecting **money, tenants, credentials, and r
 
 ---
 
-## 17. F3-P4 controlled Production reset checkpoint (authoritative current state)
+## 17. Historical F3-P4 controlled Production reset checkpoint — superseded
 
 - **Date and target:** 2026-07-21, Production project `kusseuycqgdilychphpq`, company `00000000-0000-0000-0000-000000000001` only.
 - **Database phase:** exact read-only dry run `READY`; the approved 2,651-row deletion manifest with SHA-256 `cfa7d6d7bc739bd190fb14a2e8bb680dc473fbe1e678db1b1235f07e9b75cb7d` committed exactly once in the guarded `SERIALIZABLE` operator. No assertion failed and recovery did not rerun the apply SQL.
@@ -1516,7 +1520,7 @@ The plan preserves every control protecting **money, tenants, credentials, and r
 
 ---
 
-## 18. F3-P5 repeated Production read-only preflight (authoritative current state)
+## 18. Historical F3-P5 repeated Production read-only preflight — superseded
 
 - **After-state:** `AFTER_STATE_MATCH`; ten principal anchors, ten matching scenario hashes, 179 retained rows, exact retained database hash, zero deletion-manifest rows, zero former 128/922 rows, Storage `6 retained / 0 approved-delete` with exact retained hash.
 - **Financial certification:** all active/settled documents balance. Raw lifecycle differences are fully explained and independently validated: two Draft documents (`1700.00`) are pre-posting, one Cancelled document (`1.00`) has complete journal reversal, and one Bounced receipt (`1.00`) has complete allocation/journal/credit-control reversal. Document and receipt unexplained counts and amounts are zero.
@@ -1528,9 +1532,10 @@ The plan preserves every control protecting **money, tenants, credentials, and r
 
 ---
 
-## 19. Ephemeral Production smoke identity closure attempt — 2026-07-22
+## 19. Historical Ephemeral Production smoke identity closure chronology — 2026-07-22
 
-This section is the authoritative Rev 3.6 identity-readiness update and supersedes the earlier long-lived credential-custody next action while preserving the historical record.
+This section preserves the Rev 3.6 identity-readiness chronology. It is superseded by §20 and the Rev 4.1
+header and does not describe the current authorization or rollout state.
 
 - **Approved strategy:** exactly four temporary users — general authenticated, Finance Manager, assigned AR Clerk and unassigned AR Clerk — created with one run ID, authenticated independently, exercised only through read endpoints, globally signed out, stripped of exact application-identity rows, deleted with the supported Auth Admin interface and checked with the old access tokens after cleanup.
 - **Supersession boundary:** this strategy replaces the earlier long-lived existing-account credential-custody requirement for `B9DE-E1-002`; it does not relax any role/RLS assertion and does not authorize a second tenant or a fifth identity.
@@ -1552,7 +1557,8 @@ This section is the authoritative Rev 3.6 identity-readiness update and supersed
 
 ### 19.2 Third bounded attempt — full lifecycle executed; positive RLS contract failed
 
-This checkpoint is the authoritative current `B9DE-E1-002` execution result. The two earlier attempts remain historical fail-safe evidence.
+This checkpoint was the then-current `B9DE-E1-002` execution result. The two earlier attempts remain
+historical fail-safe evidence; later subsections supersede it.
 
 - **Capability/baseline:** both process variables were present; the credential was a supported modern Secret key; server-side `auth.admin.listUsers` passed. Git and Production matched. Prior ephemeral users/sessions were zero; company/business/Storage and existing identity baselines matched and were frozen.
 - **Sanitized run:** run-ID SHA-256 `2d3a0bf73f9d0da6f198549d3a6a2ae37010acb13a975e2e62b85837d39ba676`. Exactly four confirmed users were created and authenticated: general `530556c8b662`, Finance Manager `85afbb6bea7f`, assigned AR Clerk `5f53147562de`, and unassigned AR Clerk `7e52ce7d54f2` (sanitized user-ID hash prefixes only). No fifth identity or second tenant was created.
@@ -1629,10 +1635,11 @@ candidate was `c978bce5a14cc020ddbc349f7f91d08855006f2a`.
   scheduler is active at the locked cadence; no conflicting job exists.
 - `origin/main` and Vercel Production received the rollout candidate. Vercel deployment
   `dpl_J3g9cnk6LWPs6VgumHi6zqMnixWr` reached `READY` from the exact rollout SHA.
-- A later push receipt exposed current dependency advisories. The gate applied the bounded frontend
-  security recovery `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05`: Next.js patch-line upgrade plus
-  patched transitive/child resolutions only. Audit is zero, lint/type-check/tests/build pass, and Vercel
-  Production deployment `dpl_G8BMC3UMatggS6Y79WfzgiiBBCyV` is `READY` from the recovery commit.
+- A later push receipt exposed dependency advisories. Historical recovery
+  `ab652d57943f9be63c5f3c1d4d21dbb1cfe3ed05` upgraded the Next.js patch line and produced healthy
+  Vercel deployment `dpl_G8BMC3UMatggS6Y79WfzgiiBBCyV`, but its `postcss 8.5.10` override remained
+  vulnerable. Its audit-zero statement was incorrect and is superseded by the Rev 4.1 remediation
+  checkpoint below.
 - A fresh four-identity Production run passed the corrected backend/RLS matrix and deployed-frontend
   route matrix. Exact cleanup left Auth/users/roles/assignments `5/5/2`, ephemeral residue zero, refresh
   reuse zero and old-token protected access zero.
@@ -1640,10 +1647,26 @@ candidate was `c978bce5a14cc020ddbc349f7f91d08855006f2a`.
   accepted hash; RLS remains `20/20/20` with unconditional SELECT/write `0/0`; automatic allocation
   remains disabled.
 
+### Rev 4.1 PostCSS independent-review remediation checkpoint — 2026-07-24
+
+Independent review reproduced `2 High` findings for `GHSA-6g55-p6wh-862q`; the Rev 4.0 recovery's
+`next -> postcss 8.5.10` override was vulnerable, so its audit-zero statement was incorrect. Preferred
+Mode A (remove only the override) resolved Next to vulnerable `8.4.31` and was rejected. Mode B pins only
+Next's child to compatible `8.5.19`, retains Next `15.5.21` and Sharp `0.35.0`, and leaves all other
+PostCSS paths at `8.5.22`.
+
+Lockfile-only and installed-tree audits now report zero at every severity. Lint, type-check, `28/28` test
+files, `530/530` tests and Production build pass. No backend, database, migration, RLS, Edge Function,
+secret, provider, scheduler, Auth, Storage or business-data operation is part of this remediation. The
+exact remediation commit and healthy Vercel Production deployment will be appended as final sanitized
+evidence before the independent remediation closure review.
+
 The pre-Migration-022 full-row hash is retained as the verified entry fingerprint, but it is not
 schema-comparable after new governance columns and the expected pointer-triggered `updated_at` changes.
 The final new-schema fingerprint and all independent business invariants are recorded in
 `docs/evidence/SPRINT_BATCH_9D_E_CONSOLIDATED_PRODUCTION_ROLLOUT_EVIDENCE.md`.
 
-**Decision:** Gates 9D-E2, 9D-E3 and 9D-E4 are CLOSED; Batch 9D-E is CLOSED. Batch 9D is fully deployed
-to Production pending only independent closure review. No new feature batch begins automatically.
+**Current decision:** Gates 9D-E2, 9D-E3 and 9D-E4 were executed and remain technically deployed.
+Production remains deployed; the frontend dependency remediation is locally complete and pending its
+authorized Production redeployment. Batch 9D awaits only the final independent remediation closure
+review after that deployment is verified. No new feature batch begins automatically.
