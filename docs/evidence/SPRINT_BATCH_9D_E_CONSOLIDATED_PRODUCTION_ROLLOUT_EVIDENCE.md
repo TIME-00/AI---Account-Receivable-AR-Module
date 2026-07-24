@@ -205,12 +205,12 @@ Final read-only certification:
   `981bd4c89eaba0783efc92bd0deac2112a3b00e6d8f31fcc0f349c430affbf48`;
 - Auth/role/assignment and Storage dependency orphans `0`.
 
-## 8. Closure
+## 8. Historical consolidated-rollout closure — superseded by §9
 
-Gates 9D-E2, 9D-E3 and 9D-E4 are complete. Batch 9D-E is closed. Batch 9D is fully deployed to
-Production, pending only an independent closure review. No Critical, High or material Medium blocker
-remains. No second company, permanent smoke identity, automatic allocation, `daily-overdue` cron,
-staging action, unrelated feature or credential artifact was introduced.
+At this 2026-07-23 checkpoint, Gates 9D-E2, 9D-E3 and 9D-E4 were recorded complete and Batch 9D-E was
+recorded closed. Independent review later found the PostCSS High advisory described in §9, so the former
+"no High blocker" statement was not final. No second company, permanent smoke identity, automatic
+allocation, `daily-overdue` cron, staging action, unrelated feature or credential artifact was introduced.
 
 `PASS  BATCH 9D-E CONSOLIDATED PRODUCTION ROLLOUT AND FINAL VERIFICATION COMPLETE`
 
@@ -230,5 +230,15 @@ Both `npm audit --package-lock-only --json` and `npm audit --json` now report to
 `0/0/0/0/0`. ESLint, TypeScript, `28/28` test files, `530/530` tests and the Production build pass. This
 checkpoint changes only `frontend/package.json`, `frontend/package-lock.json` and closure documentation.
 It performs no database, migration, RLS, Edge Function, secret, FX scheduler, Auth, Storage or business-data
-operation. Commit, Vercel Production deployment and final sanitized deployment evidence follow in the
-authorized remediation gate.
+operation.
+
+The exact remediation commit is `6ad475fb1e023d7457ecc4e2a91a8c789267e5c3`
+(`fix(prod): remediate PostCSS security advisory`), pushed non-force to `origin/main`. Vercel Production
+deployment `dpl_2H9T3zxR4akYah7z7KenpR8JPyPh` reached `READY`, target `production`, branch `main`, from
+that exact SHA. The canonical `/login` route returned HTTP 200 and the post-deployment runtime-error query
+returned zero clusters. The deployed dependency contract remains Next `15.5.21`, Next child PostCSS
+`8.5.19`, all other PostCSS paths `8.5.22`, and Sharp `0.35.0`.
+
+Gates 9D-E2/E3/E4 remain technically deployed and remediated. Batch 9D is Production-deployed and awaits
+only the final independent remediation closure review; this evidence does not pre-claim that independent
+verdict.

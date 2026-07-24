@@ -4,7 +4,7 @@
 - **Type:** Production rollout plan and completed execution record. Historical planning-only and gate-specific authorization boundaries remain preserved in their dated sections.
 - **Author:** Claude Code (planning). **Rev 2** closed Codex findings **B9DE-PR-001 … B9DE-PR-010**; **Rev 3** closed **B9DE-FPR-001 … B9DE-FPR-006**; **Rev 3.1** corrects the commit-identity **Git self-reference** defect only.
 - **Revision:** **Rev 4.1**, 2026-07-24 — records independent review's PostCSS advisory finding, transparent correction of the former audit-zero statement, exact compatible remediation and Production frontend redeployment readiness. Rev 4.0 remains the consolidated rollout checkpoint.
-- **Status:** **Gates 9D-E2/E3/E4 were executed and the Production rollout remains deployed. PostCSS remediation is locally complete and awaiting its exact Production redeployment; Batch 9D then awaits final independent remediation closure review.**
+- **Status:** **Gates 9D-E2/E3/E4 were executed and remain technically deployed and remediated. The patched Vercel Production deployment is READY; Batch 9D awaits final independent remediation closure review.**
 - **`BATCH_9D_D_CODE_COMMIT`:** `233005146f7e9551e45fc437fc7fcade678a9f62` (`feat(ar): complete Batch 9D-D multi-currency allocation closure`) — the **immutable accepted implementation**. See §0.1.
 - **`BATCH_9D_E_ROLLOUT_HEAD`:** a **symbolic** identity — the clean local `main` HEAD **resolved at Gate 9D-E1 runtime** after the authorized Batch 9D-E planning commit exists. Its concrete SHA is **never written into this document**. See §0.1.
 - **`origin/main` at planning time:** `d5c9c0a0125b7ab0cb0b767424a4a2b8e01ab87d`.
@@ -1657,16 +1657,16 @@ PostCSS paths at `8.5.22`.
 
 Lockfile-only and installed-tree audits now report zero at every severity. Lint, type-check, `28/28` test
 files, `530/530` tests and Production build pass. No backend, database, migration, RLS, Edge Function,
-secret, provider, scheduler, Auth, Storage or business-data operation is part of this remediation. The
-exact remediation commit and healthy Vercel Production deployment will be appended as final sanitized
-evidence before the independent remediation closure review.
+secret, provider, scheduler, Auth, Storage or business-data operation is part of this remediation.
+Remediation commit `6ad475fb1e023d7457ecc4e2a91a8c789267e5c3` was pushed non-force.
+Vercel Production deployment `dpl_2H9T3zxR4akYah7z7KenpR8JPyPh` reached `READY` from that exact SHA;
+canonical `/login` returned HTTP 200 and the post-deployment runtime-error query returned zero clusters.
 
 The pre-Migration-022 full-row hash is retained as the verified entry fingerprint, but it is not
 schema-comparable after new governance columns and the expected pointer-triggered `updated_at` changes.
 The final new-schema fingerprint and all independent business invariants are recorded in
 `docs/evidence/SPRINT_BATCH_9D_E_CONSOLIDATED_PRODUCTION_ROLLOUT_EVIDENCE.md`.
 
-**Current decision:** Gates 9D-E2, 9D-E3 and 9D-E4 were executed and remain technically deployed.
-Production remains deployed; the frontend dependency remediation is locally complete and pending its
-authorized Production redeployment. Batch 9D awaits only the final independent remediation closure
-review after that deployment is verified. No new feature batch begins automatically.
+**Current decision:** Gates 9D-E2, 9D-E3 and 9D-E4 were executed and remain technically deployed and
+remediated. Production remains deployed; the patched frontend deployment is `READY` and healthy. Batch 9D
+awaits only the final independent remediation closure review. No new feature batch begins automatically.
