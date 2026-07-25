@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Search, XCircle } from "lucide-react";
 
 const STATUS_TABS = [
-  { value: "",               label: "All" },
+  { value: "",               label: "All statuses" },
   { value: "Draft",          label: "Draft" },
   { value: "Posted",         label: "Posted" },
   { value: "Fully Allocated",label: "Fully Allocated" },

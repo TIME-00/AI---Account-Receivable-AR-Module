@@ -222,6 +222,7 @@ export default function CreditNotesPage() {
                           decision: n.fx_decision,
                           draftExchangeRate: n.exchange_rate,
                         })}
+                        documentPosted={isPostedDocumentStatus(n.status)}
                         decisionReason={n.fx_posting_eligibility?.reason}
                         align="right"
                       />

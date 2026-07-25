@@ -95,6 +95,7 @@ export default function NewInvoicePage() {
           setSelectedTermId={inv.setSelectedTermId}
           fieldErrors={inv.fieldErrors}
           calculatedDueDate={inv.calc.calculatedDueDate}
+          onFxSubmittableChange={inv.setFxSubmittable}
         />
       )}
 

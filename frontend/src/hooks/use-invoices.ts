@@ -10,15 +10,22 @@ import { useApi } from "@/hooks/use-api";
 import type { Invoice, InvoiceLine, Customer, TaxCode, PaymentTerm, MonetaryCollectionSummary } from "@/types";
 import type { TaxCodeOption, PaymentTermOption } from "@/hooks/use-invoice-calculator";
 import { filterVisibleCustomers } from "@/lib/customer-visibility";
+import { normalizeCurrency } from "@/lib/currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
+import { useCompanyStore } from "@/stores/company-store";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface CreateInvoicePayload {
+export interface CreateInvoicePayload {
   doc_type: string;
   invoice_date: string;
   customer_id: string;
   currency: string;
   exchange_rate: number;
+  /** Governed reference-selected booking (mutually exclusive with a manual rate). */
+  fx_reference_rate_id?: string;
+  /** Governed manual-override reason (mutually exclusive with a reference id). */
+  fx_override_reason?: string;
   reference_no?: string;
   internal_remarks?: string;
   invoice_remarks?: string;
@@ -45,13 +52,68 @@ interface CreateInvoicePayload {
   }>;
 }
 
+/**
+ * Construct the exact governed Invoice create payload. A reference-selected
+ * request never carries numeric/manual authority, and no client base total is
+ * part of this contract.
+ */
+export function buildCreateInvoicePayload(
+  payload: CreateInvoicePayload,
+  baseCurrency?: string | null,
+) {
+  const currency = normalizeCurrency(payload.currency);
+  const base = normalizeCurrency(baseCurrency);
+  if (!currency || !base) {
+    throw new Error("Authoritative company and transaction currencies are required before saving.");
+  }
+  const parity = currency === base;
+  const hasReference = !parity && !!payload.fx_reference_rate_id;
+  const overrideReason = payload.fx_override_reason?.trim() ?? "";
+  const hasManualOverride =
+    !parity
+    && !hasReference
+    && Number.isFinite(payload.exchange_rate)
+    && payload.exchange_rate > 0
+    && overrideReason.length >= 5;
+  if (!parity && !hasReference && !hasManualOverride) {
+    throw new Error("Foreign-currency invoices require a fresh reference rate or governed manual override.");
+  }
+  return {
+    ...payload,
+    fx_reference_rate_id: hasReference ? payload.fx_reference_rate_id : undefined,
+    exchange_rate: parity ? 1 : hasReference ? undefined : payload.exchange_rate,
+    fx_override_reason: hasManualOverride ? overrideReason : undefined,
+    reference_no: payload.reference_no || undefined,
+    internal_remarks: payload.internal_remarks || undefined,
+    invoice_remarks: payload.invoice_remarks || undefined,
+    ref_invoice_id: payload.ref_invoice_id || undefined,
+    cn_type: payload.cn_type || undefined,
+    reason_code: payload.reason_code || undefined,
+    reason_desc: payload.reason_desc || undefined,
+    lines: payload.lines.map((line) => ({
+      description: line.description,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      item_code: line.item_code || undefined,
+      uom: line.uom || undefined,
+      discount_pct: line.discount_pct || undefined,
+      discount_amt: line.discount_amt || undefined,
+      tax_code_id: line.tax_code_id || undefined,
+      gl_account_id: line.gl_account_id || undefined,
+      cost_center: line.cost_center || undefined,
+      line_remarks: line.line_remarks || undefined,
+    })),
+  };
+}
+
 // ─── Query: Fetch Customer List (for selector) ─────────────────────────────
 
 export function useCustomers(search?: string) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["customers", "list", search],
+    queryKey: ["customers", "list", companyId, search],
     queryFn: async () =>
       // useApi() returns json.data which is the raw Customer[] array.
       // meta (total, page, page_size) is discarded by useApi().
@@ -63,6 +125,7 @@ export function useCustomers(search?: string) {
           status: "Active",
         },
       })),
+    enabled: companyId.trim().length > 0,
     staleTime: 60 * 1000,
   });
 }
@@ -71,9 +134,10 @@ export function useCustomers(search?: string) {
 
 export function useTaxCodes() {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["lookups", "tax-codes", "invoice-options"],
+    queryKey: ["lookups", "tax-codes", "invoice-options", companyId],
     // Real read-only lookup (GET /lookups/tax-codes) returning the company's
     // active tax codes with real tax_codes.id values.
     queryFn: () => api.get<TaxCode[]>("/lookups/tax-codes"),
@@ -86,6 +150,7 @@ export function useTaxCodes() {
         rate: tc.rate,
         country: tc.country,
       })),
+    enabled: companyId.trim().length > 0,
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -94,9 +159,10 @@ export function useTaxCodes() {
 
 export function usePaymentTerms() {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["lookups", "payment-terms", "invoice-options"],
+    queryKey: ["lookups", "payment-terms", "invoice-options", companyId],
     // Real read-only lookup (GET /lookups/payment-terms).
     queryFn: () => api.get<PaymentTerm[]>("/lookups/payment-terms"),
     select: (rows): PaymentTermOption[] =>
@@ -107,6 +173,7 @@ export function usePaymentTerms() {
         term_type: pt.term_type,
         days: pt.days,
       })),
+    enabled: companyId.trim().length > 0,
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -116,39 +183,14 @@ export function usePaymentTerms() {
 export function useCreateInvoice() {
   const api = useApi();
   const qc = useQueryClient();
+  const { baseCurrency } = useBaseCurrency();
 
   return useMutation({
     mutationFn: async (payload: CreateInvoicePayload) => {
-      // Clean up empty optional strings → undefined
-      const cleaned = {
-        ...payload,
-        reference_no: payload.reference_no || undefined,
-        internal_remarks: payload.internal_remarks || undefined,
-        invoice_remarks: payload.invoice_remarks || undefined,
-        ref_invoice_id: payload.ref_invoice_id || undefined,
-        cn_type: payload.cn_type || undefined,
-        reason_code: payload.reason_code || undefined,
-        reason_desc: payload.reason_desc || undefined,
-        lines: payload.lines.map((line) => ({
-          description: line.description,
-          quantity: line.quantity,
-          unit_price: line.unit_price,
-          item_code: line.item_code || undefined,
-          uom: line.uom || undefined,
-          discount_pct: line.discount_pct || undefined,
-          discount_amt: line.discount_amt || undefined,
-          // Batch 9A: forward the selected REAL tax_code_id (from
-          // GET /lookups/tax-codes). Empty string → undefined (No Tax).
-          // The backend validates the id and resolves the rate server-side,
-          // so the persisted invoice tax matches the on-screen calculation.
-          tax_code_id: line.tax_code_id || undefined,
-          gl_account_id: line.gl_account_id || undefined,
-          cost_center: line.cost_center || undefined,
-          line_remarks: line.line_remarks || undefined,
-        })),
-      };
-
-      return api.post<Invoice & { lines: InvoiceLine[] }>("/invoices", cleaned);
+      return api.post<Invoice & { lines: InvoiceLine[] }>(
+        "/invoices",
+        buildCreateInvoicePayload(payload, baseCurrency),
+      );
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["invoices"] });
@@ -187,9 +229,10 @@ export function useInvoiceList(filters: {
   page_size?: number;
 }) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["invoices", "list", filters],
+    queryKey: ["invoices", "list", companyId, filters],
     queryFn: async (): Promise<InvoiceListResult> => {
       const page = filters.page ?? 1;
       const pageSize = filters.page_size ?? 20;
@@ -222,6 +265,7 @@ export function useInvoiceList(filters: {
         },
       };
     },
+    enabled: companyId.trim().length > 0,
     staleTime: 30_000,
   });
 }
@@ -253,15 +297,16 @@ export function totalPagesFrom(pagination: ListPagination | undefined): number {
 
 export function useInvoice(id: string) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["invoices", id],
+    queryKey: ["invoices", companyId, id],
     // B9DD-FEIR-001: `getInvoiceById` calls `assertCustomerVisible`, which 404s
     // when the customer is deleted or hidden — server-side and uncapped. The
     // previous client-side re-check against a capped `/customers` page could
     // only ever be weaker, so it is removed rather than duplicated here.
     queryFn: () => api.get<Invoice & { lines: InvoiceLine[] }>(`/invoices/${id}`),
-    enabled: !!id,
+    enabled: companyId.trim().length > 0 && !!id,
   });
 }
 

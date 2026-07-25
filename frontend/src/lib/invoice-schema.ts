@@ -83,6 +83,14 @@ export const invoiceFormSchema = z.object({
     .positive("Exchange rate must be greater than 0.")
     .default(1),
 
+  // ── Governed FX authority (Gate A) ──
+  // Mutually exclusive with a manual exchange_rate/override reason. The shared
+  // FxRateField sets exactly one authority; the submit payload forwards
+  // fx_reference_rate_id for REFERENCE_SELECTED, or exchange_rate +
+  // fx_override_reason for a governed manual override. Never both.
+  fx_reference_rate_id: z.string().uuid().optional().or(z.literal("")),
+  fx_override_reason: z.string().max(500).optional().or(z.literal("")),
+
   // ── Optional fields ──
   reference_no: z
     .string()
@@ -145,6 +153,8 @@ export function defaultInvoiceValues(): InvoiceFormValues {
     customer_id: "",
     currency: "",
     exchange_rate: 1,
+    fx_reference_rate_id: "",
+    fx_override_reason: "",
     reference_no: "",
     internal_remarks: "",
     invoice_remarks: "",

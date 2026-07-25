@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { cn, formatDate } from "@/lib/utils";
 import { SUPPORTED_CURRENCY_OPTIONS } from "@/lib/currency";
 import { useBaseCurrency } from "@/hooks/use-base-currency";
+import { FxRateField } from "@/components/features/fx/fx-rate-field";
 import { CustomerComboboxWithCreate } from "@/components/features/customers/customer-combobox-with-create";
 import type { UseFormReturn } from "react-hook-form";
 import type { InvoiceFormValues } from "@/lib/invoice-schema";
@@ -23,6 +25,7 @@ interface InvoiceHeaderFormProps {
   setSelectedTermId: (id: string | null) => void;
   fieldErrors: Record<string, string>;
   calculatedDueDate: string | null;
+  onFxSubmittableChange?: (canSubmit: boolean) => void;
 }
 
 export function InvoiceHeaderForm({
@@ -36,10 +39,35 @@ export function InvoiceHeaderForm({
   setSelectedTermId,
   fieldErrors,
   calculatedDueDate,
+  onFxSubmittableChange,
 }: InvoiceHeaderFormProps) {
   const docType = form.watch("doc_type");
   // Authoritative company base currency for the FX rate direction label.
   const { baseCurrency } = useBaseCurrency();
+
+  // ── Governed FX authority (Gate A) ──
+  // Manual-override sub-state is held locally and synced into RHF only while the
+  // explicit override mode is on; leaving it resets exchange_rate to 1 and
+  // clears the reason, so a governed reference selection can never carry a stale
+  // manual rate/reason. The reference id lives in the RHF fx_reference_rate_id.
+  const [fxOverrideMode, setFxOverrideMode] = useState(false);
+  const [fxManualRate, setFxManualRate] = useState<number | null>(null);
+  const [fxOverrideReason, setFxOverrideReason] = useState("");
+  const currency = form.watch("currency");
+  const invoiceDate = form.watch("invoice_date");
+  const referenceRateId = form.watch("fx_reference_rate_id") || null;
+
+  useEffect(() => {
+    if (fxOverrideMode) {
+      if (fxManualRate != null && fxManualRate > 0) {
+        form.setValue("exchange_rate", fxManualRate, { shouldValidate: false });
+      }
+      form.setValue("fx_override_reason", fxOverrideReason, { shouldValidate: false });
+    } else {
+      form.setValue("exchange_rate", 1, { shouldValidate: false });
+      form.setValue("fx_override_reason", "", { shouldValidate: false });
+    }
+  }, [fxOverrideMode, fxManualRate, fxOverrideReason, form]);
 
   return (
     <div className="glass-card p-6 animate-fade-in">
@@ -121,20 +149,23 @@ export function InvoiceHeaderForm({
           </select>
         </div>
 
-        {/* Exchange Rate */}
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-slate-600">
-            Exchange Rate ({baseCurrency
-              ? `1 ${form.watch("currency")} = ? ${baseCurrency}`
-              : `1 ${form.watch("currency")} → company base`})
-          </label>
-          <input
-            type="number"
-            step="0.0001"
-            {...form.register("exchange_rate", { valueAsNumber: true })}
-            className="input-premium w-full"
-          />
-        </div>
+        {/* Exchange Rate — governed shared FX field (Gate A) */}
+        <FxRateField
+          currency={currency}
+          baseCurrency={baseCurrency}
+          effectiveDate={invoiceDate}
+          referenceRateId={referenceRateId}
+          onReferenceRateIdChange={(id) =>
+            form.setValue("fx_reference_rate_id", id ?? "", { shouldValidate: false })
+          }
+          manualRate={fxManualRate}
+          onManualRateChange={setFxManualRate}
+          overrideReason={fxOverrideReason}
+          onOverrideReasonChange={setFxOverrideReason}
+          overrideMode={fxOverrideMode}
+          onOverrideModeChange={setFxOverrideMode}
+          onSubmittableChange={onFxSubmittableChange}
+        />
 
         {/* Payment Term */}
         <div>

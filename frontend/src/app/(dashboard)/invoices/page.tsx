@@ -167,7 +167,7 @@ export default function InvoicesPage() {
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             )}
           >
-            All
+            All statuses
           </button>
           {INVOICE_STATUSES.map((s) => (
             <button
@@ -315,6 +315,7 @@ export default function InvoicesPage() {
                               decision: inv.fx_decision,
                               draftExchangeRate: inv.exchange_rate,
                             })}
+                            documentPosted={isPostedDocumentStatus(inv.status)}
                             decisionReason={inv.fx_posting_eligibility?.reason}
                             align="right"
                           />
@@ -372,20 +373,22 @@ export default function InvoicesPage() {
               <div className="flex items-center gap-1">
                 <button
                   type="button"
+                  aria-label="Previous page"
                   onClick={() => setPage(Math.max(1, page - 1))}
                   disabled={page <= 1}
                   className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                 </button>
                 <span className="px-3 text-xs text-slate-600">{page} / {totalPages}</span>
                 <button
                   type="button"
+                  aria-label="Next page"
                   onClick={() => setPage(Math.min(totalPages, page + 1))}
                   disabled={page >= totalPages}
                   className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             </div>

@@ -77,6 +77,7 @@ export function useInvoiceForm() {
 
   // ─── Server Field Errors ─────────────────────────────────────────────
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [fxSubmittable, setFxSubmittable] = useState(false);
   const submissionLockRef = useRef(false);
   const [submittingAction, setSubmittingAction] = useState<"draft" | "post" | null>(null);
 
@@ -214,6 +215,25 @@ export function useInvoiceForm() {
     }
   };
 
+  // ─── Governed FX submit gate (Gate A) ────────────────────────────────
+  // A foreign-currency document may only be saved when its FX authority is
+  // resolved: either a governed reference rate was selected, or an explicit
+  // manual override (rate + reason ≥5) was completed. A missing/stale/loading
+  // reference with no override blocks the save — never a silent rate-1 fallback.
+  const fxUnresolvedMessage = (): string | null => {
+    const v = form.getValues();
+    const base = baseCurrencyState.baseCurrency;
+    if (!base) {
+      return "The authenticated company base currency is unavailable. Resolve company context before saving.";
+    }
+    if (!v.currency || v.currency === base) return null;
+    const hasReference = !!v.fx_reference_rate_id;
+    const hasValidOverride =
+      (v.exchange_rate ?? 0) > 0 && (v.fx_override_reason ?? "").trim().length >= 5;
+    if (fxSubmittable && (hasReference || hasValidOverride)) return null;
+    return "Resolve the foreign-currency exchange rate (select the reference rate or complete a manual override) before saving.";
+  };
+
   // ─── Submit Handlers ─────────────────────────────────────────────────
 
   const beginSubmission = (action: "draft" | "post") => {
@@ -251,6 +271,14 @@ export function useInvoiceForm() {
         return;
       }
 
+      const fxError = fxUnresolvedMessage();
+      if (fxError) {
+        setFieldErrors({ currency: fxError });
+        setCurrentStep(1);
+        toast.error("Exchange rate required", { description: fxError });
+        return;
+      }
+
       const values = form.getValues();
       const result = await createMutation.mutateAsync(values);
       toast.success("Invoice Created", {
@@ -280,6 +308,14 @@ export function useInvoiceForm() {
         const message = readFieldErrorMessage(firstError)
           ?? "Please fix form validation errors before posting.";
         toast.error("Validation Error", { description: String(message) });
+        return;
+      }
+
+      const fxError = fxUnresolvedMessage();
+      if (fxError) {
+        setFieldErrors({ currency: fxError });
+        setCurrentStep(1);
+        toast.error("Exchange rate required", { description: fxError });
         return;
       }
 
@@ -334,6 +370,7 @@ export function useInvoiceForm() {
     baseCurrency: baseCurrencyState.baseCurrency,
     baseCurrencyLoading: baseCurrencyState.isLoading,
     baseCurrencyUnavailable: baseCurrencyState.isUnavailable,
+    setFxSubmittable,
 
     // Submit
     handleCreateDraft,

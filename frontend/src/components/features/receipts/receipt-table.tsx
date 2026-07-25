@@ -130,6 +130,7 @@ export function ReceiptTable({
                             decision: r.fx_decision,
                             draftExchangeRate: r.exchange_rate,
                           })}
+                          documentPosted={isPostedDocumentStatus(r.status)}
                           decisionReason={r.fx_posting_eligibility?.reason}
                           align="right"
                         />
@@ -181,11 +182,23 @@ export function ReceiptTable({
               Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} records
             </p>
             <div className="flex items-center gap-1">
-              <button type="button" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30">
+              <button
+                type="button"
+                aria-label="Previous page"
+                onClick={() => onPageChange(Math.max(1, page - 1))}
+                disabled={page <= 1}
+                className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+              >
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="px-3 text-xs text-slate-600">{page} / {totalPages}</span>
-              <button type="button" onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30">
+              <button
+                type="button"
+                aria-label="Next page"
+                onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+                disabled={page >= totalPages}
+                className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+              >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>

@@ -17,6 +17,7 @@ import {
   History,
   ShieldAlert,
   AlertCircle,
+  Lock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,6 +37,7 @@ const ICONS: Record<string, LucideIcon> = {
   History,
   ShieldAlert,
   AlertCircle,
+  Lock,
 };
 
 interface FxChipProps {

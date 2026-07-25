@@ -115,6 +115,7 @@ describe("Invoice detail page (B9DD-RR-006)", () => {
             base_currency: "MYR",
             base_total: 445,
             fx_decision: fxDecision({ booked_rate: 4.45, source_category: "CATALOG" }),
+            fx_posting_eligibility: { gate: "fx_governance", eligible: false, reason: "blocked" },
           },
           [widgetLine],
         ),
@@ -135,6 +136,7 @@ describe("Invoice detail page (B9DD-RR-006)", () => {
     expect(screen.queryByText(/1 MYR = 4\.4500 USD/)).toBeNull();
     // It is presented as the BOOKED snapshot, not a live rate.
     expect(screen.getAllByText(/Booked rate/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^Blocked$/i)).toBeNull();
   });
 
   it("names the transaction currency on every monetary line column", async () => {
@@ -184,6 +186,7 @@ describe("Receipt detail page (B9DD-RR-006)", () => {
           base_amount: 445,
           exchange_rate: 4.45,
           fx_decision: fxDecision({ booked_rate: 4.45 }),
+          fx_posting_eligibility: { gate: "fx_governance", eligible: false, reason: "blocked" },
         }),
       })),
       routePrefix("/", () => ({ data: [], meta: { total: 0, page: 1, page_size: 20 } })),
@@ -195,6 +198,8 @@ describe("Receipt detail page (B9DD-RR-006)", () => {
     // B9DD-RR-004: these two were codeless before.
     expect(screen.getByText(/Applied: USD 60\.00/)).toBeInTheDocument();
     expect(screen.getByText(/Unapplied: USD 40\.00/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Booked rate/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^Blocked$/i)).toBeNull();
   });
 
   it("labels the booked base amount with the real base currency", async () => {

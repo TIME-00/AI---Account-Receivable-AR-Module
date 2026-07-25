@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { formatMoneyNumber, normalizeCurrency, UNKNOWN_CURRENCY_LABEL } from "@/lib/currency";
 import {
   fxSourcePresentation,
-  fxDecisionStatePresentation,
+  fxDecisionStatePresentationForDocument,
   type FxRateDisplay,
 } from "@/lib/fx-presentation";
 import { FxChip } from "@/components/ui/fx-chip";
@@ -37,6 +37,8 @@ export interface MoneyCellProps {
    * `exchange_rate` and have it rendered as though it were booked.
    */
   fxRate?: FxRateDisplay | null;
+  /** Explicit lifecycle context for interpreting the backend `blocked` reason. */
+  documentPosted?: boolean;
   /** FX source category from the booking decision. */
   source?: FxSourceCategory | string | null;
   /** Posting-eligibility reason (decision state). */
@@ -69,6 +71,7 @@ export function MoneyCell({
   baseAvailable,
   baseBasis = "booked",
   fxRate,
+  documentPosted: documentPostedProp,
   source,
   decisionReason,
   deviationPct,
@@ -91,9 +94,20 @@ export function MoneyCell({
   const baseCaption = baseBasis === "estimated" ? "Estimated base" : "Booked base";
 
   const sourcePres = source ? fxSourcePresentation(source) : null;
-  const decisionPres = decisionReason ? fxDecisionStatePresentation(decisionReason) : null;
+  const documentPosted =
+    documentPostedProp ??
+    (fxRate != null &&
+      ["booked_snapshot", "manual_override", "stale_reference", "legacy_unverified"].includes(fxRate.kind));
+  const decisionPres = decisionReason
+    ? fxDecisionStatePresentationForDocument(decisionReason, documentPosted)
+    : null;
   // In compact mode only surface a decision chip when it needs attention.
   const decisionIsException = decisionPres != null && decisionPres.tone !== "success";
+  const showCompactLifecycle =
+    !detailed &&
+    documentPosted &&
+    fxRate != null &&
+    fxRate.kind !== "base_parity";
 
   // A rate line is only shown in detailed mode, and only when the resolver
   // produced a defensible, directional rate.
@@ -125,8 +139,18 @@ export function MoneyCell({
       )}
 
       {/* Supporting metadata: directional rate + provenance/decision chips */}
-      {(detailed || decisionIsException) && (
+      {(detailed || decisionIsException || showCompactLifecycle) && (
         <div className={cn("mt-0.5 flex flex-wrap gap-1", align === "right" ? "justify-end" : "justify-start")}>
+          {showCompactLifecycle && fxRate && (
+            <FxChip
+              presentation={{
+                label: fxRate.caption,
+                tone: fxRate.tone,
+                icon: fxRate.icon,
+                description: fxRate.description,
+              }}
+            />
+          )}
           {showRate && (
             <span
               title={fxRate!.description}

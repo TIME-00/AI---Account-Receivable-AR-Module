@@ -19,7 +19,7 @@ import { formatMoney, formatMoneySafe, normalizeCurrency } from "@/lib/currency"
 import { FxChip } from "@/components/ui/fx-chip";
 import {
   fxSourcePresentation,
-  fxDecisionStatePresentation,
+  fxDecisionStatePresentationForDocument,
   resolveFxRateDisplay,
   isPostedDocumentStatus,
 } from "@/lib/fx-presentation";
@@ -156,6 +156,12 @@ export default function InvoiceDetailPage() {
     decision: invoice.fx_decision,
     draftExchangeRate: invoice.exchange_rate,
   });
+  const fxDecisionPresentation = invoice.fx_posting_eligibility?.reason
+    ? fxDecisionStatePresentationForDocument(
+        invoice.fx_posting_eligibility.reason,
+        isPostedDocumentStatus(invoice.status),
+      )
+    : null;
   // Issue 6: Conservative — allow cancel only for 'Open' status.
   // Backend may not support cancelling 'Overdue' invoices.
   const canCancel = invoice.status === "Open";
@@ -385,9 +391,7 @@ export default function InvoiceDetailPage() {
                   {invoice.fx_decision?.source_category && (
                     <FxChip presentation={fxSourcePresentation(invoice.fx_decision.source_category)} />
                   )}
-                  {invoice.fx_posting_eligibility?.reason && (
-                    <FxChip presentation={fxDecisionStatePresentation(invoice.fx_posting_eligibility.reason)} />
-                  )}
+                  {fxDecisionPresentation && <FxChip presentation={fxDecisionPresentation} />}
                 </div>
               )}
             </div>

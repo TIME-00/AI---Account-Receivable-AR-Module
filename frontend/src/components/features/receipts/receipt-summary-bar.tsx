@@ -35,7 +35,14 @@ export function ReceiptSummaryBar({
   // and no preview at all for MYR.
   const isParity = baseCurrency !== null && watchCurrency === baseCurrency;
   // With an unknown base currency there is no defensible conversion to show.
-  const canShowBasePreview = baseCurrency !== null && !isParity && watchAmount > 0;
+  // Gate A: in reference-selected mode the working exchange_rate is a placeholder
+  // 1 (the authoritative rate/base is computed by the backend at booking). We
+  // must NOT render a bogus `amount × 1` base for a foreign receipt — the shared
+  // FxRateField already shows the governed estimated base. Only preview a base
+  // here when a real (non-placeholder) rate is present, matching the Invoice
+  // review, which likewise hides the base while exchange_rate === 1.
+  const canShowBasePreview =
+    baseCurrency !== null && !isParity && watchAmount > 0 && watchExchangeRate !== 1;
 
   return (
     <div className="glass-card overflow-hidden">

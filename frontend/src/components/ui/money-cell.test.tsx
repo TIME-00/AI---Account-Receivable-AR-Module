@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MoneyCell } from "@/components/ui/money-cell";
+import { resolveFxRateDisplay } from "@/lib/fx-presentation";
+import { fxDecision } from "@/test/harness";
 
 describe("MoneyCell", () => {
   it("shows the transaction amount with an explicit currency code", () => {
@@ -53,5 +55,70 @@ describe("MoneyCell", () => {
     );
     // "Approved" is nominal; compact mode should not render it as a chip.
     expect(screen.queryByText(/Approved/i)).toBeNull();
+  });
+
+  it("does not mislabel an already-posted booked document as Blocked", () => {
+    const fxRate = resolveFxRateDisplay({
+      currency: "USD",
+      baseCurrency: "MYR",
+      documentPosted: true,
+      decision: fxDecision({ source_category: "CATALOG", booked_rate: 4.45 }),
+    });
+    render(
+      <MoneyCell
+        amount={100}
+        currency="USD"
+        baseCurrency="MYR"
+        fxRate={fxRate}
+        decisionReason="blocked"
+        documentPosted
+        mode="compact"
+      />,
+    );
+    expect(screen.getByText(/^Booked rate$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Blocked$/i)).toBeNull();
+  });
+
+  it("keeps a genuine draft blocked decision as a danger state", () => {
+    const fxRate = resolveFxRateDisplay({
+      currency: "USD",
+      baseCurrency: "MYR",
+      documentPosted: false,
+      draftExchangeRate: 4.45,
+    });
+    render(
+      <MoneyCell
+        amount={100}
+        currency="USD"
+        baseCurrency="MYR"
+        fxRate={fxRate}
+        decisionReason="blocked"
+        mode="detailed"
+      />,
+    );
+    expect(screen.getByText(/^Blocked$/i)).toBeInTheDocument();
+  });
+
+  it("shows the truthful legacy warning in compact rows without implying current valuation", () => {
+    const fxRate = resolveFxRateDisplay({
+      currency: "USD",
+      baseCurrency: "MYR",
+      documentPosted: true,
+      decision: fxDecision({ source_category: "LEGACY_UNVERIFIED", booked_rate: 1 }),
+    });
+    render(
+      <MoneyCell
+        amount={100}
+        currency="USD"
+        baseCurrency="MYR"
+        fxRate={fxRate}
+        documentPosted
+        decisionReason="blocked"
+      />,
+    );
+    const chip = screen.getByText("Legacy rate unverified").closest("[title]");
+    expect(chip).toHaveAttribute("title", expect.stringMatching(/historical booked snapshot/i));
+    expect(chip).toHaveAttribute("title", expect.stringMatching(/not a present market\/MAS valuation/i));
+    expect(screen.queryByText(/^Blocked$/i)).toBeNull();
   });
 });

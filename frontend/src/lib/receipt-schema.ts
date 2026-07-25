@@ -53,6 +53,13 @@ export const receiptFormSchema = z.object({
     .number({ invalid_type_error: "Exchange rate must be a number." })
     .positive("Exchange rate must be greater than 0.")
     .optional(),
+  // ── Governed FX authority (Gate A) ──
+  // Mutually exclusive with a manual exchange_rate/override reason (enforced by
+  // the shared FxRateField and the backend). fx_reference_rate_id carries a
+  // REFERENCE_SELECTED booking; exchange_rate + fx_override_reason carry a
+  // governed manual override. Never both.
+  fx_reference_rate_id: z.string().uuid().optional().or(z.literal("")),
+  fx_override_reason: z.string().max(500).optional().or(z.literal("")),
   reference_no: z
     .string()
     .max(50, "Reference number must not exceed 50 characters.")
@@ -108,6 +115,8 @@ export function defaultReceiptValues(): ReceiptFormValues {
     receipt_amount: 0,
     bank_account_id: "",
     exchange_rate: 1,
+    fx_reference_rate_id: "",
+    fx_override_reason: "",
     reference_no: "",
     cheque_date: "",
     value_date: "",

@@ -24,6 +24,7 @@ import {
   usePostReceipt,
 } from "@/hooks/use-receipts";
 import { useSeedBaseCurrency } from "@/hooks/use-seed-base-currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 
 import { ReceiptFormCustomer } from "@/components/features/receipts/receipt-form-customer";
 import { ReceiptFormPayment } from "@/components/features/receipts/receipt-form-payment";
@@ -36,6 +37,7 @@ import { Receipt, FileText, Info } from "lucide-react";
 export default function NewReceiptPage() {
   const router = useRouter();
   const [isPostMode, setIsPostMode] = useState(false);
+  const [fxSubmittable, setFxSubmittable] = useState(false);
 
   // ── Form ──────────────────────────────────────────────────────────
   const form = useForm<ReceiptFormValues>({
@@ -65,6 +67,7 @@ export default function NewReceiptPage() {
   const watchCurrency = form.watch("currency");
   const watchAmount = form.watch("receipt_amount");
   const watchExchangeRate = form.watch("exchange_rate") ?? 1;
+  const { baseCurrency } = useBaseCurrency();
 
   // ── Data Queries ──────────────────────────────────────────────────
   const { data: customers = [] } = useCustomers();
@@ -93,23 +96,32 @@ export default function NewReceiptPage() {
       return;
     }
 
+    if (!baseCurrency) {
+      toast.error("Company base currency unavailable", {
+        description: "Resolve the authenticated company context before creating a receipt.",
+      });
+      return;
+    }
+
+    // Governed FX submit gate (Gate A): a foreign-currency receipt may only be
+    // saved when its FX authority is resolved — a reference rate was selected or
+    // an explicit manual override (rate + reason ≥5) was completed. No silent
+    // rate-1 fallback for a foreign currency.
+    if (baseCurrency && values.currency && values.currency !== baseCurrency) {
+      const hasReference = !!values.fx_reference_rate_id;
+      const hasValidOverride =
+        (values.exchange_rate ?? 0) > 0 && (values.fx_override_reason ?? "").trim().length >= 5;
+      if (!fxSubmittable || (!hasReference && !hasValidOverride)) {
+        toast.error("Exchange rate required", {
+          description:
+            "Resolve the foreign-currency exchange rate (select the reference rate or complete a manual override) before saving.",
+        });
+        return;
+      }
+    }
+
     try {
-      const payload: Record<string, unknown> = {
-        receipt_date: values.receipt_date,
-        customer_id: values.customer_id,
-        payment_method: values.payment_method,
-        currency: values.currency,
-        receipt_amount: values.receipt_amount,
-        bank_account_id: values.bank_account_id,
-      };
-
-      if (values.exchange_rate && values.exchange_rate !== 1) payload.exchange_rate = values.exchange_rate;
-      if (values.reference_no) payload.reference_no = values.reference_no;
-      if (values.cheque_date) payload.cheque_date = values.cheque_date;
-      if (values.value_date) payload.value_date = values.value_date;
-      if (values.remarks) payload.remarks = values.remarks;
-
-      const receipt = await createMutation.mutateAsync(payload);
+      const receipt = await createMutation.mutateAsync({ values, baseCurrency });
 
       if (isPostMode && receipt?.id) {
         const posted = await postMutation.mutateAsync({ id: receipt.id });
@@ -181,7 +193,7 @@ export default function NewReceiptPage() {
           form={form}
           watchCurrency={watchCurrency}
           watchAmount={watchAmount}
-          watchExchangeRate={watchExchangeRate}
+          onFxSubmittableChange={setFxSubmittable}
         />
 
         {/* Section 4: Remarks */}

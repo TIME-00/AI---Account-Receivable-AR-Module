@@ -9,8 +9,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
 import type { Receipt, Customer, BankAccount, MonetaryCollectionSummary, CurrencyTotal } from "@/types";
 import type { ListPagination } from "@/hooks/use-invoices";
+import type { ReceiptFormValues } from "@/lib/receipt-schema";
 import { filterVisibleCustomers } from "@/lib/customer-visibility";
 import { fetchCustomerAgingRow } from "@/lib/aging-lookup";
+import { normalizeCurrency } from "@/lib/currency";
+import { useCompanyStore } from "@/stores/company-store";
 
 // ─── Query: List Receipts (with filters) ────────────────────────────────────
 
@@ -23,9 +26,10 @@ export function useReceipts(filters: {
   page_size?: number;
 }) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["receipts", filters],
+    queryKey: ["receipts", companyId, filters],
     queryFn: async (): Promise<ReceiptListResult> => {
       const page = filters.page ?? 1;
       const pageSize = filters.page_size ?? 20;
@@ -52,6 +56,7 @@ export function useReceipts(filters: {
         },
       };
     },
+    enabled: companyId.trim().length > 0,
     staleTime: 30_000,
   });
 }
@@ -69,13 +74,14 @@ export interface ReceiptListResult {
 
 export function useReceipt(id: string) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["receipts", id],
+    queryKey: ["receipts", companyId, id],
     // B9DD-FEIR-001: receipt detail enforces customer visibility server-side
     // (404 for hidden/deleted customers); no capped client re-check.
     queryFn: () => api.get<Receipt>(`/receipts/${id}`),
-    enabled: !!id,
+    enabled: companyId.trim().length > 0 && !!id,
   });
 }
 
@@ -83,9 +89,10 @@ export function useReceipt(id: string) {
 
 export function useCustomers() {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["customers", "list"],
+    queryKey: ["customers", "list", companyId],
     queryFn: async () => {
       // useApi() returns json.data = Customer[] (raw array).
       return filterVisibleCustomers(await api.get<Customer[]>("/customers", {
@@ -93,6 +100,7 @@ export function useCustomers() {
         params: { page: 1, page_size: 100 },
       }));
     },
+    enabled: companyId.trim().length > 0,
     staleTime: 60_000,
   });
 }
@@ -101,12 +109,14 @@ export function useCustomers() {
 
 export function useBankAccounts() {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["bank-accounts"],
+    queryKey: ["bank-accounts", companyId],
     queryFn: async () => {
       return api.get<BankAccount[]>("/bank-accounts");
     },
+    enabled: companyId.trim().length > 0,
     staleTime: 60_000,
   });
 }
@@ -141,9 +151,10 @@ export interface CustomerExposure {
 
 export function useCustomerExposure(customerId: string) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
 
   return useQuery({
-    queryKey: ["customers", customerId, "exposure"],
+    queryKey: ["customers", companyId, customerId, "exposure"],
     queryFn: async (): Promise<CustomerExposure | null> => {
       const row = await fetchCustomerAgingRow(api, customerId);
       // A customer with no outstanding documents is legitimately absent from the
@@ -158,20 +169,79 @@ export function useCustomerExposure(customerId: string) {
         documentCount: row.by_currency.reduce((sum, c) => sum + c.count, 0),
       };
     },
-    enabled: !!customerId,
+    enabled: companyId.trim().length > 0 && !!customerId,
     staleTime: 15_000,
   });
 }
 
 // ─── Mutation: Create Receipt ───────────────────────────────────────────────
 
+export interface CreateReceiptCommand {
+  values: ReceiptFormValues;
+  baseCurrency: string;
+}
+
+/**
+ * Build the exact governed create payload. Company/user context and booked
+ * base amounts remain server authority and are never accepted from the form.
+ */
+export function buildCreateReceiptPayload({
+  values,
+  baseCurrency,
+}: CreateReceiptCommand): Record<string, unknown> {
+  const currency = normalizeCurrency(values.currency);
+  const base = normalizeCurrency(baseCurrency);
+  if (!currency || !base) {
+    throw new Error("Authoritative company and transaction currencies are required before saving.");
+  }
+
+  const payload: Record<string, unknown> = {
+    receipt_date: values.receipt_date,
+    customer_id: values.customer_id,
+    payment_method: values.payment_method,
+    currency,
+    receipt_amount: values.receipt_amount,
+    bank_account_id: values.bank_account_id,
+  };
+
+  const parity = currency === base;
+  const overrideReason = values.fx_override_reason?.trim() ?? "";
+  const hasManualOverride =
+    !parity
+    && !values.fx_reference_rate_id
+    && values.exchange_rate !== undefined
+    && Number.isFinite(values.exchange_rate)
+    && values.exchange_rate > 0
+    && overrideReason.length >= 5;
+
+  if (parity) {
+    payload.exchange_rate = 1;
+  } else if (values.fx_reference_rate_id) {
+    payload.fx_reference_rate_id = values.fx_reference_rate_id;
+  } else if (hasManualOverride) {
+    // Rate 1 can be an intentional foreign manual override; it must not be
+    // dropped merely because it equals the base-parity rate.
+    payload.exchange_rate = values.exchange_rate;
+    payload.fx_override_reason = overrideReason;
+  } else {
+    throw new Error("Foreign-currency receipts require a fresh reference rate or governed manual override.");
+  }
+
+  if (values.reference_no) payload.reference_no = values.reference_no;
+  if (values.cheque_date) payload.cheque_date = values.cheque_date;
+  if (values.value_date) payload.value_date = values.value_date;
+  if (values.remarks) payload.remarks = values.remarks;
+
+  return payload;
+}
+
 export function useCreateReceipt() {
   const api = useApi();
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
-      return api.post<Receipt>("/receipts", data);
+    mutationFn: async (command: CreateReceiptCommand) => {
+      return api.post<Receipt>("/receipts", buildCreateReceiptPayload(command));
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["receipts"] });

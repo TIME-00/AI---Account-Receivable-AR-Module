@@ -18,7 +18,7 @@ import { formatMoney, formatMoneySafe, normalizeCurrency } from "@/lib/currency"
 import { FxChip } from "@/components/ui/fx-chip";
 import {
   fxSourcePresentation,
-  fxDecisionStatePresentation,
+  fxDecisionStatePresentationForDocument,
   resolveFxRateDisplay,
   isPostedDocumentStatus,
 } from "@/lib/fx-presentation";
@@ -110,6 +110,12 @@ export default function ReceiptDetailPage() {
     decision: receipt.fx_decision,
     draftExchangeRate: receipt.exchange_rate,
   });
+  const fxDecisionPresentation = receipt.fx_posting_eligibility?.reason
+    ? fxDecisionStatePresentationForDocument(
+        receipt.fx_posting_eligibility.reason,
+        isPostedDocumentStatus(receipt.status),
+      )
+    : null;
   const canCancel = receipt.status === "Posted";
 
   return (
@@ -224,9 +230,7 @@ export default function ReceiptDetailPage() {
               {receipt.fx_decision?.source_category && (
                 <FxChip presentation={fxSourcePresentation(receipt.fx_decision.source_category)} />
               )}
-              {receipt.fx_posting_eligibility?.reason && (
-                <FxChip presentation={fxDecisionStatePresentation(receipt.fx_posting_eligibility.reason)} />
-              )}
+              {fxDecisionPresentation && <FxChip presentation={fxDecisionPresentation} />}
             </div>
           )}
         </div>

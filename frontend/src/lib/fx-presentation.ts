@@ -50,10 +50,11 @@ const SOURCE_LABELS: Record<string, FxPresentation> = {
     description: "Booking rate was manually overridden under governance approval.",
   },
   LEGACY_UNVERIFIED: {
-    label: "Legacy (unverified)",
+    label: "Legacy rate unverified",
     tone: "warning",
     icon: "Archive",
-    description: "Historical record without a verified booking-rate provenance.",
+    description:
+      "The historical booked rate has no verified reference provenance. The displayed base amount is the historical booked snapshot — not a present market/MAS valuation.",
   },
 };
 
@@ -131,6 +132,23 @@ export function fxDecisionStatePresentation(
 ): FxPresentation {
   if (!reason) return REASON_LABELS.missing_decision;
   return REASON_LABELS[reason] ?? REASON_LABELS.missing_decision;
+}
+
+/**
+ * Interpret a posting-eligibility reason in the document lifecycle context.
+ *
+ * The backend deliberately reports `blocked` for already-posted documents
+ * because they cannot be posted again. That is not an error state for the
+ * document and must not be rendered as a red "Blocked" chip beside the
+ * authoritative booked-rate presentation. Draft `blocked` decisions remain a
+ * genuine danger state.
+ */
+export function fxDecisionStatePresentationForDocument(
+  reason: FxPostingEligibilityReason | null | undefined,
+  documentPosted: boolean,
+): FxPresentation | null {
+  if (reason === "blocked" && documentPosted) return null;
+  return fxDecisionStatePresentation(reason);
 }
 
 // ─── Governed FX rate presentation (B9DD-FEIR-007) ──────────────────────────
@@ -286,10 +304,11 @@ export function resolveFxRateDisplay({
       kind: "legacy_unverified",
       rate: bookedRate,
       directionLabel: direction(bookedRate, code, base),
-      caption: "Legacy rate (unverified)",
+      caption: "Legacy rate unverified",
       tone: "warning",
       icon: "Archive",
-      description: "Historical record: the booking rate has no verified provenance.",
+      description:
+        "Historical record: the booked rate has no verified reference provenance. The displayed base amount is the historical booked snapshot, not a present market/MAS valuation.",
     };
   }
 
@@ -322,9 +341,12 @@ export function resolveFxRateDisplay({
     rate: bookedRate,
     directionLabel: direction(bookedRate, code, base),
     caption: "Booked rate",
-    tone: "success",
+    // Posted + booked: informational/neutral, never a danger "Blocked" state.
+    // The rate is locked because the document is posted — not because anything
+    // is wrong with it.
+    tone: "info",
     icon: "Lock",
-    description: "Immutable booking-rate snapshot recorded when the document was posted.",
+    description: "This document is already posted. Its booked exchange rate cannot be changed (rate locked).",
   };
 }
 

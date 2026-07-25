@@ -6,6 +6,7 @@ import { useCompanyStore } from "@/stores/company-store";
 import { useUserRole } from "@/hooks/use-user-role";
 import { useBankAccounts } from "@/hooks/use-receipts";
 import { useBaseCurrency } from "@/hooks/use-base-currency";
+import { FEATURE_STATUS_ROWS } from "@/lib/feature-status";
 
 export default function SettingsPage() {
   const companyName = useCompanyStore((s) => s.companyName);
@@ -191,23 +192,7 @@ export default function SettingsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {[
-                { feature: "Dashboard", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "Invoices (CRUD + Post + Cancel)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "Receipts (CRUD + Post)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "Manual Allocation", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "Customer List & Detail", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "AR Reports (Aging, Invoice, Receipt, Outstanding)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "Global Search / Notifications / Profile", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "Credit & Debit Notes", status: "Read-Only List", color: "bg-blue-50 text-blue-700" },
-                { feature: "Journal Entries", status: "Reference Guide", color: "bg-blue-50 text-blue-700" },
-                { feature: "Audit Trail", status: "Capability Reference", color: "bg-blue-50 text-blue-700" },
-                { feature: "Settings & Roles", status: "Read-Only (Authenticated)", color: "bg-blue-50 text-blue-700" },
-                { feature: "Auto-Allocation", status: "Disabled", color: "bg-slate-50 text-slate-500" },
-                { feature: "PDF/Image Import (Invoice & Receipt)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-                { feature: "Daily FX Sync", status: "Planned (Batch 9D)", color: "bg-slate-50 text-slate-500" },
-                { feature: "Report Export (PDF/Excel)", status: "Planned", color: "bg-slate-50 text-slate-500" },
-              ].map((row) => (
+              {FEATURE_STATUS_ROWS.map((row) => (
                 <tr key={row.feature}>
                   <td className="px-4 py-2.5 text-slate-700">{row.feature}</td>
                   <td className="px-4 py-2.5">
