@@ -350,11 +350,18 @@ describe("Gate A — final mutation payload authority", () => {
 });
 
 describe("Gate A — Feature Status truthfulness", () => {
-  it("does not claim undeployed Gate A work is Live or duplicate Notifications/Report Export", () => {
+  it("marks only deployed Gate A work Live without duplicating Notifications/Report Export", () => {
     const names = FEATURE_STATUS_ROWS.map((row) => row.feature);
     expect(new Set(names).size).toBe(names.length);
-    expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Governed FX"))?.status)
-      .toBe("Implemented — Pending Deployment");
+    expect(
+      FEATURE_STATUS_ROWS
+        .filter((row) =>
+          row.feature.startsWith("Governed FX")
+          || row.feature.startsWith("Booked-Rate")
+          || row.feature.startsWith("Bounded Invoice/Receipt Pagination")
+        )
+        .map((row) => row.status),
+    ).toEqual(["Live", "Live", "Live"]);
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature === "Notifications")?.status)
       .toBe("Degraded — Import Alerts Only");
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Report Export"))?.status)
