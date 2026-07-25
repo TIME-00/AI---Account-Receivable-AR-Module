@@ -60,6 +60,8 @@ export class FxRatesReadService {
       .lte('effective_date', requestedDate)
       .order('effective_date', { ascending: false })
       .order('fetched_at', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(1);
     if (params.provider) query = query.eq('provider', params.provider);
 

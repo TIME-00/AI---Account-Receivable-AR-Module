@@ -420,18 +420,42 @@ export class InvoiceService {
     const seqType = data.doc_type === 'Invoice' ? 'INV'
       : data.doc_type === 'Credit Note' ? 'CN' : 'DN';
 
-    // Generate document number (BR-INV-006)
-    const invoiceNo = await getNextSequence(this.client, auth.companyId, seqType);
-
-    // Resolve exchange rate
-    const exchangeRate = data.exchange_rate ?? await this.resolveExchangeRate(
-      auth.companyId,
-      data.currency,
-      data.invoice_date,
-    );
-
     // Get company base currency
     const company = await fetchById<{ base_currency: string }>(this.client, 'companies', auth.companyId);
+    const isBaseParity = data.currency === company.base_currency;
+
+    if (isBaseParity && data.fx_reference_rate_id !== undefined) {
+      throw new ValidationError(
+        'Base-currency documents must not select an FX reference rate.',
+        {
+          field: 'fx_reference_rate_id',
+          currency: data.currency,
+          base_currency: company.base_currency,
+        },
+      );
+    }
+    if (isBaseParity && data.exchange_rate !== undefined && data.exchange_rate !== 1) {
+      throw new ValidationError(
+        'Base-currency documents require an exchange rate of exactly 1.',
+        { field: 'exchange_rate', expected: 1 },
+      );
+    }
+
+    // Reference-selected booking is resolved and snapshotted atomically by the
+    // database wrapper. Rate 1 is only a transient payload placeholder and is
+    // never committed for a valid foreign reference selection.
+    const exchangeRate = isBaseParity
+      ? 1
+      : data.fx_reference_rate_id !== undefined
+      ? 1
+      : data.exchange_rate ?? await this.resolveExchangeRate(
+        auth.companyId,
+        data.currency,
+        data.invoice_date,
+      );
+
+    // Consume the governed sequence only after all request-side FX checks pass.
+    const invoiceNo = await getNextSequence(this.client, auth.companyId, seqType);
 
     const lineRows: Record<string, unknown>[] = [];
     if (lines && lines.length > 0) {
@@ -512,13 +536,12 @@ export class InvoiceService {
         p_company_id: auth.companyId,
         p_actor_user_id: auth.userId,
         p_invoice: invoicePayload,
+        p_import_origin: options.importOrigin ?? null,
         p_lines: lineRows,
         p_explicit_rate_supplied: data.exchange_rate !== undefined,
         p_override_reason: data.fx_override_reason ?? null,
+        p_fx_reference_rate_id: data.fx_reference_rate_id ?? null,
       };
-      if (options.importOrigin !== undefined) {
-        rpcArgs.p_import_origin = options.importOrigin;
-      }
       invoiceId = await callRpc<string>(this.client, 'fx_create_governed_invoice_draft', rpcArgs);
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key')) {
@@ -871,8 +894,26 @@ export class InvoiceService {
     data: Partial<CreateInvoiceInput>,
   ): Promise<Invoice> {
     requireRole(auth, 'AR Clerk');
+    if ('base_total' in data) {
+      throw new ValidationError(
+        'base_total is server-calculated and must not be supplied.',
+        { field: 'base_total' },
+      );
+    }
+    if (
+      data.fx_reference_rate_id !== undefined
+      && (data.exchange_rate !== undefined || data.fx_override_reason !== undefined)
+    ) {
+      throw new ValidationError(
+        'fx_reference_rate_id cannot be combined with exchange_rate or fx_override_reason.',
+        {
+          field: 'fx_reference_rate_id',
+          conflicting_fields: ['exchange_rate', 'fx_override_reason'],
+        },
+      );
+    }
     const invoice = await this.requireDraftInvoice(invoiceId, auth.companyId);
-    await requireCustomerAccess(auth, invoice.customer_id);
+    await this.requireWritableCustomer(auth, invoice.customer_id);
     await assertCustomerVisible(this.client, auth.companyId, invoice.customer_id);
 
     const updatePayload: Record<string, unknown> = {};
@@ -882,15 +923,40 @@ export class InvoiceService {
     if (data.invoice_remarks !== undefined) updatePayload.invoice_remarks = data.invoice_remarks;
     const nextCurrency = data.currency ?? invoice.currency;
     const nextDate = data.invoice_date ?? invoice.invoice_date;
+    const isBaseParity = nextCurrency === invoice.base_currency;
     const fxMaterialChange = data.currency !== undefined
       || data.invoice_date !== undefined
-      || data.exchange_rate !== undefined;
+      || data.exchange_rate !== undefined
+      || data.fx_reference_rate_id !== undefined;
+
+    if (isBaseParity && data.fx_reference_rate_id !== undefined) {
+      throw new ValidationError(
+        'Base-currency documents must not select an FX reference rate.',
+        {
+          field: 'fx_reference_rate_id',
+          currency: nextCurrency,
+          base_currency: invoice.base_currency,
+        },
+      );
+    }
+    if (isBaseParity && data.exchange_rate !== undefined && data.exchange_rate !== 1) {
+      throw new ValidationError(
+        'Base-currency documents require an exchange rate of exactly 1.',
+        { field: 'exchange_rate', expected: 1 },
+      );
+    }
 
     if (data.currency !== undefined) updatePayload.currency = data.currency;
     if (data.exchange_rate !== undefined) {
       updatePayload.exchange_rate = data.exchange_rate;
-    } else if (data.currency !== undefined || data.invoice_date !== undefined) {
+    } else if (
+      data.fx_reference_rate_id === undefined
+      && (data.currency !== undefined || data.invoice_date !== undefined)
+    ) {
       updatePayload.exchange_rate = await this.resolveExchangeRate(auth.companyId, nextCurrency, nextDate);
+    }
+    if (data.fx_reference_rate_id !== undefined) {
+      updatePayload.fx_reference_rate_id = data.fx_reference_rate_id;
     }
     if (data.reason_code !== undefined) updatePayload.reason_code = data.reason_code;
     if (data.reason_desc !== undefined) updatePayload.reason_desc = data.reason_desc;

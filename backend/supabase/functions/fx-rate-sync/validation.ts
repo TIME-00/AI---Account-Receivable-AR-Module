@@ -15,6 +15,7 @@ export const FRANKFURTER_BASE_URL = `https://${FRANKFURTER_SOURCE_HOST}/v2`;
 export const FRANKFURTER_PROVIDER_RATE_TYPE = 'frankfurter-rebased-mas-reference';
 export const PROVIDER_TIMEOUT_MS = 8_000;
 export const REAL_PROVIDER_MAX_ATTEMPTS = 3;
+export const FX_REFERENCE_STALE_AFTER_DAYS = 3;
 export const INITIAL_REAL_PROVIDER_PAIRS = [
   { fromCurrency: 'SGD', toCurrency: 'MYR' },
   { fromCurrency: 'USD', toCurrency: 'MYR' },
@@ -232,7 +233,7 @@ export function lookupLatestOnOrBefore<T extends { effectiveDate: string }>(
 export function calculateStaleState(
   latestEffectiveDate: string | null,
   requestedDate: string,
-  thresholdDays = 3,
+  thresholdDays = FX_REFERENCE_STALE_AFTER_DAYS,
 ): { is_stale: boolean; stale_reason: string | null; age_days: number | null } {
   assertDate(requestedDate, 'requested_date');
   if (!latestEffectiveDate) {

@@ -35,6 +35,7 @@ export interface CreateInvoiceInput {
   invoice_date: string;
   customer_id: string;
   currency: string;
+  fx_reference_rate_id?: string;
   exchange_rate?: number;
   fx_override_reason?: string;
   reference_no?: string;
@@ -77,6 +78,13 @@ export interface CorrectPostedReferenceInput {
 // ─── Create Invoice Validation ──────────────────────────────────────────────
 
 export function validateCreateInvoice(body: Record<string, unknown>): CreateInvoiceInput {
+  if (body.base_total !== undefined) {
+    throw new ValidationError(
+      'base_total is server-calculated and must not be supplied.',
+      { field: 'base_total' },
+    );
+  }
+
   const doc_type = validateEnum(
     requireString(body.doc_type, 'doc_type'),
     DOC_TYPES,
@@ -100,6 +108,10 @@ export function validateCreateInvoice(body: Record<string, unknown>): CreateInvo
   };
 
   // Optional fields
+  result.fx_reference_rate_id = optionalUUID(
+    body.fx_reference_rate_id,
+    'fx_reference_rate_id',
+  ) ?? undefined;
   if (body.exchange_rate !== undefined) {
     result.exchange_rate = requirePositiveNumber(body.exchange_rate, 'exchange_rate');
   }
@@ -112,6 +124,18 @@ export function validateCreateInvoice(body: Record<string, unknown>): CreateInvo
       );
     }
     validateMaxLength(result.fx_override_reason, 500, 'fx_override_reason');
+  }
+  if (
+    result.fx_reference_rate_id !== undefined
+    && (result.exchange_rate !== undefined || result.fx_override_reason !== undefined)
+  ) {
+    throw new ValidationError(
+      'fx_reference_rate_id cannot be combined with exchange_rate or fx_override_reason.',
+      {
+        field: 'fx_reference_rate_id',
+        conflicting_fields: ['exchange_rate', 'fx_override_reason'],
+      },
+    );
   }
 
   result.reference_no = optionalString(body.reference_no) ?? undefined;

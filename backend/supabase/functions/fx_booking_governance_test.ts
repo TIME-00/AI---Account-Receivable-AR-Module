@@ -208,14 +208,14 @@ Deno.test('Batch 9D-C migration 026 preserves trusted import-origin provenance',
   assertStringIncludes(invoiceService, 'export interface CreateInvoiceOptions');
   assertStringIncludes(invoiceService, 'importOrigin?: Record<string, unknown>');
   assertStringIncludes(invoiceService, 'options: CreateInvoiceOptions = {}');
-  assertStringIncludes(invoiceService, 'if (options.importOrigin !== undefined)');
-  assertStringIncludes(invoiceService, 'rpcArgs.p_import_origin = options.importOrigin');
+  assertStringIncludes(invoiceService, 'p_import_origin: options.importOrigin ?? null');
+  assertStringIncludes(invoiceService, 'p_fx_reference_rate_id: data.fx_reference_rate_id ?? null');
 
   assertStringIncludes(receiptService, 'export interface CreateReceiptOptions');
   assertStringIncludes(receiptService, 'importOrigin?: Record<string, unknown>');
   assertStringIncludes(receiptService, 'options: CreateReceiptOptions = {}');
-  assertStringIncludes(receiptService, 'if (options.importOrigin !== undefined)');
-  assertStringIncludes(receiptService, 'rpcArgs.p_import_origin = options.importOrigin');
+  assertStringIncludes(receiptService, 'p_import_origin: options.importOrigin ?? null');
+  assertStringIncludes(receiptService, 'p_fx_reference_rate_id: data.fx_reference_rate_id ?? null');
 });
 
 Deno.test('Batch 9D-C immutability predicate rejects protected changes outside Draft-to-Draft', async () => {

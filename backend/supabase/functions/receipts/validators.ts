@@ -25,6 +25,7 @@ export interface CreateReceiptInput {
   customer_id: string;
   payment_method: PaymentMethod;
   currency: string;
+  fx_reference_rate_id?: string;
   exchange_rate?: number;
   fx_override_reason?: string;
   receipt_amount: number;
@@ -33,6 +34,14 @@ export interface CreateReceiptInput {
   cheque_date?: string;
   value_date?: string;
   remarks?: string;
+}
+
+export interface UpdateDraftReceiptFxInput {
+  currency?: string;
+  receipt_date?: string;
+  fx_reference_rate_id?: string;
+  exchange_rate?: number;
+  fx_override_reason?: string;
 }
 
 export interface PostReceiptInput {
@@ -50,6 +59,13 @@ export interface ClearReceiptInput {
 // ─── Create Receipt Validation ──────────────────────────────────────────────
 
 export function validateCreateReceipt(body: Record<string, unknown>): CreateReceiptInput {
+  if (body.base_amount !== undefined) {
+    throw new ValidationError(
+      'base_amount is server-calculated and must not be supplied.',
+      { field: 'base_amount' },
+    );
+  }
+
   const receipt_date = requireString(body.receipt_date, 'receipt_date');
   validateDate(receipt_date, 'receipt_date');
 
@@ -80,6 +96,10 @@ export function validateCreateReceipt(body: Record<string, unknown>): CreateRece
   };
 
   // Optional exchange rate
+  result.fx_reference_rate_id = optionalUUID(
+    body.fx_reference_rate_id,
+    'fx_reference_rate_id',
+  ) ?? undefined;
   if (body.exchange_rate !== undefined) {
     result.exchange_rate = requirePositiveNumber(body.exchange_rate, 'exchange_rate');
   }
@@ -92,6 +112,18 @@ export function validateCreateReceipt(body: Record<string, unknown>): CreateRece
       );
     }
     validateMaxLength(result.fx_override_reason, 500, 'fx_override_reason');
+  }
+  if (
+    result.fx_reference_rate_id !== undefined
+    && (result.exchange_rate !== undefined || result.fx_override_reason !== undefined)
+  ) {
+    throw new ValidationError(
+      'fx_reference_rate_id cannot be combined with exchange_rate or fx_override_reason.',
+      {
+        field: 'fx_reference_rate_id',
+        conflicting_fields: ['exchange_rate', 'fx_override_reason'],
+      },
+    );
   }
 
   result.reference_no = optionalString(body.reference_no) ?? undefined;
@@ -122,6 +154,79 @@ export function validateCreateReceipt(body: Record<string, unknown>): CreateRece
   if (body.value_date) {
     result.value_date = requireString(body.value_date, 'value_date');
     validateDate(result.value_date, 'value_date');
+  }
+
+  return result;
+}
+
+export function validateUpdateDraftReceiptFx(
+  body: Record<string, unknown>,
+): UpdateDraftReceiptFxInput {
+  if (body.base_amount !== undefined) {
+    throw new ValidationError(
+      'base_amount is server-calculated and must not be supplied.',
+      { field: 'base_amount' },
+    );
+  }
+
+  const allowedFields = new Set([
+    'currency',
+    'receipt_date',
+    'fx_reference_rate_id',
+    'exchange_rate',
+    'fx_override_reason',
+  ]);
+  const unsupportedFields = Object.keys(body).filter((field) => !allowedFields.has(field));
+  if (unsupportedFields.length > 0) {
+    throw new ValidationError(
+      'Receipt Draft FX update contains unsupported fields.',
+      { unsupported_fields: unsupportedFields.sort() },
+    );
+  }
+
+  const result: UpdateDraftReceiptFxInput = {};
+  if (body.currency !== undefined) {
+    result.currency = requireString(body.currency, 'currency');
+    validateOperationalCurrencyForWrite(result.currency, 'currency');
+  }
+  if (body.receipt_date !== undefined) {
+    result.receipt_date = requireString(body.receipt_date, 'receipt_date');
+    validateDate(result.receipt_date, 'receipt_date');
+  }
+  result.fx_reference_rate_id = optionalUUID(
+    body.fx_reference_rate_id,
+    'fx_reference_rate_id',
+  ) ?? undefined;
+  if (body.exchange_rate !== undefined) {
+    result.exchange_rate = requirePositiveNumber(body.exchange_rate, 'exchange_rate');
+  }
+  if (body.fx_override_reason !== undefined) {
+    result.fx_override_reason = requireString(body.fx_override_reason, 'fx_override_reason');
+    if (result.fx_override_reason.trim().length < 5) {
+      throw new ValidationError(
+        'fx_override_reason must be at least 5 characters.',
+        { field: 'fx_override_reason' },
+      );
+    }
+    validateMaxLength(result.fx_override_reason, 500, 'fx_override_reason');
+  }
+  if (
+    result.fx_reference_rate_id !== undefined
+    && (result.exchange_rate !== undefined || result.fx_override_reason !== undefined)
+  ) {
+    throw new ValidationError(
+      'fx_reference_rate_id cannot be combined with exchange_rate or fx_override_reason.',
+      {
+        field: 'fx_reference_rate_id',
+        conflicting_fields: ['exchange_rate', 'fx_override_reason'],
+      },
+    );
+  }
+  if (Object.keys(result).every((field) => result[field as keyof UpdateDraftReceiptFxInput] === undefined)) {
+    throw new ValidationError(
+      'At least one governed Receipt FX field is required.',
+      { fields: [...allowedFields] },
+    );
   }
 
   return result;

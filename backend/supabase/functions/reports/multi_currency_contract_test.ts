@@ -42,6 +42,8 @@ import { validateCreateInvoice } from '../invoices/validators.ts';
 import type { CreateInvoiceInput } from '../invoices/validators.ts';
 import { calculateLineAmount } from '../invoices/calculator.ts';
 import { ReceiptService } from '../receipts/service.ts';
+import { createReceiptHandler } from '../receipts/index.ts';
+import { validateCreateReceipt } from '../receipts/validators.ts';
 import { CreditNoteService } from '../credit-notes/service.ts';
 import { DebitNoteService } from '../debit-notes/service.ts';
 import { AllocationService } from '../allocations/service.ts';
@@ -1538,6 +1540,446 @@ Deno.test('Batch 9D-D generic Invoice creation accepts only a valid Linked Credi
   );
 });
 
+Deno.test('Gate A reference-selected Invoice and Receipt creation use the exact canonical RPC arguments', async () => {
+  const fxReferenceId = '11111111-1111-4111-8111-111111111111';
+  const tables = {
+    companies: [{ id: 'co-1', base_currency: 'MYR' }],
+    customers: [{
+      id: 'cust-a', company_id: 'co-1', customer_name: 'Customer A', customer_id: 'CUST-A',
+      status: 'Active', credit_rating: 'A', is_deleted: false, is_hidden: false,
+    }],
+    user_customer_assignments: [{
+      id: 'assign-a', user_id: 'user-1', customer_id: 'cust-a', company_id: 'co-1', is_active: true,
+    }],
+    bank_accounts: [{
+      id: 'bank-1', company_id: 'co-1', is_active: true, bank_name: 'Bank', account_no: '001',
+    }],
+    invoices: [{
+      id: 'inv-created', company_id: 'co-1', customer_id: 'cust-a', invoice_no: 'INV-MOCK-001',
+      doc_type: 'Invoice', status: 'Draft', invoice_date: '2026-07-24', customer_name: 'Customer A',
+      currency: 'USD', exchange_rate: 4.25, base_currency: 'MYR', subtotal: 0, tax_total: 0,
+      total_amount: 0, base_total: 0, outstanding: 0, fx_decision_id: null,
+    }],
+    invoice_lines: [],
+    receipts: [{
+      id: 'rct-created', company_id: 'co-1', customer_id: 'cust-a', receipt_no: 'RCT-MOCK-001',
+      receipt_date: '2026-07-24', value_date: '2026-07-24', customer_name: 'Customer A',
+      payment_method: 'TT', currency: 'USD', exchange_rate: 4.25, base_currency: 'MYR',
+      receipt_amount: 10, base_amount: 42.5, allocated_amount: 0, unallocated_amount: 10,
+      bank_account_id: 'bank-1', bank_account_name: 'Bank - 001', status: 'Draft',
+      fx_decision_id: null,
+    }],
+    fx_booking_rate_decisions: [],
+  };
+  const client = new MockSupabaseClient(tables, 'service_role');
+
+  const invoice = await new InvoiceService(client as never).createInvoice(clerkAuth, {
+    doc_type: 'Invoice',
+    customer_id: 'cust-a',
+    invoice_date: '2026-07-24',
+    currency: 'USD',
+    fx_reference_rate_id: fxReferenceId,
+  });
+  const receipt = await new ReceiptService(client as never).createReceipt(clerkAuth, {
+    customer_id: 'cust-a',
+    receipt_date: '2026-07-24',
+    payment_method: 'TT',
+    currency: 'USD',
+    fx_reference_rate_id: fxReferenceId,
+    receipt_amount: 10,
+    bank_account_id: 'bank-1',
+  });
+
+  assertEquals(invoice.id, 'inv-created');
+  assertEquals(receipt.id, 'rct-created');
+
+  const invoiceCall = client.rpcCalls.find(call =>
+    call.functionName === 'fx_create_governed_invoice_draft'
+  );
+  const receiptCall = client.rpcCalls.find(call =>
+    call.functionName === 'fx_create_governed_receipt_draft'
+  );
+  assert(invoiceCall);
+  assert(receiptCall);
+  const invoiceParams = invoiceCall.params as MockRow;
+  const receiptParams = receiptCall.params as MockRow;
+  assertEquals(invoiceParams.p_fx_reference_rate_id, fxReferenceId);
+  assertEquals(invoiceParams.p_import_origin, null);
+  assertEquals(invoiceParams.p_explicit_rate_supplied, false);
+  assertEquals(invoiceParams.p_override_reason, null);
+  assertEquals((invoiceParams.p_invoice as MockRow).exchange_rate, 1);
+  assertEquals(receiptParams.p_fx_reference_rate_id, fxReferenceId);
+  assertEquals(receiptParams.p_import_origin, null);
+  assertEquals(receiptParams.p_explicit_rate_supplied, false);
+  assertEquals(receiptParams.p_override_reason, null);
+  assertEquals((receiptParams.p_receipt as MockRow).exchange_rate, 1);
+});
+
+Deno.test('Gate A request validators reject client base authority and mixed reference/manual authority', () => {
+  const baseInvoice = {
+    doc_type: 'Invoice',
+    customer_id: '22222222-2222-4222-8222-222222222222',
+    invoice_date: '2026-07-24',
+    currency: 'USD',
+  };
+  const baseReceipt = {
+    customer_id: '22222222-2222-4222-8222-222222222222',
+    receipt_date: '2026-07-24',
+    payment_method: 'TT',
+    currency: 'USD',
+    receipt_amount: 10,
+    bank_account_id: '33333333-3333-4333-8333-333333333333',
+  };
+  const referenceId = '11111111-1111-4111-8111-111111111111';
+
+  for (const action of [
+    () => validateCreateInvoice({ ...baseInvoice, base_total: 99 }),
+    () => validateCreateReceipt({ ...baseReceipt, base_amount: 99 }),
+    () =>
+      validateCreateInvoice({
+        ...baseInvoice,
+        fx_reference_rate_id: referenceId,
+        exchange_rate: 4.25,
+      }),
+    () =>
+      validateCreateReceipt({
+        ...baseReceipt,
+        fx_reference_rate_id: referenceId,
+        fx_override_reason: 'manual reason',
+      }),
+  ]) {
+    const error = (() => {
+      try {
+        action();
+      } catch (caught) {
+        return caught;
+      }
+      throw new Error('Expected validation failure');
+    })();
+    assert(error instanceof ValidationError);
+  }
+});
+
+Deno.test('Gate A base parity is exact one and rejects reference or non-one rates before mutation RPC', async () => {
+  const tables = {
+    companies: [{ id: 'co-1', base_currency: 'MYR' }],
+    customers: [{
+      id: 'cust-a', company_id: 'co-1', customer_name: 'Customer A', customer_id: 'CUST-A',
+      status: 'Active', credit_rating: 'A', is_deleted: false, is_hidden: false,
+    }],
+    user_customer_assignments: [{
+      id: 'assign-a', user_id: 'user-1', customer_id: 'cust-a', company_id: 'co-1', is_active: true,
+    }],
+    bank_accounts: [{
+      id: 'bank-1', company_id: 'co-1', is_active: true, bank_name: 'Bank', account_no: '001',
+    }],
+    invoices: [{
+      id: 'inv-created', company_id: 'co-1', customer_id: 'cust-a', invoice_no: 'INV-MOCK-001',
+      doc_type: 'Invoice', status: 'Draft', invoice_date: '2026-07-24', customer_name: 'Customer A',
+      currency: 'MYR', exchange_rate: 1, base_currency: 'MYR', subtotal: 0, tax_total: 0,
+      total_amount: 0, base_total: 0, outstanding: 0, fx_decision_id: null,
+    }],
+    invoice_lines: [],
+    receipts: [{
+      id: 'rct-created', company_id: 'co-1', customer_id: 'cust-a', receipt_no: 'RCT-MOCK-001',
+      receipt_date: '2026-07-24', value_date: '2026-07-24', customer_name: 'Customer A',
+      payment_method: 'TT', currency: 'MYR', exchange_rate: 1, base_currency: 'MYR',
+      receipt_amount: 10, base_amount: 10, allocated_amount: 0, unallocated_amount: 10,
+      bank_account_id: 'bank-1', bank_account_name: 'Bank - 001', status: 'Draft',
+      fx_decision_id: null,
+    }],
+    fx_booking_rate_decisions: [],
+  };
+  const client = new MockSupabaseClient(tables, 'service_role');
+  const invoiceService = new InvoiceService(client as never);
+  const receiptService = new ReceiptService(client as never);
+
+  await invoiceService.createInvoice(clerkAuth, {
+    doc_type: 'Invoice',
+    customer_id: 'cust-a',
+    invoice_date: '2026-07-24',
+    currency: 'MYR',
+  });
+  await receiptService.createReceipt(clerkAuth, {
+    customer_id: 'cust-a',
+    receipt_date: '2026-07-24',
+    payment_method: 'TT',
+    currency: 'MYR',
+    receipt_amount: 10,
+    bank_account_id: 'bank-1',
+  });
+
+  const parityInvoiceCall = client.rpcCalls.find(call =>
+    call.functionName === 'fx_create_governed_invoice_draft'
+  );
+  const parityReceiptCall = client.rpcCalls.find(call =>
+    call.functionName === 'fx_create_governed_receipt_draft'
+  );
+  assert(parityInvoiceCall);
+  assert(parityReceiptCall);
+  const parityInvoiceParams = parityInvoiceCall.params as MockRow;
+  const parityReceiptParams = parityReceiptCall.params as MockRow;
+  assertEquals((parityInvoiceParams.p_invoice as MockRow).exchange_rate, 1);
+  assertEquals((parityReceiptParams.p_receipt as MockRow).exchange_rate, 1);
+
+  const callsBeforeRejections = client.rpcCalls.length;
+  for (const action of [
+    () =>
+      invoiceService.createInvoice(clerkAuth, {
+        doc_type: 'Invoice',
+        customer_id: 'cust-a',
+        invoice_date: '2026-07-24',
+        currency: 'MYR',
+        exchange_rate: 1.01,
+      }),
+    () =>
+      receiptService.createReceipt(clerkAuth, {
+        customer_id: 'cust-a',
+        receipt_date: '2026-07-24',
+        payment_method: 'TT',
+        currency: 'MYR',
+        fx_reference_rate_id: '11111111-1111-4111-8111-111111111111',
+        receipt_amount: 10,
+        bank_account_id: 'bank-1',
+      }),
+  ]) {
+    const error = await rejectedValue(action);
+    assert(error instanceof ValidationError);
+  }
+  assertEquals(client.rpcCalls.length, callsBeforeRejections);
+});
+
+Deno.test('Gate A Draft Invoice update service forwards reference authority and rejects mixed client authority before RPC', async () => {
+  const invoiceId = '44444444-4444-4444-8444-444444444441';
+  const referenceId = '44444444-4444-4444-8444-444444444442';
+  const client = new MockSupabaseClient({
+    customers: [{
+      id: 'cust-a',
+      company_id: clerkAuth.companyId,
+      is_deleted: false,
+      is_hidden: false,
+    }],
+    user_customer_assignments: [{
+      id: 'assign-a',
+      user_id: clerkAuth.userId,
+      customer_id: 'cust-a',
+      company_id: clerkAuth.companyId,
+      is_active: true,
+    }],
+    invoices: [{
+      id: invoiceId,
+      company_id: clerkAuth.companyId,
+      customer_id: 'cust-a',
+      doc_type: 'Invoice',
+      status: 'Draft',
+      invoice_date: '2026-07-20',
+      currency: 'USD',
+      base_currency: 'MYR',
+      exchange_rate: 4.25,
+      base_total: 425,
+      total_amount: 100,
+    }],
+  }, 'service_role');
+  const service = new InvoiceService(client as never);
+
+  await service.updateDraftInvoice(clerkAuth, invoiceId, {
+    currency: 'USD',
+    invoice_date: '2026-07-24',
+    fx_reference_rate_id: referenceId,
+    company_id: 'attacker-company',
+    user_id: 'attacker-user',
+  } as Partial<CreateInvoiceInput>);
+
+  assertEquals(client.rpcCalls.length, 1);
+  assertEquals(client.rpcCalls[0].functionName, 'update_draft_invoice');
+  const params = client.rpcCalls[0].params as MockRow;
+  const changes = params.p_changes as MockRow;
+  assertEquals(params.p_invoice_id, invoiceId);
+  assertEquals(params.p_company_id, clerkAuth.companyId);
+  assertEquals(params.p_user_id, clerkAuth.userId);
+  assertEquals(changes.fx_reference_rate_id, referenceId);
+  assertEquals(changes.fx_explicit_rate_supplied, false);
+  assertEquals(changes.fx_override_reason, null);
+  assertEquals(changes.exchange_rate, undefined);
+  assertEquals(changes.base_total, undefined);
+  assertEquals(changes.company_id, undefined);
+  assertEquals(changes.user_id, undefined);
+
+  const invalidCases: Array<{
+    name: string;
+    input: Partial<CreateInvoiceInput> & Record<string, unknown>;
+  }> = [
+    {
+      name: 'reference plus numeric rate',
+      input: { currency: 'USD', fx_reference_rate_id: referenceId, exchange_rate: 4.25 },
+    },
+    {
+      name: 'reference plus override reason',
+      input: {
+        currency: 'USD',
+        fx_reference_rate_id: referenceId,
+        fx_override_reason: 'manual override',
+      },
+    },
+    {
+      name: 'client base total',
+      input: { currency: 'USD', fx_reference_rate_id: referenceId, base_total: 425 },
+    },
+    {
+      name: 'parity plus foreign reference',
+      input: { currency: 'MYR', fx_reference_rate_id: referenceId },
+    },
+    {
+      name: 'parity plus non-one rate',
+      input: { currency: 'MYR', exchange_rate: 1.01 },
+    },
+  ];
+
+  for (const invalidCase of invalidCases) {
+    const callsBefore = client.rpcCalls.length;
+    const error = await rejectedValue(() =>
+      service.updateDraftInvoice(
+        clerkAuth,
+        invoiceId,
+        invalidCase.input as Partial<CreateInvoiceInput>,
+      )
+    );
+    assert(error instanceof ValidationError, invalidCase.name);
+    assertEquals(
+      client.rpcCalls.length,
+      callsBefore,
+      `${invalidCase.name} must fail before the mutation RPC`,
+    );
+  }
+});
+
+Deno.test('Gate A Draft Receipt update service forwards reference authority and rejects invalid scope or mixed authority before RPC', async () => {
+  const receiptId = '55555555-5555-4555-8555-555555555551';
+  const referenceId = '55555555-5555-4555-8555-555555555552';
+  const receipt = {
+    id: receiptId,
+    company_id: clerkAuth.companyId,
+    customer_id: 'cust-a',
+    receipt_no: 'RCT-GATE-A-UPDATE',
+    status: 'Draft',
+    receipt_date: '2026-07-20',
+    currency: 'USD',
+    base_currency: 'MYR',
+    exchange_rate: 4.25,
+    receipt_amount: 100,
+    base_amount: 425,
+  };
+  const client = new MockSupabaseClient({
+    customers: [{
+      id: 'cust-a',
+      company_id: clerkAuth.companyId,
+      is_deleted: false,
+      is_hidden: false,
+    }],
+    user_customer_assignments: [{
+      id: 'assign-a',
+      user_id: clerkAuth.userId,
+      customer_id: 'cust-a',
+      company_id: clerkAuth.companyId,
+      is_active: true,
+    }],
+    receipts: [receipt],
+  }, 'service_role');
+  const service = new ReceiptService(client as never);
+
+  await service.updateDraftReceiptFx(clerkAuth, receiptId, {
+    currency: 'USD',
+    receipt_date: '2026-07-24',
+    fx_reference_rate_id: referenceId,
+  });
+
+  assertEquals(client.rpcCalls.length, 1);
+  assertEquals(client.rpcCalls[0].functionName, 'fx_update_governed_receipt_fx');
+  const params = client.rpcCalls[0].params as MockRow;
+  assertEquals(params.p_company_id, clerkAuth.companyId);
+  assertEquals(params.p_actor_user_id, clerkAuth.userId);
+  assertEquals(params.p_receipt_id, receiptId);
+  assertEquals(params.p_currency, 'USD');
+  assertEquals(params.p_receipt_date, '2026-07-24');
+  assertEquals(params.p_fx_reference_rate_id, referenceId);
+  assertEquals(params.p_explicit_rate_supplied, false);
+  assertEquals(params.p_override_reason, null);
+  assertEquals(params.p_exchange_rate, null);
+  assertEquals(params.p_base_amount, undefined);
+
+  const invalidCases: Array<{
+    name: string;
+    input: Record<string, unknown>;
+  }> = [
+    {
+      name: 'reference plus numeric rate',
+      input: { currency: 'USD', fx_reference_rate_id: referenceId, exchange_rate: 4.25 },
+    },
+    {
+      name: 'reference plus override reason',
+      input: {
+        currency: 'USD',
+        fx_reference_rate_id: referenceId,
+        fx_override_reason: 'manual override',
+      },
+    },
+    {
+      name: 'client base amount',
+      input: { currency: 'USD', fx_reference_rate_id: referenceId, base_amount: 425 },
+    },
+    {
+      name: 'parity plus foreign reference',
+      input: { currency: 'MYR', fx_reference_rate_id: referenceId },
+    },
+    {
+      name: 'parity plus non-one rate',
+      input: { currency: 'MYR', exchange_rate: 1.01 },
+    },
+  ];
+
+  for (const invalidCase of invalidCases) {
+    const callsBefore = client.rpcCalls.length;
+    const error = await rejectedValue(() =>
+      service.updateDraftReceiptFx(clerkAuth, receiptId, invalidCase.input)
+    );
+    assert(error instanceof ValidationError, invalidCase.name);
+    assertEquals(
+      client.rpcCalls.length,
+      callsBefore,
+      `${invalidCase.name} must fail before the mutation RPC`,
+    );
+  }
+
+  const crossCompanyClient = new MockSupabaseClient({
+    receipts: [{ ...receipt, company_id: 'co-other' }],
+  }, 'service_role');
+  const crossCompanyError = await rejectedValue(() =>
+    new ReceiptService(crossCompanyClient as never).updateDraftReceiptFx(
+      clerkAuth,
+      receiptId,
+      { currency: 'USD', fx_reference_rate_id: referenceId },
+    )
+  );
+  assert(crossCompanyError instanceof NotFoundError);
+  assertEquals(crossCompanyClient.rpcCalls.length, 0);
+
+  const unauthorizedAuth: AuthContext = {
+    ...clerkAuth,
+    roles: ['System Admin'],
+    highestRole: 'System Admin',
+  };
+  const unauthorizedClient = new MockSupabaseClient({ receipts: [receipt] }, 'service_role');
+  const unauthorizedError = await rejectedValue(() =>
+    new ReceiptService(unauthorizedClient as never).updateDraftReceiptFx(
+      unauthorizedAuth,
+      receiptId,
+      { currency: 'USD', fx_reference_rate_id: referenceId },
+    )
+  );
+  assertEquals((unauthorizedError as { code?: string }).code, 'AUTHORIZATION_ERROR');
+  assertEquals(unauthorizedClient.rpcCalls.length, 0);
+});
+
 Deno.test('Batch 9D-D Linked Credit Note creation fails closed for every invalid reference class', async () => {
   const cases: Array<{ label: string; reference: MockRow | null }> = [
     { label: 'missing reference', reference: null },
@@ -2457,6 +2899,96 @@ Deno.test('Batch 9D-D receipt RPC summary includes 1,001 authorized rows and exc
   assertEquals(client.rpcCalls.some(call => call.functionName === 'ar_receipt_collection_summary'), false);
 });
 
+Deno.test('Gate A Invoice and Receipt pagination reaches page two and searches beyond the first 15 rows', async () => {
+  const invoices = Array.from({ length: 31 }, (_, index) => ({
+    id: `gate-a-invoice-${String(index).padStart(2, '0')}`,
+    company_id: 'co-1',
+    customer_id: 'cust-a',
+    invoice_no: index === 0 ? 'GATE-A-INVOICE-DEEP-SEARCH' : `GATE-A-INV-${index}`,
+    customer_name: 'Customer A',
+    reference_no: null,
+    doc_type: 'Invoice',
+    status: 'Open',
+    posting_period: '2026-07',
+    invoice_date: '2026-07-24',
+    currency: 'MYR',
+    outstanding: 1,
+    total_amount: 1,
+    exchange_rate: 1,
+    base_total: 1,
+    fx_decision_id: null,
+  }));
+  const receipts = Array.from({ length: 31 }, (_, index) => ({
+    id: `gate-a-receipt-${String(index).padStart(2, '0')}`,
+    company_id: 'co-1',
+    customer_id: 'cust-a',
+    receipt_no: index === 0 ? 'GATE-A-RECEIPT-DEEP-SEARCH' : `GATE-A-RCT-${index}`,
+    customer_name: 'Customer A',
+    reference_no: null,
+    status: 'Posted',
+    payment_method: 'Bank Transfer',
+    posting_period: '2026-07',
+    receipt_date: '2026-07-24',
+    currency: 'MYR',
+    unallocated_amount: 1,
+    receipt_amount: 1,
+    exchange_rate: 1,
+    base_amount: 1,
+    fx_decision_id: null,
+  }));
+  const client = new MockSupabaseClient({
+    companies: [{ id: 'co-1', base_currency: 'MYR' }],
+    customers: [{
+      id: 'cust-a',
+      company_id: 'co-1',
+      is_deleted: false,
+      is_hidden: false,
+    }],
+    user_customer_assignments: [{
+      id: 'assign-a',
+      user_id: 'user-1',
+      customer_id: 'cust-a',
+      company_id: 'co-1',
+      is_active: true,
+    }],
+    invoices,
+    receipts,
+    fx_booking_rate_decisions: [],
+  });
+  const invoiceService = new InvoiceService(client as never, client as never);
+  const receiptService = new ReceiptService(client as never, client as never);
+
+  const invoicePageTwo = await invoiceService.listInvoices(
+    clerkAuth,
+    { doc_type: 'Invoice', status: 'Open' },
+    { page: 2, page_size: 15 },
+  );
+  const receiptPageTwo = await receiptService.listReceipts(
+    clerkAuth,
+    { status: 'Posted' },
+    { page: 2, page_size: 15 },
+  );
+  assertEquals(invoicePageTwo.invoices.length, 15);
+  assertEquals(invoicePageTwo.total, 31);
+  assertEquals(receiptPageTwo.receipts.length, 15);
+  assertEquals(receiptPageTwo.total, 31);
+
+  const invoiceSearch = await invoiceService.listInvoices(
+    clerkAuth,
+    { search: 'INVOICE-DEEP-SEARCH' },
+    { page: 1, page_size: 15 },
+  );
+  const receiptSearch = await receiptService.listReceipts(
+    clerkAuth,
+    { search: 'RECEIPT-DEEP-SEARCH' },
+    { page: 1, page_size: 15 },
+  );
+  assertEquals(invoiceSearch.total, 1);
+  assertEquals(invoiceSearch.invoices[0].invoice_no, 'GATE-A-INVOICE-DEEP-SEARCH');
+  assertEquals(receiptSearch.total, 1);
+  assertEquals(receiptSearch.receipts[0].receipt_no, 'GATE-A-RECEIPT-DEEP-SEARCH');
+});
+
 Deno.test('Batch 9D-D aging summary and by-customer contracts aggregate 1,001 rows inside RPCs before pagination', async () => {
   const invoices = Array.from({ length: 1001 }, (_, index) => ({
     id: `aging-${index}`, company_id: 'co-1', customer_id: 'cust-aging', doc_type: 'Invoice', status: 'Open',
@@ -2789,7 +3321,11 @@ Deno.test('Batch 9D-D migration 027 defines complete-set scoped aggregates and s
       && invoiceIndex.includes("dependencies.createService(req.headers.get('Authorization')!)"),
     'Invoice index must inject the request Authorization header into the JWT-scoped read client',
   );
-  assert(receiptIndex.includes("getUserClient(req.headers.get('Authorization')!)"), 'Receipt index must inject the JWT-scoped read client');
+  assert(
+    receiptIndex.includes('getUserClient(authorizationHeader)')
+      && receiptIndex.includes("dependencies.createService(req.headers.get('Authorization')!)"),
+    'Receipt index must inject the request Authorization header into the JWT-scoped read client',
+  );
   assert(reportIndex.includes("getUserClient(req.headers.get('Authorization')!)"), 'Report index must inject the JWT-scoped migration-027 read client');
   assert(creditNoteIndex.includes("getUserClient(req.headers.get('Authorization')!)"), 'Credit-note index must inject the JWT-scoped delegated read client');
   assert(debitNoteIndex.includes("getUserClient(req.headers.get('Authorization')!)"), 'Debit-note index must inject the JWT-scoped delegated read client');
@@ -3118,6 +3654,190 @@ function postedReferenceHandler(
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
 }
+
+const receiptFxRouteReceiptId = '88888888-8888-4888-8888-888888888881';
+const receiptFxRouteCompanyId = '88888888-8888-4888-8888-888888888882';
+const receiptFxRouteUserId = '88888888-8888-4888-8888-888888888883';
+const receiptFxRouteCustomerId = '88888888-8888-4888-8888-888888888884';
+const receiptFxRouteReferenceId = '88888888-8888-4888-8888-888888888885';
+
+const receiptFxRouteAuth: AuthContext = {
+  userId: receiptFxRouteUserId,
+  companyId: receiptFxRouteCompanyId,
+  roles: ['AR Clerk'],
+  highestRole: 'AR Clerk',
+  email: 'receipt-route-clerk@example.test',
+};
+
+function receiptFxRequest(body: unknown): Request {
+  return new Request(
+    `https://example.test/functions/v1/receipts/${receiptFxRouteReceiptId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer receipt-route-test-token',
+        'Content-Type': 'application/json',
+        'X-Company-Id': receiptFxRouteCompanyId,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+function receiptFxRouteTables(
+  overrides: MockRow = {},
+): Record<string, MockRow[]> {
+  return {
+    customers: [{
+      id: receiptFxRouteCustomerId,
+      company_id: receiptFxRouteCompanyId,
+      is_deleted: false,
+      is_hidden: false,
+    }],
+    user_customer_assignments: [{
+      id: 'receipt-route-assignment',
+      user_id: receiptFxRouteUserId,
+      customer_id: receiptFxRouteCustomerId,
+      company_id: receiptFxRouteCompanyId,
+      is_active: true,
+    }],
+    receipts: [{
+      id: receiptFxRouteReceiptId,
+      company_id: receiptFxRouteCompanyId,
+      customer_id: receiptFxRouteCustomerId,
+      receipt_no: 'RCT-GATE-A-ROUTE',
+      status: 'Draft',
+      receipt_date: '2026-07-20',
+      currency: 'USD',
+      base_currency: 'MYR',
+      exchange_rate: 4.25,
+      receipt_amount: 100,
+      base_amount: 425,
+      ...overrides,
+    }],
+  };
+}
+
+function receiptFxHandler(
+  client: MockSupabaseClient,
+  auth: AuthContext = receiptFxRouteAuth,
+): (req: Request) => Promise<Response> {
+  return createReceiptHandler({
+    authenticate: (req, companyId) => {
+      assertEquals(req.headers.get('Authorization'), 'Bearer receipt-route-test-token');
+      assertEquals(companyId, receiptFxRouteCompanyId);
+      return Promise.resolve(auth);
+    },
+    createService: (authorizationHeader) => {
+      assertEquals(authorizationHeader, 'Bearer receipt-route-test-token');
+      return new ReceiptService(client as never);
+    },
+  });
+}
+
+Deno.test('Gate A PATCH Receipt route reaches the governed Draft FX update with authenticated tenant authority', async () => {
+  const client = new MockSupabaseClient(receiptFxRouteTables(), 'service_role');
+  const response = await receiptFxHandler(client)(receiptFxRequest({
+    currency: 'USD',
+    receipt_date: '2026-07-24',
+    fx_reference_rate_id: receiptFxRouteReferenceId,
+  }));
+
+  assertEquals(response.status, 200);
+  const body = await responseJson(response);
+  assertEquals(body.success, true);
+  assertEquals(client.rpcCalls.length, 1);
+  assertEquals(client.rpcCalls[0].functionName, 'fx_update_governed_receipt_fx');
+  const params = client.rpcCalls[0].params as MockRow;
+  assertEquals(params.p_company_id, receiptFxRouteCompanyId);
+  assertEquals(params.p_actor_user_id, receiptFxRouteUserId);
+  assertEquals(params.p_receipt_id, receiptFxRouteReceiptId);
+  assertEquals(params.p_currency, 'USD');
+  assertEquals(params.p_receipt_date, '2026-07-24');
+  assertEquals(params.p_fx_reference_rate_id, receiptFxRouteReferenceId);
+  assertEquals(params.p_explicit_rate_supplied, false);
+  assertEquals(params.p_override_reason, null);
+  assertEquals(params.p_exchange_rate, null);
+
+  const corsResponse = await receiptFxHandler(client)(new Request(
+    `https://example.test/functions/v1/receipts/${receiptFxRouteReceiptId}`,
+    {
+      method: 'OPTIONS',
+      headers: { 'X-Company-Id': receiptFxRouteCompanyId },
+    },
+  ));
+  assertEquals(corsResponse.status, 204);
+  assert(
+    corsResponse.headers.get('Access-Control-Allow-Methods')?.split(',').map((method) => method.trim())
+      .includes('PATCH'),
+    'Receipt CORS preflight must advertise the PATCH Draft FX update route',
+  );
+});
+
+Deno.test('Gate A PATCH Receipt route rejects mixed authority, cross-company, unauthorized, and non-Draft requests before RPC', async () => {
+  for (const invalidBody of [
+    {
+      currency: 'USD',
+      fx_reference_rate_id: receiptFxRouteReferenceId,
+      exchange_rate: 4.25,
+    },
+    {
+      currency: 'USD',
+      fx_reference_rate_id: receiptFxRouteReferenceId,
+      fx_override_reason: 'manual override',
+    },
+    {
+      currency: 'USD',
+      fx_reference_rate_id: receiptFxRouteReferenceId,
+      base_amount: 425,
+    },
+    {
+      currency: 'USD',
+      fx_reference_rate_id: receiptFxRouteReferenceId,
+      company_id: 'attacker-company',
+    },
+  ]) {
+    const client = new MockSupabaseClient(receiptFxRouteTables(), 'service_role');
+    const response = await receiptFxHandler(client)(receiptFxRequest(invalidBody));
+    assertEquals(response.status, 400);
+    assertEquals((await responseJson(response)).success, false);
+    assertEquals(client.rpcCalls.length, 0);
+  }
+
+  const crossCompanyClient = new MockSupabaseClient(
+    receiptFxRouteTables({ company_id: '99999999-9999-4999-8999-999999999999' }),
+    'service_role',
+  );
+  const crossCompanyResponse = await receiptFxHandler(crossCompanyClient)(receiptFxRequest({
+    currency: 'USD',
+    fx_reference_rate_id: receiptFxRouteReferenceId,
+  }));
+  assertEquals(crossCompanyResponse.status, 404);
+  assertEquals(crossCompanyClient.rpcCalls.length, 0);
+
+  const unauthorizedClient = new MockSupabaseClient(receiptFxRouteTables(), 'service_role');
+  const unauthorizedResponse = await receiptFxHandler(unauthorizedClient, {
+    ...receiptFxRouteAuth,
+    roles: ['System Admin'],
+    highestRole: 'System Admin',
+  })(receiptFxRequest({
+    currency: 'USD',
+    fx_reference_rate_id: receiptFxRouteReferenceId,
+  }));
+  assertEquals(unauthorizedResponse.status, 403);
+  assertEquals(unauthorizedClient.rpcCalls.length, 0);
+
+  const postedClient = new MockSupabaseClient(
+    receiptFxRouteTables({ status: 'Posted' }),
+    'service_role',
+  );
+  const postedResponse = await receiptFxHandler(postedClient)(receiptFxRequest({
+    currency: 'USD',
+    fx_reference_rate_id: receiptFxRouteReferenceId,
+  }));
+  assertEquals(postedResponse.status, 400);
+  assertEquals(postedClient.rpcCalls.length, 0);
+});
 
 Deno.test('Batch 9D-D F-05/F-07 production handler reaches posted reference RPC with AuthContext-bound identity', async () => {
   const client = new MockSupabaseClient({
@@ -4385,7 +5105,12 @@ Deno.test('Batch 9D-D production constructor composition keeps trusted and authe
       && invoiceIndex.includes("dependencies.createService(req.headers.get('Authorization')!)"),
     'Invoice handler dependency composition must preserve the request JWT-scoped client',
   );
-  for (const indexSource of [receiptIndex, reportIndex, creditIndex, debitIndex]) {
+  assert(
+    receiptIndex.includes('getUserClient(authorizationHeader)')
+      && receiptIndex.includes("dependencies.createService(req.headers.get('Authorization')!)"),
+    'Receipt handler dependency composition must preserve the request JWT-scoped client',
+  );
+  for (const indexSource of [reportIndex, creditIndex, debitIndex]) {
     assert(indexSource.includes("getUserClient(req.headers.get('Authorization')!)"), 'Every user-request read composition must inject the JWT-scoped client');
   }
   assert(creditService.includes('new InvoiceService(this.client, readClient)'), 'Credit-note nested invoice service must receive read client explicitly');

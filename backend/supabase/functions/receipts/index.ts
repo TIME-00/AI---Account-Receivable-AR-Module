@@ -6,12 +6,14 @@
 
 import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
+import type { AuthContext } from '../_shared/auth.ts';
 import { getUserClient } from '../_shared/db.ts';
 import { errorResponse, successResponse } from '../_shared/errors.ts';
-import { parseRequestBody, parsePagination, validateUUID } from '../_shared/validators.ts';
+import { parseRequestBody, parsePagination } from '../_shared/validators.ts';
 import { ReceiptService } from './service.ts';
 import {
   validateCreateReceipt,
+  validateUpdateDraftReceiptFx,
   validatePostReceipt,
   validateCancelReceipt,
   validateClearReceipt,
@@ -45,18 +47,40 @@ function matchRoute(url: URL): { route: string; params: Record<string, string> }
   return { route: 'notFound', params: {} };
 }
 
-Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method === 'OPTIONS') return handleCORS();
+function handleReceiptCORS(): Response {
+  const response = handleCORS();
+  response.headers.set(
+    'Access-Control-Allow-Methods',
+    'POST, GET, OPTIONS, PUT, PATCH, DELETE',
+  );
+  return response;
+}
+
+export interface ReceiptHandlerDependencies {
+  authenticate(req: Request, companyId: string): Promise<AuthContext>;
+  createService(authorizationHeader: string): ReceiptService;
+}
+
+const productionDependencies: ReceiptHandlerDependencies = {
+  authenticate: getAuthContext,
+  createService: (authorizationHeader) => new ReceiptService(
+    undefined,
+    getUserClient(authorizationHeader),
+  ),
+};
+
+export async function handleReceiptRequest(
+  req: Request,
+  dependencies: ReceiptHandlerDependencies = productionDependencies,
+): Promise<Response> {
+  if (req.method === 'OPTIONS') return handleReceiptCORS();
 
   try {
     const url = new URL(req.url);
     const { route, params } = matchRoute(url);
     const companyId = extractCompanyId(req);
-    const auth = await getAuthContext(req, companyId);
-    const service = new ReceiptService(
-      undefined,
-      getUserClient(req.headers.get('Authorization')!),
-    );
+    const auth = await dependencies.authenticate(req, companyId);
+    const service = dependencies.createService(req.headers.get('Authorization')!);
 
     if (route === 'collection') {
       if (req.method === 'POST') {
@@ -83,6 +107,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (route === 'single' && req.method === 'GET') {
       const receipt = await service.getReceiptById(auth, params.id);
+      return jsonResponse(successResponse(receipt));
+    }
+
+    if (route === 'single' && req.method === 'PATCH') {
+      const body = await parseRequestBody(req);
+      const input = validateUpdateDraftReceiptFx(body as Record<string, unknown>);
+      const receipt = await service.updateDraftReceiptFx(auth, params.id, input);
       return jsonResponse(successResponse(receipt));
     }
 
@@ -130,4 +161,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { status, body } = errorResponse(error);
     return jsonResponse(body, status);
   }
-});
+}
+
+export function createReceiptHandler(
+  dependencies: ReceiptHandlerDependencies = productionDependencies,
+): (req: Request) => Promise<Response> {
+  return (req) => handleReceiptRequest(req, dependencies);
+}
+
+export const handler = createReceiptHandler();
+
+if (import.meta.main) {
+  Deno.serve(handler);
+}
