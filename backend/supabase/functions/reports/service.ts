@@ -257,6 +257,7 @@ export class ReportService {
     auth: AuthContext,
     asOfDate?: string,
     pagination?: PaginationParams,
+    creditRating?: string,
   ): Promise<{ rows: CustomerAgingRow[]; total: number }> {
     requireOperationalReadRole(auth);
     const refDate = asOfDate ?? new Date().toISOString().slice(0, 10);
@@ -269,6 +270,7 @@ export class ReportService {
         p_as_of_date: refDate,
         p_page: pagination?.page ?? 1,
         p_page_size: pagination?.page_size ?? 200,
+        p_credit_rating: creditRating ?? null,
       },
     );
   }

@@ -428,6 +428,10 @@ class MockSupabaseClient {
     return (this.tables.invoices ?? []).filter(row =>
       row.company_id === params.p_company_id
       && customers.has(row.customer_id)
+      && (
+        row.invoice_date === undefined
+        || String(row.invoice_date) <= String(params.p_as_of_date)
+      )
       && ['Open', 'Overdue', 'Partially Paid'].includes(String(row.status))
       && ['Invoice', 'Debit Note'].includes(String(row.doc_type))
       && Number(row.outstanding) > 0
@@ -508,7 +512,15 @@ class MockSupabaseClient {
         meta: monetaryAggregationMeta(baseCurrency, byCurrency), current_amount: amounts.current,
         bucket_1_30: amounts['1_30'], bucket_31_60: amounts['31_60'], bucket_61_90: amounts['61_90'], bucket_over_90: amounts.over_90,
       };
-    }).sort((a, b) => b.base_total - a.base_total || String(a.customer_name).localeCompare(String(b.customer_name)));
+    }).filter(row =>
+      params.p_credit_rating === null
+      || params.p_credit_rating === undefined
+      || row.credit_rating === params.p_credit_rating
+    ).sort((a, b) =>
+      b.base_total - a.base_total
+      || String(a.customer_name).localeCompare(String(b.customer_name))
+      || String(a.customer_id).localeCompare(String(b.customer_id))
+    );
     const page = Number(params.p_page);
     const pageSize = Number(params.p_page_size);
     return { rows: customerRows.slice((page - 1) * pageSize, page * pageSize), total: customerRows.length };
@@ -3014,6 +3026,184 @@ Deno.test('Batch 9D-D aging summary and by-customer contracts aggregate 1,001 ro
   assertEquals(byCustomer.rows[0].total_outstanding, 1001);
   assertEquals(client.rpcCalls.some(call => call.functionName === 'ar_aging_summary'), true);
   assertEquals(client.rpcCalls.some(call => call.functionName === 'ar_aging_by_customer'), true);
+});
+
+Deno.test('Gate B credit-rating drill-down reconciles outstanding-only dashboard count and base amount over all pages', async () => {
+  const customers = [
+    {
+      id: 'cust-a1', company_id: 'co-1', customer_id: 'A-001',
+      customer_name: 'Alpha One', credit_limit: 5000, credit_rating: 'A',
+      is_deleted: false, is_hidden: false,
+    },
+    {
+      id: 'cust-a2', company_id: 'co-1', customer_id: 'A-002',
+      customer_name: 'Alpha Two', credit_limit: 5000, credit_rating: 'A',
+      is_deleted: false, is_hidden: false,
+    },
+    {
+      id: 'cust-b1', company_id: 'co-1', customer_id: 'B-001',
+      customer_name: 'Beta One', credit_limit: 5000, credit_rating: 'B',
+      is_deleted: false, is_hidden: false,
+    },
+    {
+      id: 'cust-hidden', company_id: 'co-1', customer_id: 'A-HIDDEN',
+      customer_name: 'Hidden Alpha', credit_limit: 5000, credit_rating: 'A',
+      is_deleted: false, is_hidden: true,
+    },
+  ];
+  const invoices = [
+    {
+      id: 'inv-a1', company_id: 'co-1', customer_id: 'cust-a1',
+      doc_type: 'Invoice', status: 'Open', invoice_date: '2026-01-10',
+      due_date: '2026-01-20', outstanding: 100, exchange_rate: 1,
+      currency: 'MYR',
+    },
+    {
+      id: 'inv-a2', company_id: 'co-1', customer_id: 'cust-a2',
+      doc_type: 'Debit Note', status: 'Overdue', invoice_date: '2026-01-11',
+      due_date: '2026-01-15', outstanding: 50, exchange_rate: 2,
+      currency: 'SGD',
+    },
+    {
+      id: 'inv-b1', company_id: 'co-1', customer_id: 'cust-b1',
+      doc_type: 'Invoice', status: 'Open', invoice_date: '2026-01-12',
+      due_date: '2026-01-20', outstanding: 999, exchange_rate: 1,
+      currency: 'MYR',
+    },
+    {
+      id: 'inv-future', company_id: 'co-1', customer_id: 'cust-a1',
+      doc_type: 'Invoice', status: 'Open', invoice_date: '2026-02-01',
+      due_date: '2026-02-10', outstanding: 777, exchange_rate: 1,
+      currency: 'MYR',
+    },
+    {
+      id: 'inv-hidden', company_id: 'co-1', customer_id: 'cust-hidden',
+      doc_type: 'Invoice', status: 'Open', invoice_date: '2026-01-10',
+      due_date: '2026-01-20', outstanding: 888, exchange_rate: 1,
+      currency: 'MYR',
+    },
+  ];
+  const client = new MockSupabaseClient({
+    companies: [{ id: 'co-1', base_currency: 'MYR' }],
+    customers,
+    invoices,
+  });
+  const service = new ReportService(client as never, client as never);
+
+  const pageOne = await service.getAgingByCustomer(
+    managerAuth,
+    '2026-01-31',
+    { page: 1, page_size: 1 },
+    'A',
+  );
+  const pageTwo = await service.getAgingByCustomer(
+    managerAuth,
+    '2026-01-31',
+    { page: 2, page_size: 1 },
+    'A',
+  );
+  const rows = [...pageOne.rows, ...pageTwo.rows];
+
+  assertEquals(pageOne.total, 2);
+  assertEquals(pageTwo.total, 2);
+  assertEquals(rows.length, 2);
+  assertEquals(rows.reduce((sum, row) => sum + row.base_total, 0), 200);
+  assert(rows.every(row => row.credit_rating === 'A'));
+  assert(rows.every(row => row.customer_id !== 'cust-hidden'));
+
+  const ratingCalls = client.rpcCalls.filter(call =>
+    call.functionName === 'ar_aging_by_customer'
+  );
+  assertEquals(ratingCalls.length, 2);
+  const ratingParams = ratingCalls.map(call =>
+    call.params as Record<string, unknown>
+  );
+  assert(ratingParams.every(params => params.p_credit_rating === 'A'));
+  assert(ratingParams.every(params => params.p_company_id === managerAuth.companyId));
+  assert(ratingParams.every(params => params.p_user_id === managerAuth.userId));
+});
+
+Deno.test('Gate B Credit and Debit Note fixtures preserve populated, empty, hidden, assignment, and tenant visibility', async () => {
+  const tables = {
+    companies: [
+      { id: 'co-1', base_currency: 'MYR' },
+      { id: 'co-2', base_currency: 'MYR' },
+    ],
+    customers: [
+      {
+        id: 'cust-visible', company_id: 'co-1', customer_id: 'VISIBLE',
+        customer_name: 'Visible Customer', is_deleted: false, is_hidden: false,
+      },
+      {
+        id: 'cust-hidden', company_id: 'co-1', customer_id: 'HIDDEN',
+        customer_name: 'Hidden Customer', is_deleted: false, is_hidden: true,
+      },
+      {
+        id: 'cust-other', company_id: 'co-2', customer_id: 'OTHER',
+        customer_name: 'Other Tenant', is_deleted: false, is_hidden: false,
+      },
+    ],
+    user_customer_assignments: [{
+      id: 'assign-visible', user_id: 'user-1', company_id: 'co-1',
+      customer_id: 'cust-visible', is_active: true,
+    }],
+    invoices: [
+      {
+        id: 'cn-visible', company_id: 'co-1', customer_id: 'cust-visible',
+        invoice_no: 'CN-LOCAL-001', doc_type: 'Credit Note', status: 'Open',
+        invoice_date: '2026-01-01', currency: 'MYR', outstanding: 25,
+        exchange_rate: 1, total_amount: 25, base_total: 25, fx_decision_id: null,
+      },
+      {
+        id: 'dn-visible', company_id: 'co-1', customer_id: 'cust-visible',
+        invoice_no: 'DN-LOCAL-001', doc_type: 'Debit Note', status: 'Open',
+        invoice_date: '2026-01-02', currency: 'MYR', outstanding: 30,
+        exchange_rate: 1, total_amount: 30, base_total: 30, fx_decision_id: null,
+      },
+      {
+        id: 'dn-hidden', company_id: 'co-1', customer_id: 'cust-hidden',
+        invoice_no: 'DN-HIDDEN-001', doc_type: 'Debit Note', status: 'Open',
+        invoice_date: '2026-01-03', currency: 'MYR', outstanding: 40,
+        exchange_rate: 1, total_amount: 40, base_total: 40, fx_decision_id: null,
+      },
+      {
+        id: 'cn-other', company_id: 'co-2', customer_id: 'cust-other',
+        invoice_no: 'CN-OTHER-001', doc_type: 'Credit Note', status: 'Open',
+        invoice_date: '2026-01-04', currency: 'MYR', outstanding: 50,
+        exchange_rate: 1, total_amount: 50, base_total: 50, fx_decision_id: null,
+      },
+    ],
+    fx_booking_rate_decisions: [],
+  };
+  const readClient = new MockSupabaseClient(tables, 'authenticated');
+  const service = new InvoiceService(
+    new MockSupabaseClient(tables, 'service_role') as never,
+    readClient as never,
+  );
+
+  const creditNotes = await service.listInvoices(
+    clerkAuth,
+    { doc_type: 'Credit Note' },
+    { page: 1, page_size: 20 },
+  );
+  const debitNotes = await service.listInvoices(
+    clerkAuth,
+    { doc_type: 'Debit Note' },
+    { page: 1, page_size: 20 },
+  );
+  const empty = await service.listInvoices(
+    { ...clerkAuth, userId: 'unassigned-user' },
+    { doc_type: 'Credit Note' },
+    { page: 1, page_size: 20 },
+  );
+
+  assertEquals(creditNotes.invoices.length, 1);
+  assertEquals(creditNotes.invoices[0]?.id, 'cn-visible');
+  assertEquals(debitNotes.invoices.length, 1);
+  assertEquals(debitNotes.invoices[0]?.id, 'dn-visible');
+  assertEquals(empty.invoices.length, 0);
+  assert(!debitNotes.invoices.some(row => row.id === 'dn-hidden'));
+  assert(!creditNotes.invoices.some(row => row.id === 'cn-other'));
 });
 
 Deno.test('Batch 9D-D ReportService.getCustomerStatement returns null mixed legacy scalars and base/per-currency balances', async () => {

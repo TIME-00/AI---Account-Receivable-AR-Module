@@ -8,7 +8,12 @@ import { handleCORS, jsonResponse } from '../_shared/cors.ts';
 import { getAuthContext, extractCompanyId } from '../_shared/auth.ts';
 import { getUserClient } from '../_shared/db.ts';
 import { errorResponse, successResponse, ValidationError } from '../_shared/errors.ts';
-import { parsePagination, validateDate } from '../_shared/validators.ts';
+import { CREDIT_RATINGS } from '../_shared/constants.ts';
+import {
+  parsePagination,
+  validateDate,
+  validateEnum,
+} from '../_shared/validators.ts';
 import { ReportService } from './service.ts';
 
 const DEFAULT_BUSINESS_TIME_ZONE = 'Asia/Kuala_Lumpur';
@@ -109,8 +114,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (route === 'agingByCustomer' && req.method === 'GET') {
       const asOfDate = url.searchParams.get('as_of_date') ?? undefined;
       if (asOfDate) validateDate(asOfDate, 'as_of_date');
+      const creditRatingText = url.searchParams.get('credit_rating');
+      const creditRating = creditRatingText === null
+        ? undefined
+        : validateEnum(creditRatingText, CREDIT_RATINGS, 'credit_rating');
       const pagination = parsePagination(url);
-      const result = await service.getAgingByCustomer(auth, asOfDate, pagination);
+      const result = await service.getAgingByCustomer(
+        auth,
+        asOfDate,
+        pagination,
+        creditRating,
+      );
       return jsonResponse(successResponse(result.rows, {
         total: result.total, page: pagination.page, page_size: pagination.page_size,
       }));

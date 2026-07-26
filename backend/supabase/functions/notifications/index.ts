@@ -1,105 +1,137 @@
 // ============================================================================
 // TSH Synergy ERP - Accounts Receivable Module
 // Edge Function: notifications
-// Read-only derived notification signals. No fake messages, no mutations.
+// Cursor-paginated derived import alerts with per-user acknowledgement state.
 // ============================================================================
 
-import { handleCORS, jsonResponse } from '../_shared/cors.ts';
-import { extractCompanyId, getAuthContext, requireOperationalReadRole } from '../_shared/auth.ts';
-import { getAdminClient } from '../_shared/db.ts';
-import { errorResponse, successResponse, ValidationError } from '../_shared/errors.ts';
+import { handleCORS, jsonResponse } from "../_shared/cors.ts";
+import {
+  extractCompanyId,
+  getAuthContext,
+  requireOperationalReadRole,
+} from "../_shared/auth.ts";
+import type { AuthContext } from "../_shared/auth.ts";
+import { getAdminClient } from "../_shared/db.ts";
+import {
+  errorResponse,
+  successResponse,
+  ValidationError,
+} from "../_shared/errors.ts";
+import { parseRequestBody } from "../_shared/validators.ts";
+import {
+  parseNotificationListParams,
+  parseReadAllBody,
+  parseReadOneBody,
+} from "./contract.ts";
+import { NotificationService } from "./service.ts";
+import type { NotificationServiceContract } from "./service.ts";
 
-type NotificationItem = {
-  id: string;
-  type: 'import_review' | 'import_error' | 'overdue_ar';
-  severity: 'info' | 'warning' | 'error';
-  title: string;
-  message: string;
-  route: string;
-  created_at: string | null;
-  metadata: Record<string, string | number | null>;
-};
+type Route = "list" | "unreadCount" | "readOne" | "readAll" | "notFound";
 
-type ImportBatchRow = {
-  id: string;
-  batch_name: string;
-  import_type: 'invoice' | 'receipt';
-  status: string;
-  error_rows: number | null;
-  unmatched_count: number | null;
-  created_at: string | null;
-};
-
-function normalizeLimit(value: string | null): number {
-  if (!value) return 10;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) {
-    throw new ValidationError('limit must be an integer from 1 to 20.', { field: 'limit' });
-  }
-  return parsed;
+function getSubPath(pathname: string): string {
+  const index = pathname.indexOf("/notifications");
+  if (index === -1) return pathname;
+  return pathname.slice(index + "/notifications".length) || "/";
 }
 
-function importRoute(importType: 'invoice' | 'receipt'): string {
-  return importType === 'receipt' ? '/receipts/import' : '/invoices/import';
+function matchRoute(pathname: string): Route {
+  const subPath = getSubPath(pathname);
+  if (/^\/?$/.test(subPath)) return "list";
+  if (/^\/unread-count\/?$/.test(subPath)) return "unreadCount";
+  if (/^\/read\/?$/.test(subPath)) return "readOne";
+  if (/^\/read-all\/?$/.test(subPath)) return "readAll";
+  return "notFound";
 }
 
-Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method === 'OPTIONS') return handleCORS();
+function notificationCors(): Response {
+  const response = handleCORS();
+  response.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  return response;
+}
+
+async function optionalJsonBody(
+  req: Request,
+): Promise<Record<string, unknown>> {
+  if (req.body === null) return {};
+  return await parseRequestBody<Record<string, unknown>>(req);
+}
+
+export interface NotificationHandlerDependencies {
+  authenticate(req: Request, companyId: string): Promise<AuthContext>;
+  createService(): NotificationServiceContract;
+}
+
+const productionDependencies: NotificationHandlerDependencies = {
+  authenticate: getAuthContext,
+  createService: () => new NotificationService(getAdminClient()),
+};
+
+export async function handleNotificationRequest(
+  req: Request,
+  dependencies: NotificationHandlerDependencies = productionDependencies,
+): Promise<Response> {
+  if (req.method === "OPTIONS") return notificationCors();
 
   try {
     const url = new URL(req.url);
-    if (req.method !== 'GET') {
-      return jsonResponse(
-        { success: false, error: { code: 'ROUTE_NOT_FOUND', message: `No route matches ${req.method} ${url.pathname}` } },
-        404,
-      );
-    }
-
+    const route = matchRoute(url.pathname);
     const companyId = extractCompanyId(req);
-    const auth = await getAuthContext(req, companyId);
+    const auth = await dependencies.authenticate(req, companyId);
     requireOperationalReadRole(auth);
+    const service = dependencies.createService();
 
-    const limit = normalizeLimit(url.searchParams.get('limit'));
-    const client = getAdminClient();
-
-    const { data: importBatches, error: importError } = await client
-      .from('import_batches')
-      .select('id, batch_name, import_type, status, error_rows, unmatched_count, created_at')
-      .eq('company_id', auth.companyId)
-      .in('status', ['Parsed', 'Validated', 'Completed'])
-      .or('error_rows.gt.0,unmatched_count.gt.0')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (importError) {
-      throw new Error(`Failed to derive import notifications: ${importError.message}`);
+    if (route === "list" && req.method === "GET") {
+      const result = await service.list(auth, parseNotificationListParams(url));
+      return jsonResponse({
+        success: true,
+        data: result.data,
+        meta: result.meta,
+      });
     }
 
-    const importNotifications: NotificationItem[] = ((importBatches ?? []) as ImportBatchRow[]).map((batch): NotificationItem => {
-      const needsReview = Number(batch.unmatched_count ?? 0) > 0;
-      return {
-        id: `import-${batch.id}`,
-        type: needsReview ? 'import_review' : 'import_error',
-        severity: needsReview ? 'warning' : 'error',
-        title: needsReview ? 'Import rows need review' : 'Import completed with errors',
-        message: `${batch.batch_name} (${batch.import_type}) has ${batch.unmatched_count ?? 0} unmatched/review rows and ${batch.error_rows ?? 0} error rows.`,
-        route: importRoute(batch.import_type),
-        created_at: batch.created_at,
-        metadata: {
-          batch_id: batch.id,
-          import_type: batch.import_type,
-          status: batch.status,
-          error_rows: batch.error_rows ?? 0,
-          unmatched_count: batch.unmatched_count ?? 0,
-        },
-      };
-    });
+    if (route === "unreadCount" && req.method === "GET") {
+      if ([...url.searchParams.keys()].length > 0) {
+        throw new ValidationError(
+          "The unread-count endpoint does not accept query parameters.",
+        );
+      }
+      const unreadCount = await service.unreadCount(auth);
+      return jsonResponse(successResponse({ unread_count: unreadCount }));
+    }
 
-    return jsonResponse(successResponse(importNotifications.slice(0, limit), {
-      total: importNotifications.length,
-    }));
+    if (route === "readOne" && req.method === "POST") {
+      const body = await parseRequestBody<Record<string, unknown>>(req);
+      const result = await service.readOne(auth, parseReadOneBody(body));
+      return jsonResponse(successResponse(result));
+    }
+
+    if (route === "readAll" && req.method === "POST") {
+      const body = await optionalJsonBody(req);
+      const result = await service.readAll(auth, parseReadAllBody(body).type);
+      return jsonResponse(successResponse(result));
+    }
+
+    return jsonResponse({
+      success: false,
+      error: {
+        code: "ROUTE_NOT_FOUND",
+        message: `No route matches ${req.method} ${url.pathname}`,
+      },
+    }, 404);
   } catch (error) {
     const { status, body } = errorResponse(error);
     return jsonResponse(body, status);
   }
-});
+}
+
+export function createNotificationHandler(
+  dependencies: NotificationHandlerDependencies = productionDependencies,
+): (req: Request) => Promise<Response> {
+  return (req) => handleNotificationRequest(req, dependencies);
+}
+
+export const handler = createNotificationHandler();
+
+if (import.meta.main) {
+  Deno.serve(handler);
+}
