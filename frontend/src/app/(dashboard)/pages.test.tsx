@@ -35,6 +35,12 @@ vi.mock("@/hooks/use-base-currency", () => ({
   useBaseCurrency: () => ({ baseCurrency: "MYR", isLoading: false, isUnavailable: false }),
 }));
 
+vi.mock("@/hooks/use-auth-context", () => ({
+  useAuthContext: () => ({
+    data: { user: { id: "user-1", email: "test@example.invalid" } },
+  }),
+}));
+
 vi.mock("@/hooks/use-user-role", () => ({
   useUserRole: () => ({ role: "AR Clerk", isLoading: false, email: "t@test", canPostInvoice: true, canCreateInvoice: true, canPostReceipt: true }),
 }));

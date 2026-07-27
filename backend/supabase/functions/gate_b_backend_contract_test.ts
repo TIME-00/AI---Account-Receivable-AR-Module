@@ -70,6 +70,22 @@ function expectThrows(action: () => unknown, fragment: string): void {
   throw new Error(`Expected error containing ${fragment}`);
 }
 
+async function expectRejects(
+  action: () => Promise<unknown>,
+  fragment: string,
+): Promise<void> {
+  try {
+    await action();
+  } catch (error) {
+    assert(
+      String(error).includes(fragment),
+      `Expected rejection containing ${fragment}, got ${String(error)}`,
+    );
+    return;
+  }
+  throw new Error(`Expected rejection containing ${fragment}`);
+}
+
 Deno.test("Gate B migration is one guarded forward contract with no cron or business rewrite", async () => {
   const migration = await read(
     "../../../database/032_post_batch_9d_gate_b_notifications_and_rating_drilldown.sql",
@@ -564,6 +580,58 @@ Deno.test("Gate B NotificationService forwards only authenticated context and bo
     pruneCalls.every((call) =>
       call.params.p_company_id === companyId && call.params.p_user_id === userId
     ),
+  );
+});
+
+Deno.test("Gate B NotificationService rejects malformed RPC result envelopes", async () => {
+  const serviceFor = (data: unknown) =>
+    new NotificationService({
+      rpc: () => Promise.resolve({ data, error: null }),
+    } as never);
+  const params = {
+    limit: 20,
+    cursor: null,
+    readState: "all" as const,
+    type: null,
+  };
+
+  await expectRejects(
+    () =>
+      serviceFor({
+        rows: [{
+          notification_key: notificationKey,
+          type: "import_error",
+          title: "Synthetic",
+          message: "Malformed source identifier",
+          severity: "error",
+          created_at: "2026-07-26T15:30:45.123Z",
+          source: { type: "import_batch", id: "not-a-uuid" },
+          deep_link: "/invoices/import",
+          read_at: null,
+        }],
+        has_more: false,
+      }).list(managerAuth, params),
+    "invalid result",
+  );
+  await expectRejects(
+    () => serviceFor("25").unreadCount(managerAuth),
+    "invalid result",
+  );
+  await expectRejects(
+    () =>
+      serviceFor({
+        notification_key: notificationKey,
+        read_at: "not-a-date",
+      }).readOne(managerAuth, parseNotificationKey(notificationKey)),
+    "invalid result",
+  );
+  await expectRejects(
+    () =>
+      serviceFor({
+        acknowledged_count: "25",
+        completed_at: "2026-07-26T15:32:00.000Z",
+      }).readAll(managerAuth, null),
+    "invalid result",
   );
 });
 

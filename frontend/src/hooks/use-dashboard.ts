@@ -1,7 +1,9 @@
 "use client";
 
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
+import { useAuthContext } from "@/hooks/use-auth-context";
+import { useCompanyStore } from "@/stores/company-store";
 import type { ARSummary, CustomerAgingRow, LiveDashboardMetrics } from "@/types";
 
 const DEFAULT_TREND_MONTHS = 6;
@@ -20,9 +22,14 @@ const DEFAULT_TREND_MONTHS = 6;
  */
 export function useDashboardMetrics(trendMonths: number = DEFAULT_TREND_MONTHS) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
+  const { data: auth } = useAuthContext();
+  const userId = auth?.user.id ?? "";
+  const identityReady =
+    companyId.trim().length > 0 && userId.trim().length > 0;
 
   const query = useQuery({
-    queryKey: ["dashboard", "metrics", trendMonths],
+    queryKey: ["dashboard", "metrics", companyId, userId, trendMonths],
     queryFn: () =>
       api.get<LiveDashboardMetrics>("/reports/dashboard", {
         params: { trend_months: trendMonths },
@@ -32,7 +39,12 @@ export function useDashboardMetrics(trendMonths: number = DEFAULT_TREND_MONTHS) 
     refetchInterval: 60 * 1000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[2] === companyId &&
+        previousQuery.queryKey[3] === userId
+        ? previousData
+        : undefined,
+    enabled: identityReady,
     retry: false,
   });
 

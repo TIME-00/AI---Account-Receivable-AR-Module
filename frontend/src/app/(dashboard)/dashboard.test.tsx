@@ -6,9 +6,16 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, createFakeApi, route, type FakeApi } from "@/test/harness";
+import { act, screen, waitFor } from "@testing-library/react";
+import {
+  createDeferred,
+  renderWithProviders,
+  createFakeApi,
+  route,
+  type FakeApi,
+} from "@/test/harness";
 import type { LiveDashboardMetrics } from "@/types";
+import { useCompanyStore } from "@/stores/company-store";
 
 let fakeApi: FakeApi;
 
@@ -16,6 +23,12 @@ vi.mock("@/hooks/use-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/use-api")>();
   return { ...actual, useApi: () => fakeApi };
 });
+
+vi.mock("@/hooks/use-auth-context", () => ({
+  useAuthContext: () => ({
+    data: { user: { id: "user-1", email: "test@example.invalid" } },
+  }),
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
@@ -81,10 +94,54 @@ function metricsFixture(over: Partial<LiveDashboardMetrics> = {}): LiveDashboard
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useCompanyStore.getState().setCompany("co-1", "Company One", "SGD");
   fakeApi = createFakeApi([route("/reports/dashboard", () => ({ data: metricsFixture() }))]);
 });
 
 describe("Dashboard page (B9DD-RR-006)", () => {
+  it("does not retain one company's cached dashboard metrics after a company switch", async () => {
+    const secondCompany = createDeferred<{ data: LiveDashboardMetrics }>();
+    let calls = 0;
+    fakeApi = createFakeApi([
+      route("/reports/dashboard", () => {
+        calls += 1;
+        return calls === 1
+          ? { data: metricsFixture() }
+          : secondCompany.promise;
+      }),
+    ]);
+
+    renderWithProviders(<DashboardPage />);
+    await waitFor(() =>
+      expect(screen.getAllByText(/SGD 545\.00/).length).toBeGreaterThan(0),
+    );
+
+    act(() => {
+      useCompanyStore.getState().setCompany("co-2", "Company Two", "MYR");
+    });
+    await waitFor(() => expect(calls).toBe(2));
+    expect(screen.queryByText(/SGD 545\.00/)).toBeNull();
+
+    await act(async () => {
+      secondCompany.resolve({
+        data: metricsFixture({
+          meta: {
+            ...metricsFixture().meta,
+            company_id: "co-2",
+            base_currency: "MYR",
+          },
+          kpis: {
+            ...metricsFixture().kpis,
+            total_outstanding_ar: 777,
+          },
+        }),
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getAllByText(/MYR 777\.00/).length).toBeGreaterThan(0),
+    );
+  });
+
   it("labels base KPIs with the company's REAL base currency, not MYR", async () => {
     renderWithProviders(<DashboardPage />);
     await waitFor(() => expect(screen.getAllByText(/SGD 545\.00/).length).toBeGreaterThan(0));

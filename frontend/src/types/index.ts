@@ -345,16 +345,10 @@ export interface GlobalSearchResult {
   metadata: Record<string, string | number | null>;
 }
 
-export interface NotificationItem {
-  id: string;
-  type: "import_review" | "import_error" | "overdue_ar";
-  severity: "info" | "warning" | "error";
-  title: string;
-  message: string;
-  route: string;
-  created_at: string | null;
-  metadata: Record<string, string | number | null>;
-}
+// Gate B: the canonical notification contract now lives in `@/lib/notifications`
+// and mirrors the committed backend envelope exactly (import alerts only;
+// `overdue_ar` is fully de-scoped). Re-exported here for existing importers.
+export type { NotificationItem } from "@/lib/notifications";
 
 // ─── Allocation ─────────────────────────────────────────────────────────────
 

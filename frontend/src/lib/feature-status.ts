@@ -1,5 +1,5 @@
 // Truthful, phase-aware capability status used by the read-only Settings page.
-// Gate A implementation is local until its separately authorized deployment.
+// Gate A is deployed; Gate B remains local until separately authorized.
 export const FEATURE_STATUS_ROWS = [
   { feature: "Dashboard", status: "Live", color: "bg-emerald-50 text-emerald-700" },
   { feature: "Invoices (CRUD + Post + Cancel)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
@@ -8,8 +8,23 @@ export const FEATURE_STATUS_ROWS = [
   { feature: "Customer List & Detail", status: "Live", color: "bg-emerald-50 text-emerald-700" },
   { feature: "AR Reports (Aging, Invoice, Receipt, Outstanding)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
   { feature: "Global Search / Profile", status: "Live", color: "bg-emerald-50 text-emerald-700" },
-  { feature: "Notifications", status: "Degraded — Import Alerts Only", color: "bg-amber-50 text-amber-700" },
-  { feature: "Credit & Debit Notes", status: "Read-Only List", color: "bg-blue-50 text-blue-700" },
+  // Gate B capabilities: implemented locally, not yet deployed (migration 032 and
+  // the Notifications/Reports Edge functions require separate authorization).
+  {
+    feature: "Import Notifications (Page, Dropdown & Unread Badge) — Import Alerts Only",
+    status: "Implemented — Pending Deployment",
+    color: "bg-indigo-50 text-indigo-700",
+  },
+  {
+    feature: "Credit Rating Drill-Down (Dashboard → Aging by Customer)",
+    status: "Implemented — Pending Deployment",
+    color: "bg-indigo-50 text-indigo-700",
+  },
+  {
+    feature: "Credit/Debit Note Visibility & Empty States",
+    status: "Implemented — Pending Deployment",
+    color: "bg-indigo-50 text-indigo-700",
+  },
   { feature: "Journal Entries", status: "Reference Guide", color: "bg-blue-50 text-blue-700" },
   { feature: "Audit Trail", status: "Capability Reference", color: "bg-blue-50 text-blue-700" },
   { feature: "Settings & Roles", status: "Read-Only (Authenticated)", color: "bg-blue-50 text-blue-700" },

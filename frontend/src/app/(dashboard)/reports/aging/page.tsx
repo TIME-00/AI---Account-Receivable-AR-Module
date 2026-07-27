@@ -1,21 +1,59 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { Suspense, useState, useMemo, useEffect } from "react";
 import Link from "next/link";
-import { Clock, Search, ArrowUpDown, Download, Info } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Clock, Search, ArrowUpDown, Download, Info, X, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgingSummaryF2, useAgingByCustomerF2 } from "@/hooks/use-f2-data";
 import { formatMoneySafe } from "@/lib/currency";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
 import { totalPagesFrom } from "@/hooks/use-invoices";
-import type { CustomerAgingRow } from "@/types";
+import type { CustomerAgingRow, CreditRating } from "@/types";
 
 type SortKey = "customer_name" | "current_amount" | "bucket_1_30" | "bucket_31_60" | "bucket_61_90" | "bucket_over_90" | "total_outstanding";
 
 /** Server page size for the customer table (backend clamps to MAX_PAGE_SIZE=100). */
 const AGING_PAGE_SIZE = 25;
 
+/** The exact rating domain the backend accepts (ar_aging_by_customer). */
+const SUPPORTED_RATINGS: readonly CreditRating[] = ["AAA", "AA", "A", "B", "C", "D"];
+
+function normalizeRating(value: string | null): CreditRating | null {
+  return value && (SUPPORTED_RATINGS as readonly string[]).includes(value)
+    ? (value as CreditRating)
+    : null;
+}
+
+/**
+ * `useSearchParams()` requires a Suspense boundary for static generation; the
+ * page content that reads the credit-rating drill-down parameter lives inside it.
+ */
 export default function AgingReportPage() {
+  return (
+    <Suspense fallback={<AgingReportFallback />}>
+      <AgingReportContent />
+    </Suspense>
+  );
+}
+
+function AgingReportFallback() {
+  return (
+    <div className="glass-card flex items-center justify-center py-20">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
+    </div>
+  );
+}
+
+function AgingReportContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Drill-down authority: the rating comes from the URL, validated against the
+  // exact backend domain. An unknown value is ignored (treated as no filter).
+  const rawCreditRating = searchParams.get("credit_rating");
+  const creditRating = normalizeRating(rawCreditRating);
+  const invalidCreditRating =
+    rawCreditRating !== null && creditRating === null;
   // B9DD-RR-001: two independent datasets.
   //   • summary  — GET /reports/aging: complete, authoritative, page-independent.
   //   • rows     — GET /reports/aging/by-customer: ONE SERVER PAGE.
@@ -23,12 +61,23 @@ export default function AgingReportPage() {
   const { data: summary, isLoading: loadingSummary, error: errorSummary } = useAgingSummaryF2();
 
   const [page, setPage] = useState(1);
+
+  // Changing the rating (including clearing it) resets to page 1 so the user
+  // never lands on an out-of-range page of the newly filtered set.
+  useEffect(() => {
+    setPage(1);
+  }, [creditRating]);
+
   const {
     data: agingRaw,
     isLoading: loadingRows,
     error: errorRows,
     isFetching: fetchingRows,
-  } = useAgingByCustomerF2(page, AGING_PAGE_SIZE);
+  } = useAgingByCustomerF2(page, AGING_PAGE_SIZE, creditRating, {
+    enabled: !invalidCreditRating,
+  });
+
+  const clearRating = () => router.push("/reports/aging");
 
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("total_outstanding");
@@ -95,6 +144,35 @@ export default function AgingReportPage() {
       { label: "90+ Days", value: findBucket("90") || findBucket("over 90"), color: "text-red-600", bg: "bg-red-50" },
     ];
   }, [summary]);
+
+  if (invalidCreditRating) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Link href="/reports" className="hover:text-blue-600">Reports</Link>
+          <span>/</span>
+          <span className="font-medium text-slate-800">AR Aging Report</span>
+        </div>
+        <div className="glass-card flex flex-col items-center justify-center gap-3 py-16 text-center">
+          <ShieldCheck className="h-9 w-9 text-amber-500" aria-hidden="true" />
+          <h1 className="text-lg font-semibold text-slate-900">
+            Invalid credit rating filter
+          </h1>
+          <p className="max-w-md text-sm text-slate-500">
+            The requested rating is outside the supported AAA, AA, A, B, C and D domain.
+            No customer-aging rows were requested.
+          </p>
+          <button
+            type="button"
+            onClick={clearRating}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+          >
+            Clear invalid filter
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Loading ────────────────────────────────────────────────────────────────
   if (isLoading) {
@@ -198,13 +276,38 @@ export default function AgingReportPage() {
       </div>
 
       {/* ── Customer aging rows: a SEPARATE server-paginated dataset ───────── */}
-      <div className="space-y-1">
-        <h2 className="text-sm font-semibold text-slate-800">Customer aging rows</h2>
-        <p className="text-xs text-slate-500">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-sm font-semibold text-slate-800">Customer aging rows</h2>
+          {creditRating && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
+              <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+              Credit rating: {creditRating}
+              <button
+                type="button"
+                onClick={clearRating}
+                aria-label="Clear credit rating filter"
+                className="ml-0.5 rounded-full p-0.5 text-brand-500 transition-colors hover:bg-brand-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-slate-500" aria-live="polite">
           {total > 0
-            ? `Showing customers ${firstRowIndex}–${lastRowIndex} of ${total} — this is the current page of customer aging rows, not the whole report.`
-            : "No customers with outstanding exposure."}
+            ? `Showing customers ${firstRowIndex}–${lastRowIndex} of ${total}${
+                creditRating ? ` rated ${creditRating}` : ""
+              } — this is the current page of customer aging rows, not the whole report.`
+            : creditRating
+              ? `No outstanding customers with credit rating ${creditRating}.`
+              : "No customers with outstanding exposure."}
         </p>
+        {creditRating && total > 0 && (
+          <p className="text-[11px] text-slate-400">
+            The {total} total reconciles with the dashboard credit-rating distribution for {creditRating}.
+          </p>
+        )}
       </div>
 
       {/* Search — current page only; the backend exposes no customer filter on
@@ -232,7 +335,9 @@ export default function AgingReportPage() {
             <p className="mt-3 text-sm text-slate-500">
               {isSearching
                 ? "No customers on this page match your filter"
-                : "No aging data available"}
+                : creditRating
+                  ? `No outstanding customers with credit rating ${creditRating}`
+                  : "No aging data available"}
             </p>
             {isSearching && total > pageSize && (
               <p className="mt-1 text-xs text-slate-400">

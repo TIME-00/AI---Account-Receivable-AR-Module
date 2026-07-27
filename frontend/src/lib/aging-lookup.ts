@@ -152,11 +152,17 @@ export async function fetchAgingByCustomerPage(
   api: ApiClient,
   page: number,
   pageSize: number = AGING_MAX_PAGE_SIZE,
+  creditRating?: string | null,
 ): Promise<{ rows: CustomerAgingRow[]; total: number; page: number; page_size: number }> {
   const size = Math.min(Math.max(1, pageSize), AGING_MAX_PAGE_SIZE);
+  // The rating filter is applied SERVER-SIDE (ar_aging_by_customer p_credit_rating);
+  // the backend already scopes visibility (deleted/hidden/assignment) and returns
+  // only outstanding customers, so there is no client-side rating filtering.
+  const params: Record<string, string | number> = { page, page_size: size };
+  if (creditRating) params.credit_rating = creditRating;
   const res = await api.getWithMeta<CustomerAgingRow[] | { rows: CustomerAgingRow[] }>(
     "/reports/aging/by-customer",
-    { params: { page, page_size: size } },
+    { params },
   );
   const data = res.data;
   const rows = Array.isArray(data) ? data : data.rows;

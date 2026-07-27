@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useDashboardMetrics } from "@/hooks/use-dashboard";
 import { ApiError } from "@/hooks/use-api";
 import { KpiCard } from "@/components/ui/kpi-card";
@@ -64,6 +65,7 @@ function formatAsOf(date: string): string {
 // ─── Dashboard Page ─────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { metrics, isLoading, isError, error, refetch } = useDashboardMetrics(6);
 
   const meta = metrics?.meta;
@@ -215,7 +217,14 @@ export default function DashboardPage() {
       {/* ─── Charts Row 2: Collection Trend + Credit Rating ───────── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <CollectionTrendChart data={trendData} currency={currency} isLoading={isLoading} />
-        <CreditRiskChart data={creditRatingData} currency={currency} isLoading={isLoading} />
+        <CreditRiskChart
+          data={creditRatingData}
+          currency={currency}
+          isLoading={isLoading}
+          onSelectRating={(rating) =>
+            router.push(`/reports/aging?credit_rating=${encodeURIComponent(rating)}`)
+          }
+        />
       </div>
 
       {/* ─── Top Outstanding Customers ─────────────────────────────── */}

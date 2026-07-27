@@ -163,12 +163,14 @@ export default function CreditNotesPage() {
           <div className="flex flex-col items-center justify-center py-20">
             <CreditCard className="h-10 w-10 text-slate-300" />
             <p className="mt-3 text-sm font-medium text-slate-600">
-              {hasSearch ? "No notes match your search" : "No " + docType.toLowerCase() + "s yet"}
+              {hasSearch
+                ? "No notes match your search"
+                : `No visible ${docType.toLowerCase()}s`}
             </p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 max-w-sm text-center text-xs text-slate-400">
               {hasSearch
                 ? "Try a different search term."
-                : "Create one from the Invoice Workbench by selecting Credit Note or Debit Note."}
+                : `There are no ${docType.toLowerCase()}s you're authorized to view — this is an empty result, not an error. ${docType}s are created from the Invoice Workbench by selecting ${docType}.`}
             </p>
           </div>
         ) : (

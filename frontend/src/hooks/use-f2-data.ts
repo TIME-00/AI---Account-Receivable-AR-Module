@@ -21,8 +21,10 @@
 
 "use client";
 
-import { useQueries, useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useApi, type ApiClient } from "@/hooks/use-api";
+import { useAuthContext } from "@/hooks/use-auth-context";
+import { useCompanyStore } from "@/stores/company-store";
 import type {
   Invoice,
   Receipt,
@@ -256,10 +258,16 @@ export function useReceiptReport(filters: { date_from?: string; date_to?: string
  */
 export function useAgingSummaryF2() {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
+  const { data: auth } = useAuthContext();
+  const userId = auth?.user.id ?? "";
+  const identityReady =
+    companyId.trim().length > 0 && userId.trim().length > 0;
 
   return useQuery({
-    queryKey: ["reports", "aging", "summary-f2"],
+    queryKey: ["reports", "aging", "summary-f2", companyId, userId],
     queryFn: () => api.get<ARSummary>("/reports/aging"),
+    enabled: identityReady,
     staleTime: 2 * 60_000,
   });
 }
@@ -276,15 +284,43 @@ export function useAgingSummaryF2() {
  * `scoped_customers` CTE (is_deleted / is_hidden / assignment), so no client-side
  * re-filter against a capped customer list is applied.
  */
-export function useAgingByCustomerF2(page = 1, pageSize = 100) {
+export function useAgingByCustomerF2(
+  page = 1,
+  pageSize = 100,
+  creditRating: string | null = null,
+  options?: { enabled?: boolean },
+) {
   const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
+  const { data: auth } = useAuthContext();
+  const userId = auth?.user.id ?? "";
+  const identityReady =
+    companyId.trim().length > 0 && userId.trim().length > 0;
 
   return useQuery({
-    queryKey: ["reports", "aging", "by-customer-f2", page, pageSize],
-    queryFn: () => fetchAgingByCustomerPage(api, page, pageSize),
+    // The rating is part of the cache identity: switching ratings must not reuse
+    // another rating's page. Company and user are also authoritative because
+    // role/assignment scope can differ within the same tenant.
+    queryKey: [
+      "reports",
+      "aging",
+      "by-customer-f2",
+      companyId,
+      userId,
+      page,
+      pageSize,
+      creditRating,
+    ],
+    queryFn: () => fetchAgingByCustomerPage(api, page, pageSize, creditRating),
     // Keep the current page rendered while the next one loads, so paging does
     // not tear down and re-mount the whole report.
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[7] === creditRating &&
+        previousQuery.queryKey[3] === companyId &&
+        previousQuery.queryKey[4] === userId
+        ? previousData
+        : undefined,
+    enabled: identityReady && (options?.enabled ?? true),
     staleTime: 2 * 60_000,
   });
 }

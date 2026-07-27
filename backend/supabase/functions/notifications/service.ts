@@ -44,8 +44,49 @@ interface ReadAllResult {
   completed_at: string;
 }
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const NOTIFICATION_KEY_PATTERN =
+  /^import:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(import_error|import_review)$/i;
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" &&
+    ISO_TIMESTAMP_PATTERN.test(value) &&
+    !Number.isNaN(Date.parse(value));
+}
+
+function isNotificationItem(value: unknown): value is NotificationItem {
+  if (!isRecord(value) || !isRecord(value.source)) return false;
+  const keyMatch = typeof value.notification_key === "string"
+    ? NOTIFICATION_KEY_PATTERN.exec(value.notification_key)
+    : null;
+  if (!keyMatch) return false;
+
+  const sourceId = value.source.id;
+  const notificationType = value.type;
+  const expectedSeverity = notificationType === "import_error"
+    ? "error"
+    : notificationType === "import_review"
+    ? "warning"
+    : null;
+
+  return UUID_PATTERN.test(String(sourceId)) &&
+    keyMatch[1].toLowerCase() === String(sourceId).toLowerCase() &&
+    keyMatch[2] === notificationType &&
+    value.source.type === "import_batch" &&
+    typeof value.title === "string" &&
+    typeof value.message === "string" &&
+    value.severity === expectedSeverity &&
+    isIsoTimestamp(value.created_at) &&
+    typeof value.deep_link === "string" &&
+    value.deep_link.startsWith("/") &&
+    (value.read_at === null || isIsoTimestamp(value.read_at));
 }
 
 function invalidRpcResult(): never {
@@ -101,7 +142,9 @@ export class NotificationService implements NotificationServiceContract {
     if (
       !isRecord(result) ||
       !Array.isArray(result.rows) ||
-      typeof result.has_more !== "boolean"
+      typeof result.has_more !== "boolean" ||
+      result.rows.length > params.limit ||
+      !result.rows.every(isNotificationItem)
     ) {
       invalidRpcResult();
     }
@@ -132,9 +175,8 @@ export class NotificationService implements NotificationServiceContract {
         p_user_id: auth.userId,
       },
     );
-    const count = Number(result);
-    if (!Number.isSafeInteger(count) || count < 0) invalidRpcResult();
-    return count;
+    if (!Number.isSafeInteger(result) || result < 0) invalidRpcResult();
+    return result;
   }
 
   async readOne(
@@ -154,7 +196,7 @@ export class NotificationService implements NotificationServiceContract {
     if (
       !isRecord(result) ||
       result.notification_key !== key.notificationKey ||
-      typeof result.read_at !== "string"
+      !isIsoTimestamp(result.read_at)
     ) {
       invalidRpcResult();
     }
@@ -178,7 +220,7 @@ export class NotificationService implements NotificationServiceContract {
       !isRecord(result) ||
       !Number.isSafeInteger(result.acknowledged_count) ||
       (result.acknowledged_count as number) < 0 ||
-      typeof result.completed_at !== "string"
+      !isIsoTimestamp(result.completed_at)
     ) {
       invalidRpcResult();
     }

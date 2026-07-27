@@ -4,7 +4,6 @@ import { useAuth } from "@/providers/auth-provider";
 import { useCompanyStore } from "@/stores/company-store";
 import { useUserRole } from "@/hooks/use-user-role";
 import { useGlobalSearch } from "@/hooks/use-global-search";
-import { useNotifications } from "@/hooks/use-notifications";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import {
@@ -12,30 +11,20 @@ import {
   ChevronDown,
   LogOut,
   User,
-  Bell,
   Search,
   Loader2,
   FileText,
   Receipt,
   Users,
-  AlertTriangle,
-  AlertCircle,
-  Info,
-  Inbox,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
-import type { GlobalSearchResult, NotificationItem } from "@/types";
+import type { GlobalSearchResult } from "@/types";
+import { NotificationDropdown } from "@/components/features/notifications/notification-dropdown";
 
 const SEARCH_TYPE_ICON: Record<GlobalSearchResult["type"], typeof FileText> = {
   customer: Users,
   invoice: FileText,
   receipt: Receipt,
-};
-
-const SEVERITY_STYLE: Record<NotificationItem["severity"], { icon: typeof Info; color: string }> = {
-  info: { icon: Info, color: "text-blue-500" },
-  warning: { icon: AlertTriangle, color: "text-amber-500" },
-  error: { icon: AlertCircle, color: "text-red-500" },
 };
 
 export function Header() {
@@ -47,7 +36,6 @@ export function Header() {
 
   const [showCompanyMenu, setShowCompanyMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
 
   // ─── Global Search ──────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
@@ -60,14 +48,9 @@ export function Header() {
   } = useGlobalSearch(searchQuery);
   const showSearchDropdown = searchFocused && trimmedQuery.length >= 2;
 
-  // ─── Notifications ──────────────────────────────────────────────────────
-  const { data: notifications, isLoading: notifLoading } = useNotifications();
-  const notifCount = notifications?.length ?? 0;
-
   const companyMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
-  const notifRef = useRef<HTMLDivElement>(null);
 
   // Close menus on outside click
   useEffect(() => {
@@ -76,7 +59,6 @@ export function Header() {
       if (companyMenuRef.current && !companyMenuRef.current.contains(t)) setShowCompanyMenu(false);
       if (userMenuRef.current && !userMenuRef.current.contains(t)) setShowUserMenu(false);
       if (searchRef.current && !searchRef.current.contains(t)) setSearchFocused(false);
-      if (notifRef.current && !notifRef.current.contains(t)) setShowNotifications(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -85,7 +67,6 @@ export function Header() {
   const goTo = (route: string) => {
     setSearchFocused(false);
     setSearchQuery("");
-    setShowNotifications(false);
     router.push(route);
   };
 
@@ -200,78 +181,8 @@ export function Header() {
           )}
         </div>
 
-        {/* Notifications */}
-        <div className="relative" ref={notifRef}>
-          <button
-            onClick={() => setShowNotifications((v) => !v)}
-            className="relative flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-            aria-label="Notifications"
-          >
-            <Bell className="h-4 w-4" />
-            {notifCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                {notifCount > 9 ? "9+" : notifCount}
-              </span>
-            )}
-          </button>
-
-          {showNotifications && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-96 animate-fade-in overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl shadow-slate-200/50">
-              <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Notifications
-                </p>
-                {notifCount > 0 && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                    {notifCount}
-                  </span>
-                )}
-              </div>
-
-              {notifLoading ? (
-                <div className="flex items-center gap-2 px-3 py-4 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading…
-                </div>
-              ) : notifCount === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 px-3 py-8 text-center">
-                  <Inbox className="h-6 w-6 text-slate-300" />
-                  <p className="text-sm text-slate-500">You&apos;re all caught up.</p>
-                  <p className="text-[11px] text-slate-400">
-                    Import reviews, import errors, and overdue AR alerts appear here.
-                  </p>
-                </div>
-              ) : (
-                <ul className="max-h-96 overflow-y-auto">
-                  {notifications!.map((n) => {
-                    const { icon: Icon, color } = SEVERITY_STYLE[n.severity];
-                    return (
-                      <li key={n.id} className="border-b border-slate-100 last:border-0">
-                        <button
-                          onClick={() => goTo(n.route)}
-                          className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-slate-50"
-                        >
-                          <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", color)} />
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-slate-700">{n.title}</p>
-                            <p className="text-xs text-slate-400">{n.message}</p>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-
-              <button
-                onClick={() => goTo("/notifications")}
-                className="block w-full border-t border-slate-200 px-3 py-2 text-center text-xs font-medium text-brand-600 transition-colors hover:bg-slate-50"
-              >
-                View all notifications
-              </button>
-            </div>
-          )}
-        </div>
+        {/* Notifications — self-contained Gate B dropdown (shared data contract) */}
+        <NotificationDropdown />
 
         {/* User Menu */}
         <div className="relative" ref={userMenuRef}>

@@ -25,6 +25,12 @@ vi.mock("@/hooks/use-api", async (importOriginal) => {
   return { ...actual, useApi: () => fakeApi };
 });
 
+vi.mock("@/hooks/use-auth-context", () => ({
+  useAuthContext: () => ({
+    data: { user: { id: "user-1", email: "test@example.invalid" } },
+  }),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   useParams: () => ({}),
