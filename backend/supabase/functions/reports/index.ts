@@ -15,6 +15,9 @@ import {
   validateEnum,
 } from '../_shared/validators.ts';
 import { ReportService } from './service.ts';
+import { handleReportExportRequest, isExportPath } from './export-handler.ts';
+import { SupabaseExportRepository } from './export-repository.ts';
+import { ReportExportService } from './export-service.ts';
 
 const DEFAULT_BUSINESS_TIME_ZONE = 'Asia/Kuala_Lumpur';
 
@@ -89,10 +92,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { route, params } = matchRoute(subPath);
     const companyId = extractCompanyId(req);
     const auth = await getAuthContext(req, companyId);
-    const service = new ReportService(
-      undefined,
-      getUserClient(req.headers.get('Authorization')!),
-    );
+    const userClient = getUserClient(req.headers.get('Authorization')!);
+    const service = new ReportService(undefined, userClient);
+
+    if (isExportPath(subPath)) {
+      const exportService = new ReportExportService(
+        new SupabaseExportRepository(userClient),
+      );
+      return await handleReportExportRequest(req, auth, exportService, subPath);
+    }
 
     // ── Aging Summary (shorthand: /aging) ──
     if (route === 'aging' && req.method === 'GET') {
