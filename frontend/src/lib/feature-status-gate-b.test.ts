@@ -9,7 +9,7 @@ const find = (predicate: (feature: string) => boolean) =>
   FEATURE_STATUS_ROWS.find((row) => predicate(row.feature));
 
 describe("Gate B feature status", () => {
-  it("marks the three Gate B capabilities Implemented — Pending Deployment (never Live)", () => {
+  it("marks the three deployed Gate B capabilities Live", () => {
     const gateB = [
       "Import Notifications",
       "Credit Rating Drill-Down",
@@ -18,8 +18,7 @@ describe("Gate B feature status", () => {
     for (const prefix of gateB) {
       const row = find((f) => f.startsWith(prefix));
       expect(row, `missing Gate B row: ${prefix}`).toBeDefined();
-      expect(row!.status).toBe("Implemented — Pending Deployment");
-      expect(row!.status).not.toBe("Live");
+      expect(row!.status).toBe("Live");
     }
   });
 

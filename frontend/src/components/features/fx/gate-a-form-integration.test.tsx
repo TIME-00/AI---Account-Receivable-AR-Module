@@ -350,7 +350,7 @@ describe("Gate A — final mutation payload authority", () => {
 });
 
 describe("Gate A — Feature Status truthfulness", () => {
-  it("marks only deployed Gate A work Live without duplicating Notifications/Report Export", () => {
+  it("marks deployed Gate A and Gate B work Live without duplicating Notifications/Report Export", () => {
     const names = FEATURE_STATUS_ROWS.map((row) => row.feature);
     expect(new Set(names).size).toBe(names.length);
     expect(
@@ -362,10 +362,10 @@ describe("Gate A — Feature Status truthfulness", () => {
         )
         .map((row) => row.status),
     ).toEqual(["Live", "Live", "Live"]);
-    // Gate B implemented (local) the notification surface; it is import-alert-only
-    // and Pending Deployment — never "Live" and never implying overdue alerts.
+    // Gate B deployed the notification surface; it remains import-alert-only
+    // and never implies overdue alerts.
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Import Notifications"))?.status)
-      .toBe("Implemented — Pending Deployment");
+      .toBe("Live");
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Report Export"))?.status)
       .toBe("Planned");
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature === "Daily FX Sync")?.status)
