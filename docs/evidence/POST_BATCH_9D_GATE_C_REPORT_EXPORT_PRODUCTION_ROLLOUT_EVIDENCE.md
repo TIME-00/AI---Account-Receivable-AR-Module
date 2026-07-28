@@ -67,7 +67,7 @@ Simplified Chinese, Traditional Chinese, Japanese and accented Latin data.
   `GET /favicon.ico` request with resource type `other`; the diagnostic
   allow-list remains path, origin, method, status and resource-type specific.
 - An unauthenticated export request failed closed with HTTP 401 and the
-  sanitized code `UNAUTHORIZED_NO_AUTH_HEADER`.
+  sanitized code `AUTHENTICATION_ERROR`.
 - The authenticated Finance context succeeded. Cross-company, user-override,
   role and assignment isolation remain covered by the executable backend
   contract suite; no second Production identity or Production data mutation was
