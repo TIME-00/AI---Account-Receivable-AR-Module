@@ -28,8 +28,13 @@ const MONEY_RE = /^-?\d+\.\d{2}$/;
 const RATE_RE = /^-?\d+(?:\.\d+)?$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCY_RE = /^[A-Z]{3}$/;
+// PostgreSQL's uuid type accepts the canonical 8-4-4-4-12 hexadecimal shape
+// without requiring RFC version/variant bits. Fixed tenant identifiers (for
+// example the P1 demo company) are valid database UUIDs even when those bits
+// are zero, so the export parser must mirror PostgreSQL rather than narrowing
+// the backend contract to generated RFC UUIDs.
 const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function fail(message: string): never {
   throw new ExportParseError(message);

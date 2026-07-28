@@ -350,7 +350,7 @@ describe("Gate A — final mutation payload authority", () => {
 });
 
 describe("Gate A — Feature Status truthfulness", () => {
-  it("marks deployed Gate A and Gate B work Live without duplicating Notifications/Report Export", () => {
+  it("marks deployed Gate A, Gate B and Gate C work Live without duplicate status rows", () => {
     const names = FEATURE_STATUS_ROWS.map((row) => row.feature);
     expect(new Set(names).size).toBe(names.length);
     expect(
@@ -367,7 +367,7 @@ describe("Gate A — Feature Status truthfulness", () => {
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Import Notifications"))?.status)
       .toBe("Live");
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Report Export"))?.status)
-      .toBe("Implemented — Pending Deployment");
+      .toBe("Live");
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature === "Daily FX Sync")?.status)
       .toBe("Live (Automated)");
   });

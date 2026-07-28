@@ -6,10 +6,11 @@ function row(feature: string) {
 }
 
 describe("Feature Status — Gate C report export", () => {
-  it("marks Report Export as Implemented — Pending Deployment (not Live, not Planned)", () => {
+  it("marks Report Export as Live after Production deployment", () => {
     const exportRow = FEATURE_STATUS_ROWS.find((r) => r.feature.includes("Report Export"));
-    expect(exportRow?.status).toBe("Implemented — Pending Deployment");
-    expect(exportRow?.status).not.toBe("Live");
+    expect(exportRow?.status).toBe("Live");
+    expect(exportRow?.color).toBe("bg-emerald-50 text-emerald-700");
+    expect(exportRow?.status).not.toBe("Implemented — Pending Deployment");
     expect(exportRow?.status).not.toBe("Planned");
   });
 

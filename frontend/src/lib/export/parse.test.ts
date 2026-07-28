@@ -52,6 +52,22 @@ describe("parseExportDataset", () => {
     expect(() => parseExportDataset("aging", badTimezone)).toThrow(/timezone/i);
   });
 
+  it("accepts canonical PostgreSQL UUIDs without RFC version or variant bits", () => {
+    const raw = buildRawExport("aging") as {
+      company: Record<string, unknown>;
+      rows: Record<string, unknown>[];
+    };
+    raw.company.id = "00000000-0000-0000-0000-000000000001";
+    raw.rows[0].customer_id = "00000000-0000-0000-0000-000000000002";
+
+    const dataset = parseExportDataset("aging", raw);
+
+    expect(dataset.company.id).toBe("00000000-0000-0000-0000-000000000001");
+    expect(dataset.rows[0].customer_id).toBe(
+      "00000000-0000-0000-0000-000000000002",
+    );
+  });
+
   it("rejects a non-ISO generated_at", () => {
     const raw = { ...buildRawExport("aging"), generated_at: "2026-07-27 12:00" };
     expect(() => parseExportDataset("aging", raw)).toThrow(ExportParseError);

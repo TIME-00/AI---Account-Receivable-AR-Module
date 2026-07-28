@@ -1,5 +1,5 @@
 // Truthful, phase-aware capability status used by the read-only Settings page.
-// Gate A and Gate B are deployed.
+// Gate A, Gate B and Gate C are deployed.
 export const FEATURE_STATUS_ROWS = [
   { feature: "Dashboard", status: "Live", color: "bg-emerald-50 text-emerald-700" },
   { feature: "Invoices (CRUD + Post + Cancel)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
@@ -48,7 +48,7 @@ export const FEATURE_STATUS_ROWS = [
   { feature: "Daily FX Sync", status: "Live (Automated)", color: "bg-emerald-50 text-emerald-700" },
   {
     feature: "Report Export (PDF/Excel) (Gate C)",
-    status: "Implemented — Pending Deployment",
-    color: "bg-amber-50 text-amber-700",
+    status: "Live",
+    color: "bg-emerald-50 text-emerald-700",
   },
 ] as const;
