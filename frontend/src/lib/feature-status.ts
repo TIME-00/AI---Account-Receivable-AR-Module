@@ -46,5 +46,9 @@ export const FEATURE_STATUS_ROWS = [
     color: "bg-emerald-50 text-emerald-700",
   },
   { feature: "Daily FX Sync", status: "Live (Automated)", color: "bg-emerald-50 text-emerald-700" },
-  { feature: "Report Export (PDF/Excel) (Gate C)", status: "Planned", color: "bg-slate-50 text-slate-500" },
+  {
+    feature: "Report Export (PDF/Excel) (Gate C)",
+    status: "Implemented — Pending Deployment",
+    color: "bg-amber-50 text-amber-700",
+  },
 ] as const;

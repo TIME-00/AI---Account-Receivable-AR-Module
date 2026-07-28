@@ -3,8 +3,10 @@
 import { Suspense, useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Clock, Search, ArrowUpDown, Download, Info, X, ShieldCheck } from "lucide-react";
+import { Clock, Search, ArrowUpDown, Info, X, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ExportMenu } from "@/components/features/reports/export-menu";
+import { localTodayISODate } from "@/lib/export";
 import { useAgingSummaryF2, useAgingByCustomerF2 } from "@/hooks/use-f2-data";
 import { formatMoneySafe } from "@/lib/currency";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
@@ -174,40 +176,6 @@ function AgingReportContent() {
     );
   }
 
-  // ── Loading ────────────────────────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Link href="/reports" className="hover:text-blue-600">Reports</Link><span>/</span>
-          <span className="text-slate-800 font-medium">AR Aging Report</span>
-        </div>
-        <div className="glass-card flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
-            <p className="text-sm text-slate-500">Loading aging data…</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Error ──────────────────────────────────────────────────────────────────
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Link href="/reports" className="hover:text-blue-600">Reports</Link><span>/</span>
-          <span className="text-slate-800 font-medium">AR Aging Report</span>
-        </div>
-        <div className="glass-card flex flex-col items-center justify-center gap-2 py-20">
-          <p className="text-sm font-medium text-red-600">Failed to load aging data</p>
-          <p className="text-xs text-slate-400">{(error as Error).message}</p>
-        </div>
-      </div>
-    );
-  }
-
   const today = new Date().toLocaleDateString("en-MY", { year: "numeric", month: "long", day: "numeric" });
 
   return (
@@ -218,16 +186,31 @@ function AgingReportContent() {
         <span className="text-slate-800 font-medium">AR Aging Report</span>
       </div>
 
-      {/* Header + Date */}
+      {/* Header + Date — kept mounted across data (re)loads so a background
+          refetch never tears down the export control and cancels an in-flight
+          export. */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">AR Aging Report</h1>
           <p className="mt-1 text-sm text-slate-500">As of: Today, {today}</p>
         </div>
-        <button disabled className="flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-xs font-medium text-slate-400 cursor-not-allowed" title="Coming Soon">
-          <Download className="h-3.5 w-3.5" /> Export — Coming Soon
-        </button>
+        <ExportMenu reportType="aging" filters={{ as_of_date: localTodayISODate() }} />
       </div>
+
+      {isLoading ? (
+        <div className="glass-card flex items-center justify-center py-20">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
+            <p className="text-sm text-slate-500">Loading aging data…</p>
+          </div>
+        </div>
+      ) : error ? (
+        <div className="glass-card flex flex-col items-center justify-center gap-2 py-20">
+          <p className="text-sm font-medium text-red-600">Failed to load aging data</p>
+          <p className="text-xs text-slate-400">{(error as Error).message}</p>
+        </div>
+      ) : (
+      <>
 
       {/* Summary Cards — company-base bucket amounts (authoritative, complete).
           B9DD-RR-001: this is the COMPLETE authorized collection and is
@@ -414,6 +397,8 @@ function AgingReportContent() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

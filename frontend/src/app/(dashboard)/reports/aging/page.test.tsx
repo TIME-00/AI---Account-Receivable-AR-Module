@@ -12,10 +12,12 @@ import userEvent from "@testing-library/user-event";
 import {
   renderWithProviders,
   createFakeApi,
+  createDeferred,
   route,
   agingRowFixture,
   arSummaryFixture,
   type FakeApi,
+  type FakeResponse,
 } from "@/test/harness";
 
 let fakeApi: FakeApi;
@@ -187,6 +189,37 @@ describe("Aging report — server pagination (B9DD-RR-001)", () => {
 
     expect(screen.getByText(/No customers with outstanding exposure/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Next/i })).toBeNull();
+  });
+
+  // ── Gate C regression ──────────────────────────────────────────────────────
+  // The export control lived only inside the fully-loaded branch, so whenever a
+  // background refetch flipped the page back through its `isLoading` gate the
+  // whole body — including <ExportMenu> — was unmounted, aborting any in-flight
+  // export before its download and erasing its success feedback. The control is
+  // now a stable sibling of the data body and must survive a (re)load.
+  it("keeps the Export control mounted while the report data is (re)loading", async () => {
+    const rowsPending = createDeferred<FakeResponse>();
+    fakeApi = createFakeApi([
+      route("/reports/aging", () => ({ data: COMPANY_SUMMARY })),
+      route("/reports/aging/by-customer", () => rowsPending.promise),
+    ]);
+    renderWithProviders(<AgingReportPage />);
+
+    // The data body is still loading…
+    await waitFor(() =>
+      expect(screen.getByText(/Loading aging data…/i)).toBeInTheDocument(),
+    );
+    // …yet the export control is already present: it is decoupled from the
+    // data-loading gate, so a refetch can never tear it down mid-export.
+    expect(screen.getByRole("button", { name: /^export$/i })).toBeInTheDocument();
+
+    // Settle the pending rows; the control is still there once data arrives.
+    rowsPending.resolve({
+      data: pageOfRows(1, 25),
+      meta: { total: TOTAL_CUSTOMERS, page: 1, page_size: 25 },
+    });
+    await waitFor(() => expect(screen.getByText("Customer 1")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^export$/i })).toBeInTheDocument();
   });
 
   it("shows an error state without inventing figures", async () => {

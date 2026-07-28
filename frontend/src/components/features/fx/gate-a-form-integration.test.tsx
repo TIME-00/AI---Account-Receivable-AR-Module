@@ -367,7 +367,7 @@ describe("Gate A — Feature Status truthfulness", () => {
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Import Notifications"))?.status)
       .toBe("Live");
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature.startsWith("Report Export"))?.status)
-      .toBe("Planned");
+      .toBe("Implemented — Pending Deployment");
     expect(FEATURE_STATUS_ROWS.find((row) => row.feature === "Daily FX Sync")?.status)
       .toBe("Live (Automated)");
   });

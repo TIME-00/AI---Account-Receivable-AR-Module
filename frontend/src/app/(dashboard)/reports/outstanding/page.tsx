@@ -2,8 +2,10 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
-import { Users, Search, ArrowUpDown, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { Users, Search, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ExportMenu } from "@/components/features/reports/export-menu";
+import { localTodayISODate } from "@/lib/export";
 import { useAgingByCustomerF2, useAgingSummaryF2 } from "@/hooks/use-f2-data";
 import { formatMoneySafe } from "@/lib/currency";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
@@ -68,37 +70,8 @@ export default function CustomerOutstandingPage() {
     else { setSortKey(key); setSortAsc(key === "customer_name"); }
   };
 
-  // ── Loading ────────────────────────────────────────────────────────────────
-  if (isLoading || summaryLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Link href="/reports" className="hover:text-blue-600">Reports</Link><span>/</span>
-          <span className="text-slate-800 font-medium">Customer Outstanding</span>
-        </div>
-        <div className="glass-card flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
-            <p className="text-sm text-slate-500">Loading outstanding data…</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || summaryError) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Link href="/reports" className="hover:text-blue-600">Reports</Link><span>/</span>
-          <span className="text-slate-800 font-medium">Customer Outstanding</span>
-        </div>
-        <div className="glass-card flex flex-col items-center justify-center gap-2 py-20">
-          <p className="text-sm font-medium text-red-600">Failed to load data</p>
-        </div>
-      </div>
-    );
-  }
+  const loading = isLoading || summaryLoading;
+  const failed = error || summaryError;
 
   return (
     <div className="space-y-6">
@@ -108,14 +81,29 @@ export default function CustomerOutstandingPage() {
         <span className="text-slate-800 font-medium">Customer Outstanding</span>
       </div>
 
-      {/* Header */}
+      {/* Header — kept mounted across data (re)loads so a background refetch
+          never tears down the export control and cancels an in-flight export. */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Customer Outstanding</h1>
-        <button disabled className="flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-xs font-medium text-slate-400 cursor-not-allowed">
-          <Download className="h-3.5 w-3.5" /> Export — Coming Soon
-        </button>
+        <ExportMenu
+          reportType="customer-outstanding"
+          filters={{ as_of_date: localTodayISODate() }}
+        />
       </div>
 
+      {loading ? (
+        <div className="glass-card flex items-center justify-center py-20">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
+            <p className="text-sm text-slate-500">Loading outstanding data…</p>
+          </div>
+        </div>
+      ) : failed ? (
+        <div className="glass-card flex flex-col items-center justify-center gap-2 py-20">
+          <p className="text-sm font-medium text-red-600">Failed to load data</p>
+        </div>
+      ) : (
+      <>
       {/* Authoritative company-wide totals (all customers, not just this page) */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
@@ -240,6 +228,8 @@ export default function CustomerOutstandingPage() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -251,7 +251,9 @@ describe("Receipt report page (B9DD-RR-006)", () => {
     // The native sum (200) is never presented as a total.
     expect(screen.queryByText("MYR 200.00")).toBeNull();
     // Every request stayed within the backend page limit.
-    for (const call of fakeApi.calls) {
+    const pagedCalls = fakeApi.calls.filter((call) => "page_size" in call.params);
+    expect(pagedCalls.length).toBeGreaterThan(0);
+    for (const call of pagedCalls) {
       expect(Number(call.params.page_size)).toBeLessThanOrEqual(100);
     }
   });

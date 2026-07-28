@@ -2,13 +2,14 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
-import { Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ExportMenu } from "@/components/features/reports/export-menu";
 import { useReceiptReport, formatDate } from "@/hooks/use-f2-data";
 import { formatMoney } from "@/lib/currency";
 import { MoneySummary } from "@/components/ui/money-summary";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
 import { PAYMENT_METHOD_NAMES, type MonetarySummary } from "@/types";
+import { localTodayISODate } from "@/lib/export";
 
 const statusColors: Record<string, string> = {
   Draft: "bg-slate-100 text-slate-600",
@@ -18,17 +19,13 @@ const statusColors: Record<string, string> = {
   Bounced: "bg-red-50 text-red-700",
 };
 
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 export default function ReceiptSummaryPage() {
   const thirtyDaysAgo = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    return toDateStr(d);
+    return localTodayISODate(d);
   }, []);
-  const todayStr = useMemo(() => toDateStr(new Date()), []);
+  const todayStr = useMemo(() => localTodayISODate(), []);
 
   const [dateFrom, setDateFrom] = useState(thirtyDaysAgo);
   const [dateTo, setDateTo] = useState(todayStr);
@@ -42,46 +39,34 @@ export default function ReceiptSummaryPage() {
   const receivedSummary = overall?.summary.document_total_summary;
   const unappliedSummary = overall?.summary.current_balance_summary;
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Breadcrumb />
+  return (
+    <div className="space-y-6">
+      <Breadcrumb />
+
+      {/* Header — kept mounted across data (re)loads so a background refetch
+          never tears down the export control and cancels an in-flight export. */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Receipt Summary</h1>
+        <ExportMenu
+          reportType="receipts"
+          filters={{ date_from: dateFrom, date_to: dateTo }}
+        />
+      </div>
+
+      {isLoading ? (
         <div className="glass-card flex items-center justify-center py-20">
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
             <p className="text-sm text-slate-500">Loading receipt summary…</p>
           </div>
         </div>
-      </div>
-    );
-  }
-
-  if (isError || !data || !overall || !receivedSummary || !unappliedSummary) {
-    return (
-      <div className="space-y-6">
-        <Breadcrumb />
+      ) : (isError || !data || !overall || !receivedSummary || !unappliedSummary) ? (
         <div className="glass-card flex flex-col items-center justify-center gap-2 py-20">
           <p className="text-sm font-medium text-red-600">Failed to load receipt summary</p>
           <p className="text-xs text-slate-400">The authoritative report contract could not be loaded.</p>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <Breadcrumb />
-
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Receipt Summary</h1>
-        <button
-          disabled
-          className="flex cursor-not-allowed items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-xs font-medium text-slate-400"
-        >
-          <Download className="h-3.5 w-3.5" /> Export — Coming Soon
-        </button>
-      </div>
-
+      ) : (
+      <>
       {/* Date Range (server-side filter) */}
       <div className="flex flex-wrap items-center gap-3">
         <label htmlFor="date-from" className="text-xs font-medium text-slate-500">From:</label>
@@ -194,6 +179,8 @@ export default function ReceiptSummaryPage() {
       <p className="text-center text-[10px] text-slate-400">
         All totals are supplied by the backend monetary aggregation contract over the full filtered collection.
       </p>
+      </>
+      )}
     </div>
   );
 }

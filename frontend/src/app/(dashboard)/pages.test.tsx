@@ -55,6 +55,7 @@ vi.mock("next/navigation", () => ({
 
 import InvoiceListPage from "@/app/(dashboard)/invoices/page";
 import InvoiceSummaryPage from "@/app/(dashboard)/reports/invoices/page";
+import ReceiptSummaryPage from "@/app/(dashboard)/reports/receipts/page";
 import AgingReportPage from "@/app/(dashboard)/reports/aging/page";
 import CustomerOutstandingPage from "@/app/(dashboard)/reports/outstanding/page";
 
@@ -141,7 +142,12 @@ describe("Invoice Summary report page", () => {
     ]);
 
     renderWithProviders(<InvoiceSummaryPage />);
-    await waitFor(() => expect(screen.getByText("Invoice Summary")).toBeInTheDocument());
+    // The heading (and its export control) is a stable sibling of the data body,
+    // so target the heading specifically — the breadcrumb also reads "Invoice
+    // Summary".
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Invoice Summary" })).toBeInTheDocument()
+    );
 
     // Full filtered collection size, from the backend — not a 100-row cap.
     await waitFor(() => expect(screen.getByText(/Server-side filter — 1001 invoice\(s\) in range/i)).toBeInTheDocument());
@@ -160,6 +166,26 @@ describe("Invoice Summary report page", () => {
     ]);
     renderWithProviders(<InvoiceSummaryPage />);
     await waitFor(() => expect(screen.getByText(/% \(by count\)/i)).toBeInTheDocument());
+  });
+
+  it("keeps its header and Export control mounted while report queries are pending", async () => {
+    const pending = new Promise<never>(() => {});
+    fakeApi = createFakeApi([route("/invoices", () => pending)]);
+    renderWithProviders(<InvoiceSummaryPage />);
+    expect(screen.getByRole("heading", { name: "Invoice Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^export$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Loading invoice summary/i)).toBeInTheDocument();
+  });
+});
+
+describe("Receipt Summary report page", () => {
+  it("keeps its header and Export control mounted while report queries are pending", () => {
+    const pending = new Promise<never>(() => {});
+    fakeApi = createFakeApi([route("/receipts", () => pending)]);
+    renderWithProviders(<ReceiptSummaryPage />);
+    expect(screen.getByRole("heading", { name: "Receipt Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^export$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Loading receipt summary/i)).toBeInTheDocument();
   });
 });
 
@@ -225,6 +251,20 @@ describe("Customer Outstanding report page", () => {
     renderWithProviders(<CustomerOutstandingPage />);
     await waitFor(() => expect(screen.getByText("SGD 300.00")).toBeInTheDocument());
     expect(screen.getByText("USD 100.00")).toBeInTheDocument();
+  });
+
+  it("keeps its header and Export control mounted while aging queries are pending", () => {
+    const pending = new Promise<never>(() => {});
+    fakeApi = createFakeApi([
+      route("/reports/aging", () => pending),
+      route("/reports/aging/by-customer", () => pending),
+    ]);
+    renderWithProviders(<CustomerOutstandingPage />);
+    expect(
+      screen.getByRole("heading", { name: "Customer Outstanding" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^export$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Loading outstanding data/i)).toBeInTheDocument();
   });
 });
 

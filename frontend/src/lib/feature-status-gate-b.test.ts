@@ -30,12 +30,14 @@ describe("Gate B feature status", () => {
     }
   });
 
-  it("preserves Gate A rows as Live and Report Export as Planned", () => {
+  it("preserves Gate A rows as Live and Report Export as Implemented — Pending Deployment", () => {
     expect(find((f) => f === "Dashboard")!.status).toBe("Live");
     expect(find((f) => f.startsWith("Governed FX"))!.status).toBe("Live");
     expect(find((f) => f.startsWith("Booked-Rate"))!.status).toBe("Live");
     expect(find((f) => f === "Daily FX Sync")!.status).toBe("Live (Automated)");
-    expect(find((f) => f.startsWith("Report Export"))!.status).toBe("Planned");
+    expect(find((f) => f.startsWith("Report Export"))!.status).toBe(
+      "Implemented — Pending Deployment",
+    );
     expect(find((f) => f === "Auto-Allocation")!.status).toBe("Disabled");
   });
 
