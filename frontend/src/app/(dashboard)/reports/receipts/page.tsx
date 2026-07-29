@@ -6,9 +6,15 @@ import { cn } from "@/lib/utils";
 import { ExportMenu } from "@/components/features/reports/export-menu";
 import { useReceiptReport, formatDate } from "@/hooks/use-f2-data";
 import { formatMoney } from "@/lib/currency";
-import { MoneySummary } from "@/components/ui/money-summary";
+import {
+  CompactCompanyBase,
+  MoneySummary,
+} from "@/components/ui/money-summary";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
-import { PAYMENT_METHOD_NAMES, type MonetarySummary } from "@/types";
+import {
+  PAYMENT_METHOD_NAMES,
+  type NormalizedMonetarySummary,
+} from "@/types";
 import { localTodayISODate } from "@/lib/export";
 
 const statusColors: Record<string, string> = {
@@ -36,8 +42,8 @@ export default function ReceiptSummaryPage() {
   const { data, isLoading, isError } = useReceiptReport({ date_from: dateFrom, date_to: dateTo });
 
   const overall = data?.overall;
-  const receivedSummary = overall?.summary.document_total_summary;
-  const unappliedSummary = overall?.summary.current_balance_summary;
+  const receivedSummary = overall?.summary.documentTotal;
+  const unappliedSummary = overall?.summary.currentBalance;
 
   return (
     <div className="space-y-6">
@@ -108,7 +114,7 @@ export default function ReceiptSummaryPage() {
           key: m.method,
           label: PAYMENT_METHOD_NAMES[m.method] ?? m.method,
           count: m.total,
-          summary: m.summary.document_total_summary,
+          summary: m.summary.documentTotal,
         }))}
         overallTotal={overall.total}
         emptyLabel="No receipts in date range"
@@ -121,7 +127,7 @@ export default function ReceiptSummaryPage() {
           key: s.status,
           label: s.status,
           count: s.total,
-          summary: s.summary.document_total_summary,
+          summary: s.summary.documentTotal,
           badgeClass: statusColors[s.status],
         }))}
         overallTotal={overall.total}
@@ -177,7 +183,7 @@ export default function ReceiptSummaryPage() {
       </div>
 
       <p className="text-center text-[10px] text-slate-400">
-        All totals are supplied by the backend monetary aggregation contract over the full filtered collection.
+        Native totals are supplied by the server over the full filtered collection. Legacy company-base totals are not presented as verified.
       </p>
       </>
       )}
@@ -189,7 +195,7 @@ interface BreakdownRow {
   key: string;
   label: string;
   count: number;
-  summary: MonetarySummary;
+  summary: NormalizedMonetarySummary;
   badgeClass?: string;
 }
 
@@ -211,7 +217,7 @@ function BreakdownTable({
       <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
         <p className="mt-0.5 text-[10px] text-slate-400">
-          Each row is an authoritative backend summary over the full filtered range.
+          Each row uses a validated server summary over the full filtered range.
         </p>
       </div>
       {rows.length === 0 ? (
@@ -244,10 +250,10 @@ function BreakdownTable({
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono text-xs">{row.count}</td>
                   <td className="px-4 py-2.5 text-right">
-                    <CurrencyTotals byCurrency={row.summary.by_currency} className="text-xs" />
+                    <CurrencyTotals byCurrency={row.summary.byCurrency} className="text-xs" />
                   </td>
-                  <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-slate-700">
-                    {formatMoney(row.summary.base_total, row.summary.base_currency)}
+                  <td className="px-4 py-2.5 text-right">
+                    <CompactCompanyBase summary={row.summary} />
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-500">
                     {overallTotal > 0 ? ((row.count / overallTotal) * 100).toFixed(1) : "0.0"}%

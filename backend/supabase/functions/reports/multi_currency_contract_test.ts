@@ -6,6 +6,7 @@ import {
   currentBaseFromBookedRate,
   monetarySummaryFromEntries,
   monetaryAggregationMeta,
+  parseMonetaryCollectionSummary,
   roundMoney,
   CURRENT_BALANCE_BOOKED_RATE_BASIS,
   CURRENT_OUTSTANDING_AMOUNT_BASIS,
@@ -28,6 +29,7 @@ import {
   validateOperationalCurrencyForWrite,
 } from '../_shared/validators.ts';
 import {
+  AuthorizationError,
   BusinessError,
   errorResponse,
   NotFoundError,
@@ -620,10 +622,10 @@ class MockSupabaseClient {
     };
   }
 
-  async rpc(
+  rpc(
     functionName: string,
     params: Record<string, unknown>,
-  ): Promise<{ data: unknown; error: { code: string; message: string } | null }> {
+  ): { data: unknown; error: { code: string; message: string } | null } {
     this.rpcCalls.push({ functionName, params });
     const forcedError = this.rpcErrors[functionName];
     if (forcedError) return { data: null, error: forcedError };
@@ -662,7 +664,7 @@ class MockSupabaseClient {
     }
     if (functionName === 'add_draft_invoice_lines') {
       const lines = this.tables.invoice_lines ?? (this.tables.invoice_lines = []);
-      let nextLineNo = Math.max(
+      const nextLineNo = Math.max(
         0,
         ...lines
           .filter(line => line.invoice_id === params.p_invoice_id)
@@ -964,9 +966,10 @@ Deno.test('Batch 9D-D FX governance eligibility reasons are explicit and not a g
 
 Deno.test('Batch 9D-D optional post-write enrichment cannot mask a committed mutation', async () => {
   const committed = { id: 'committed-mutation' };
-  const result = await withOptionalReadEnrichment(committed, async () => {
-    throw new Error('optional enrichment failed');
-  });
+  const result = await withOptionalReadEnrichment(
+    committed,
+    () => Promise.reject(new Error('optional enrichment failed')),
+  );
   assertEquals(result, committed);
 });
 
@@ -1329,21 +1332,29 @@ Deno.test('Batch 9D-D ordinary user-domain reads reject a service-role-only mock
     receipts: [],
   };
   const serviceRoleClient = new MockSupabaseClient(tables, 'service_role');
-  const operations = [
+  const collectionOperations = [
     () => new InvoiceService(serviceRoleClient as never, serviceRoleClient as never).listInvoices(clerkAuth, {}, { page: 1, page_size: 10 }),
     () => new ReceiptService(serviceRoleClient as never, serviceRoleClient as never).listReceipts(clerkAuth, {}, { page: 1, page_size: 10 }),
-    () => new ReportService(serviceRoleClient as never, serviceRoleClient as never).getAgingSummary(managerAuth, '2026-01-31'),
   ];
-  for (const operation of operations) {
-    let rejected = false;
-    try {
-      await operation();
-    } catch (error) {
-      rejected = String(error).includes('permission denied')
-        || String(error).includes('Report access is not permitted');
-    }
-    assertEquals(rejected, true, 'Ordinary user-domain reads must not depend on service_role execution');
+  for (const operation of collectionOperations) {
+    const error = await rejectedValue(operation);
+    assert(error instanceof AuthorizationError);
+    assertEquals(error.code, 'AUTHORIZATION_ERROR');
+    assertEquals(error.status, 403);
+    assert(
+      !error.message.includes('permission denied'),
+      'Raw database authorization detail must not escape collection services',
+    );
   }
+
+  const reportError = await rejectedValue(() =>
+    new ReportService(serviceRoleClient as never, serviceRoleClient as never)
+      .getAgingSummary(managerAuth, '2026-01-31')
+  );
+  assert(
+    reportError instanceof Error,
+    'Existing report read must still reject service-role-only composition',
+  );
 });
 
 Deno.test('Batch 9D-D services route migration-027 reads through the authenticated client, not the mutation client', async () => {
@@ -2047,12 +2058,13 @@ Deno.test('Batch 9D-D Linked and Standalone Credit Note structural inputs fail c
   assertEquals(standaloneError.code, 'BR-CN-REF');
   assertEquals(standaloneClient.rpcCalls.length, 0);
 
-  const validatorError = await rejectedValue(async () => {
+  const validatorError = await rejectedValue(() => {
     validateCreateInvoice({
       ...linkedCreditNoteInput({ cn_type: 'Standalone' }),
       customer_id: 'a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1',
       ref_invoice_id: linkedCreditNoteReferenceId,
     } as unknown as Record<string, unknown>);
+    return Promise.resolve();
   });
   assert(validatorError instanceof ValidationError);
   assertEquals(validatorError.message, 'ref_invoice_id is only permitted for Linked Credit Notes.');
@@ -3829,10 +3841,10 @@ function postedReferenceHandler(
   authenticatedCompanies: string[] = [],
 ): (req: Request) => Promise<Response> {
   return createInvoiceHandler({
-    authenticate: async (req, companyId) => {
+    authenticate: (req, companyId) => {
       assertEquals(req.headers.get('Authorization'), 'Bearer route-test-token');
       authenticatedCompanies.push(companyId);
-      return postedReferenceRouteAuth;
+      return Promise.resolve(postedReferenceRouteAuth);
     },
     createService: (authorizationHeader) => {
       assertEquals(authorizationHeader, 'Bearer route-test-token');
@@ -4135,27 +4147,27 @@ Deno.test('Batch 9D-D F-07 posted reference route rejects payload authority, inv
 Deno.test('Batch 9D-D F-07 generic Invoice PATCH remains Draft-only update composition', async () => {
   const calls: Array<{ method: string; auth: AuthContext; id: string; input: CreateInvoiceInput }> = [];
   const service = {
-    updateDraftInvoice: async (
+    updateDraftInvoice: (
       auth: AuthContext,
       id: string,
       input: CreateInvoiceInput,
     ): Promise<Invoice> => {
       calls.push({ method: 'updateDraftInvoice', auth, id, input });
-      return {
+      return Promise.resolve({
         id,
         company_id: auth.companyId,
         customer_id: input.customer_id,
         doc_type: input.doc_type,
         status: 'Draft',
         reference_no: input.reference_no,
-      } as Invoice;
+      } as Invoice);
     },
     correctPostedReference: (): never => {
       throw new Error('Generic PATCH must not invoke correctPostedReference');
     },
   } as unknown as InvoiceService;
   const routeHandler = createInvoiceHandler({
-    authenticate: async () => postedReferenceRouteAuth,
+    authenticate: () => Promise.resolve(postedReferenceRouteAuth),
     createService: () => service,
   });
 
@@ -5549,4 +5561,71 @@ Deno.test('Batch 9D-D Migration 029 hidden and nonexistent reference targets hav
     (hidden.body.error as MockRow).message,
     'NOT_FOUND: Financial document not found',
   );
+});
+
+Deno.test('Gate D v2 Invoice and Receipt summaries retain multi-currency and Gate C export contracts', async () => {
+  const build = (currentAmountBasis: 'current_outstanding' | 'current_unallocated') => {
+    const entry = (
+      amountBasis: 'current_outstanding' | 'current_unallocated' | 'original_document_total',
+      normalizationBasis: 'current_balance_x_booked_rate' | 'original_booked_base_snapshot',
+    ) => ({
+      row_count: 2,
+      matching_document_count: 2,
+      authoritative_document_count: 1,
+      unavailable_count: 1,
+      base_available: false,
+      amount_basis: amountBasis,
+      base_currency: 'MYR',
+      base_total: '42.50',
+      by_currency: [
+        { currency: 'MYR', amount: '42.50', base_amount: '42.50', count: 1, authoritative_document_count: 1, unavailable_count: 0, base_available: true },
+        { currency: 'USD', amount: '10.00', base_amount: null, count: 1, authoritative_document_count: 0, unavailable_count: 1, base_available: false },
+      ],
+      unavailable_by_currency: [{ currency: 'USD', document_count: 1 }],
+      meta: {
+        contract_version: 2 as const,
+        base_currency: 'MYR',
+        multi_currency: true,
+        normalization_basis: normalizationBasis,
+        authority_basis: 'current_consistent_booked_fx_decision' as const,
+      },
+    });
+    return {
+      current_balance_summary: entry(currentAmountBasis, 'current_balance_x_booked_rate'),
+      document_total_summary: entry('original_document_total', 'original_booked_base_snapshot'),
+    };
+  };
+
+  const invoice = parseMonetaryCollectionSummary(build('current_outstanding'), {
+    currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS,
+  });
+  const receipt = parseMonetaryCollectionSummary(build('current_unallocated'), {
+    currentAmountBasis: CURRENT_UNALLOCATED_AMOUNT_BASIS,
+  });
+  assertEquals(invoice.current_balance_summary.meta.contract_version, 2);
+  assertEquals(receipt.current_balance_summary.meta.contract_version, 2);
+  assertEquals(invoice.current_balance_summary.by_currency[1].base_amount, null);
+  assertEquals(receipt.current_balance_summary.by_currency[1].base_amount, null);
+
+  const migration033 = await Deno.readTextFile(
+    new URL('../../../../database/033_post_batch_9d_gate_d_dashboard_customer_distribution_and_monetary_summary_authority.sql', import.meta.url),
+  );
+  for (const field of [
+    "'meta'", "'kpis'", "'invoice_status_counts'", "'aging_buckets'",
+    "'collection_trend'", "'top_outstanding_customers'",
+    "'credit_rating_distribution'", "'total_invoices'", "'open_invoices'",
+    "'overdue_invoices'", "'total_receipts'", "'total_ar_balance'",
+    "'total_overdue_balance'", "'total_credit_balance'", "'overdue_percentage'",
+  ]) {
+    assert(migration033.includes(field), `Gate D must retain Dashboard field ${field}`);
+  }
+
+  const exportService = await Deno.readTextFile(new URL('./export-service.ts', import.meta.url));
+  const receiptService = await Deno.readTextFile(new URL('../receipts/service.ts', import.meta.url));
+  assert(exportService.includes('async exportInvoices('));
+  assert(exportService.includes('async exportReceipts('));
+  assert(exportService.includes('fx_source_category'));
+  assert(receiptService.includes('async handleBouncedCheque('));
+  assert(receiptService.includes("rpc('ar_receipt_collection'"));
+  assert(receiptService.includes("'handle_bounced_cheque'"));
 });

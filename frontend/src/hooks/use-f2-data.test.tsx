@@ -11,6 +11,7 @@ import {
   invoiceFixture,
   receiptFixture,
   collectionSummary,
+  collectionSummaryV2,
   monetarySummary,
   currencyTotal,
   ANCHOR_BY_CURRENCY,
@@ -49,6 +50,21 @@ const anchorSummary = collectionSummary(
   monetarySummary(ANCHOR_BY_CURRENCY, ANCHOR_BASE_TOTAL, "MYR", "original_document_total"),
 );
 
+const receiptAnchorSummary = collectionSummary(
+  monetarySummary(
+    ANCHOR_BY_CURRENCY,
+    ANCHOR_BASE_TOTAL,
+    "MYR",
+    "current_unallocated",
+  ),
+  monetarySummary(
+    ANCHOR_BY_CURRENCY,
+    ANCHOR_BASE_TOTAL,
+    "MYR",
+    "original_document_total",
+  ),
+);
+
 describe("useInvoiceReport — authoritative totals, no client summation", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -69,7 +85,10 @@ describe("useInvoiceReport — authoritative totals, no client summation", () =>
     const overall = result.current.data!.overall;
     // 1,001 rows summarised, but no request ever asked for more than 10 rows.
     expect(overall.total).toBe(1001);
-    expect(overall.summary.current_balance_summary.base_total).toBe(945_000);
+    expect(overall.summary.currentBalance.contractVersion).toBe(1);
+    if (overall.summary.currentBalance.contractVersion === 1) {
+      expect(overall.summary.currentBalance.legacyBaseTotal).toBe(945_000);
+    }
 
     const maxPageSize = Math.max(...fakeApi.calls.map((c) => Number(c.params.page_size)));
     expect(maxPageSize).toBeLessThanOrEqual(10);
@@ -114,14 +133,19 @@ describe("useInvoiceReport — authoritative totals, no client summation", () =>
     expect(statuses).toContain("Paid");
 
     for (const entry of result.current.data!.byStatus) {
-      const by = entry.summary.document_total_summary.by_currency;
+      const documentTotal = entry.summary.documentTotal;
+      expect(documentTotal.contractVersion).toBe(1);
+      if (documentTotal.contractVersion !== 1) {
+        throw new Error("Expected a legacy v1 report summary.");
+      }
+      const by = documentTotal.byCurrency;
       // Both native currencies survive; they are never collapsed into one.
       expect(by.map((c) => c.currency).sort()).toEqual(["MYR", "USD"]);
       // MYR 545 anchor: the base total is NOT the sum of native amounts (200).
       const nativeSum = by.reduce((s, c) => s + c.amount, 0);
       expect(nativeSum).toBe(200);
-      expect(entry.summary.document_total_summary.base_total).toBe(545);
-      expect(entry.summary.document_total_summary.base_total).not.toBe(nativeSum);
+      expect(documentTotal.legacyBaseTotal).toBe(545);
+      expect(documentTotal.legacyBaseTotal).not.toBe(nativeSum);
     }
   });
 
@@ -134,6 +158,30 @@ describe("useInvoiceReport — authoritative totals, no client summation", () =>
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.data).toBeUndefined();
   });
+
+  it("strictly carries v2 partial authority through every report summary", async () => {
+    fakeApi = createFakeApi([
+      route("/invoices", (params) => ({
+        data: [invoiceFixture()],
+        meta: {
+          total: params.status ? 1 : 3,
+          page: 1,
+          page_size: Number(params.page_size),
+          summary: collectionSummaryV2("current_outstanding", "partial"),
+        },
+      })),
+    ]);
+    const { result } = renderHook(() => useInvoiceReport({}), {
+      wrapper: Providers,
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.data?.overall.summary.currentBalance).toMatchObject({
+      contractVersion: 2,
+      baseTotal: "125.50",
+      baseAvailable: false,
+      unavailableCount: 2,
+    });
+  });
 });
 
 describe("useReceiptReport — authoritative totals by status and payment method", () => {
@@ -143,7 +191,7 @@ describe("useReceiptReport — authoritative totals by status and payment method
     fakeApi = createFakeApi([
       route("/receipts", (params) => ({
         data: [receiptFixture()],
-        meta: { total: 3, page: 1, page_size: Number(params.page_size), summary: anchorSummary },
+        meta: { total: 3, page: 1, page_size: Number(params.page_size), summary: receiptAnchorSummary },
       })),
     ]);
 
@@ -155,6 +203,38 @@ describe("useReceiptReport — authoritative totals by status and payment method
     expect(methods).toContain("TT");
     expect(result.current.data!.byMethod.length).toBeGreaterThan(0);
     // Per-method figures come straight from the backend summary.
-    expect(result.current.data!.byMethod[0].summary.document_total_summary.base_total).toBe(545);
+    const documentTotal =
+      result.current.data!.byMethod[0].summary.documentTotal;
+    expect(documentTotal.contractVersion).toBe(1);
+    if (documentTotal.contractVersion === 1) {
+      expect(documentTotal.legacyBaseTotal).toBe(545);
+    }
+  });
+
+  it("keeps all-unavailable v2 receipt report totals nullable", async () => {
+    fakeApi = createFakeApi([
+      route("/receipts", (params) => ({
+        data: [receiptFixture()],
+        meta: {
+          total: 2,
+          page: 1,
+          page_size: Number(params.page_size),
+          summary: collectionSummaryV2(
+            "current_unallocated",
+            "all-unavailable",
+          ),
+        },
+      })),
+    ]);
+    const { result } = renderHook(() => useReceiptReport({}), {
+      wrapper: Providers,
+    });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.data?.overall.summary.documentTotal).toMatchObject({
+      contractVersion: 2,
+      baseTotal: null,
+      authoritativeDocumentCount: 0,
+      unavailableCount: 2,
+    });
   });
 });

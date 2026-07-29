@@ -7,13 +7,23 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
-import type { Receipt, Customer, BankAccount, MonetaryCollectionSummary, CurrencyTotal } from "@/types";
+import type {
+  Receipt,
+  Customer,
+  BankAccount,
+  NormalizedMonetaryCollectionSummary,
+  CurrencyTotal,
+} from "@/types";
 import type { ListPagination } from "@/hooks/use-invoices";
 import type { ReceiptFormValues } from "@/lib/receipt-schema";
 import { filterVisibleCustomers } from "@/lib/customer-visibility";
 import { fetchCustomerAgingRow } from "@/lib/aging-lookup";
 import { normalizeCurrency } from "@/lib/currency";
 import { useCompanyStore } from "@/stores/company-store";
+import {
+  parseCollectionSummary,
+  SUMMARY_UNAVAILABLE_MESSAGE,
+} from "@/lib/monetary-summary";
 
 // ─── Query: List Receipts (with filters) ────────────────────────────────────
 
@@ -45,10 +55,20 @@ export function useReceipts(filters: {
       // The former capped `/customers` post-filter narrowed rows but not the
       // summary, so the two could describe different sets. Removed.
       const res = await api.getWithMeta<Receipt[]>("/receipts", { params });
+      let summary: NormalizedMonetaryCollectionSummary | null = null;
+      let summaryUnavailable: string | null = null;
+      try {
+        summary = parseCollectionSummary(res.meta?.summary, {
+          currentAmountBasis: "current_unallocated",
+        });
+      } catch {
+        summaryUnavailable = SUMMARY_UNAVAILABLE_MESSAGE;
+      }
 
       return {
         rows: res.data,
-        summary: res.meta?.summary,
+        summary,
+        summaryUnavailable,
         pagination: {
           total: res.meta?.total ?? res.data.length,
           page: res.meta?.page ?? page,
@@ -65,8 +85,10 @@ export function useReceipts(filters: {
 export interface ReceiptListResult {
   /** Rows for the CURRENT PAGE only. */
   rows: Receipt[];
-  /** Authoritative summary over the ENTIRE filtered collection. */
-  summary?: MonetaryCollectionSummary;
+  /** Strictly validated v1/v2 summary over the entire filtered collection. */
+  summary: NormalizedMonetaryCollectionSummary | null;
+  /** Sanitized, non-leaking fail-closed state for a missing/invalid summary. */
+  summaryUnavailable: string | null;
   pagination: ListPagination;
 }
 

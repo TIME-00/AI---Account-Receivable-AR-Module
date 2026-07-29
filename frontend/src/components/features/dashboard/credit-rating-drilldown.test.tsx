@@ -74,29 +74,29 @@ describe("CreditRiskChart drill-down controls", () => {
     renderWithProviders(
       <CreditRiskChart data={chartData} currency="MYR" onSelectRating={onSelect} />,
     );
-    const group = screen.getByRole("group", { name: /drill down by credit rating/i });
+    const group = screen.getByRole("group", { name: /view customers by credit rating/i });
 
     for (const rating of RATINGS) {
       const btn = within(group).getByRole("button", {
-        name: new RegExp(`credit rating ${rating}\\b`, "i"),
+        name: new RegExp(`view customers rated ${rating}\\b`, "i"),
       });
       expect(btn).toBeInTheDocument();
     }
 
     // pointer
     await userEvent.click(
-      within(group).getByRole("button", { name: /credit rating A\b/i }),
+      within(group).getByRole("button", { name: /view customers rated A\b/i }),
     );
     expect(onSelect).toHaveBeenCalledWith("A");
 
     // keyboard (Enter activates a focused native button)
-    const dButton = within(group).getByRole("button", { name: /credit rating D\b/i });
+    const dButton = within(group).getByRole("button", { name: /view customers rated D\b/i });
     dButton.focus();
     await userEvent.keyboard("{Enter}");
     expect(onSelect).toHaveBeenCalledWith("D");
 
     const aaButton = within(group).getByRole("button", {
-      name: /credit rating AA\b/i,
+      name: /view customers rated AA\b/i,
     });
     aaButton.focus();
     await userEvent.keyboard(" ");
@@ -112,7 +112,7 @@ describe("CreditRiskChart drill-down controls", () => {
         activeRating="B"
       />,
     );
-    const active = screen.getByRole("button", { name: /credit rating B\b/i });
+    const active = screen.getByRole("button", { name: /view customers rated B\b/i });
     expect(active).toHaveAttribute("aria-pressed", "true");
   });
 });

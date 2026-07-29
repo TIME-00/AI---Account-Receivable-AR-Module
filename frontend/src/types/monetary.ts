@@ -59,6 +59,17 @@ export interface MonetaryCollectionSummary {
   document_total_summary: MonetarySummary;
 }
 
+// Gate D normalized models. Raw collection summaries may only become these
+// types after validation by `parseCollectionSummary`.
+export type {
+  ParsedCollectionSummary as NormalizedMonetaryCollectionSummary,
+  ParsedCurrencyGroupV1 as NormalizedCurrencyGroupV1,
+  ParsedCurrencyGroupV2 as NormalizedCurrencyGroupV2,
+  ParsedSummary as NormalizedMonetarySummary,
+  ParsedSummaryV1 as NormalizedMonetarySummaryV1,
+  ParsedSummaryV2 as NormalizedMonetarySummaryV2,
+} from "../lib/monetary-summary";
+
 // ─── FX booking-decision read enrichment (invoice / receipt rows & detail) ───
 // Mirrors _shared/fx-read-contracts.ts + service.ts attachFxDecisionReadSummary.
 

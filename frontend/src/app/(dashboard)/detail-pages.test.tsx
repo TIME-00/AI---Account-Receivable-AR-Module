@@ -226,9 +226,9 @@ describe("Receipt detail page (B9DD-RR-006)", () => {
 // ─── Receipt report ─────────────────────────────────────────────────────────
 
 describe("Receipt report page (B9DD-RR-006)", () => {
-  it("renders authoritative collection totals and never sums the page rows", async () => {
+  it("marks legacy collection totals unverified and never sums the page rows", async () => {
     const anchor = collectionSummary(
-      monetarySummary(ANCHOR_BY_CURRENCY, ANCHOR_BASE_TOTAL, "MYR", "current_outstanding"),
+      monetarySummary(ANCHOR_BY_CURRENCY, ANCHOR_BASE_TOTAL, "MYR", "current_unallocated"),
       monetarySummary(
         ANCHOR_BY_CURRENCY,
         ANCHOR_BASE_TOTAL,
@@ -246,7 +246,8 @@ describe("Receipt report page (B9DD-RR-006)", () => {
     ]);
 
     renderWithProviders(<ReceiptSummaryPage />);
-    await waitFor(() => expect(screen.getAllByText(/MYR 545\.00/).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText("Not verified").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/MYR 545\.00/)).not.toBeInTheDocument();
 
     // The native sum (200) is never presented as a total.
     expect(screen.queryByText("MYR 200.00")).toBeNull();

@@ -7,11 +7,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   createDeferred,
   renderWithProviders,
   createFakeApi,
   route,
+  customerFixture,
   type FakeApi,
 } from "@/test/harness";
 import type { LiveDashboardMetrics } from "@/types";
@@ -27,6 +29,7 @@ vi.mock("@/hooks/use-api", async (importOriginal) => {
 vi.mock("@/hooks/use-auth-context", () => ({
   useAuthContext: () => ({
     data: { user: { id: "user-1", email: "test@example.invalid" } },
+    isSuccess: true,
   }),
 }));
 
@@ -87,6 +90,18 @@ function metricsFixture(over: Partial<LiveDashboardMetrics> = {}): LiveDashboard
       },
     ],
     credit_rating_distribution: [{ rating: "A", customer_count: 1, outstanding_base: 545 }],
+    customer_credit_rating_distribution: {
+      population: "VISIBLE_CUSTOMERS",
+      included_statuses: ["Active", "Inactive", "Blocked", "On Hold"],
+      rows: [
+        { rating: "AAA", customer_count: 0 },
+        { rating: "AA", customer_count: 0 },
+        { rating: "A", customer_count: 1 },
+        { rating: "B", customer_count: 0 },
+        { rating: "C", customer_count: 0 },
+        { rating: "D", customer_count: 0 },
+      ],
+    },
     total_invoices: 10,
     ...over,
   } as LiveDashboardMetrics;
@@ -172,5 +187,125 @@ describe("Dashboard page (B9DD-RR-006)", () => {
     renderWithProviders(<DashboardPage />);
     await waitFor(() => expect(screen.getByText(/unavailable|failed|error/i)).toBeInTheDocument());
     expect(screen.queryByText(/MYR/)).toBeNull();
+  });
+
+  it("opens the all-visible customer dialog instead of navigating directly", async () => {
+    fakeApi = createFakeApi([
+      route("/reports/dashboard", () => ({ data: metricsFixture() })),
+      route("/customers", () => ({
+        data: [
+          customerFixture({
+            customer_name: "Zero Balance Customer",
+            credit_rating: "A",
+          }),
+        ],
+        meta: { total: 1, page: 1, page_size: 25 },
+      })),
+    ]);
+    renderWithProviders(<DashboardPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "View customers rated A" }),
+    );
+
+    expect(
+      await screen.findByRole("dialog", { name: "Customers rated A" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Zero Balance Customer")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/including customers with no outstanding balance/i)
+        .length,
+    ).toBeGreaterThan(0);
+    const call = fakeApi.calls.find((entry) => entry.path === "/customers");
+    expect(call?.params).toEqual({
+      credit_rating: "A",
+      page: 1,
+      page_size: 25,
+    });
+  });
+
+  it("performs one synchronized refetch when counts first mismatch", async () => {
+    let dashboardCalls = 0;
+    let customerCalls = 0;
+    fakeApi = createFakeApi([
+      route("/reports/dashboard", () => {
+        dashboardCalls += 1;
+        return {
+          data: metricsFixture({
+            customer_credit_rating_distribution: {
+              ...metricsFixture().customer_credit_rating_distribution,
+              rows: metricsFixture().customer_credit_rating_distribution.rows.map(
+                (row) =>
+                  row.rating === "A"
+                    ? {
+                        ...row,
+                        customer_count: dashboardCalls === 1 ? 1 : 2,
+                      }
+                    : row,
+              ),
+            },
+          }),
+        };
+      }),
+      route("/customers", () => {
+        customerCalls += 1;
+        return {
+          data: [
+            customerFixture({ id: "c-1" }),
+            customerFixture({ id: "c-2", customer_id: "C0002" }),
+          ],
+          meta: { total: 2, page: 1, page_size: 25 },
+        };
+      }),
+    ]);
+    renderWithProviders(<DashboardPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "View customers rated A" }),
+    );
+
+    await waitFor(() => expect(dashboardCalls).toBe(2));
+    await waitFor(() => expect(customerCalls).toBe(2));
+    expect(
+      screen.queryByText(/refresh to view the latest list/i),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("2 matching customers")).toBeInTheDocument();
+  });
+
+  it("stops after a persistent mismatch and allows one manual cycle", async () => {
+    let dashboardCalls = 0;
+    let customerCalls = 0;
+    fakeApi = createFakeApi([
+      route("/reports/dashboard", () => {
+        dashboardCalls += 1;
+        return { data: metricsFixture() };
+      }),
+      route("/customers", () => {
+        customerCalls += 1;
+        return {
+          data: [
+            customerFixture({ id: "c-1" }),
+            customerFixture({ id: "c-2", customer_id: "C0002" }),
+          ],
+          meta: { total: 2, page: 1, page_size: 25 },
+        };
+      }),
+    ]);
+    renderWithProviders(<DashboardPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "View customers rated A" }),
+    );
+    expect(
+      await screen.findByText(
+        "Customer data changed. Refresh to view the latest list.",
+      ),
+    ).toBeInTheDocument();
+    expect(dashboardCalls).toBe(2);
+    expect(customerCalls).toBe(2);
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(dashboardCalls).toBe(3));
+    await waitFor(() => expect(customerCalls).toBe(3));
+    expect(
+      screen.getByText("Customer data changed. Refresh to view the latest list."),
+    ).toBeInTheDocument();
   });
 });

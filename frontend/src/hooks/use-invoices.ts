@@ -7,7 +7,18 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
-import type { Invoice, InvoiceLine, Customer, TaxCode, PaymentTerm, MonetaryCollectionSummary } from "@/types";
+import type {
+  Invoice,
+  InvoiceLine,
+  Customer,
+  TaxCode,
+  PaymentTerm,
+  NormalizedMonetaryCollectionSummary,
+} from "@/types";
+import {
+  parseCollectionSummary,
+  SUMMARY_UNAVAILABLE_MESSAGE,
+} from "@/lib/monetary-summary";
 import type { TaxCodeOption, PaymentTermOption } from "@/hooks/use-invoice-calculator";
 import { filterVisibleCustomers } from "@/lib/customer-visibility";
 import { normalizeCurrency } from "@/lib/currency";
@@ -254,10 +265,20 @@ export function useInvoiceList(filters: {
       // ROWS but not the SUMMARY, the two could describe different sets. It is
       // removed rather than reproduced client-side.
       const res = await api.getWithMeta<Invoice[]>("/invoices", { params });
+      let summary: NormalizedMonetaryCollectionSummary | null = null;
+      let summaryUnavailable: string | null = null;
+      try {
+        summary = parseCollectionSummary(res.meta?.summary, {
+          currentAmountBasis: "current_outstanding",
+        });
+      } catch {
+        summaryUnavailable = SUMMARY_UNAVAILABLE_MESSAGE;
+      }
 
       return {
         rows: res.data,
-        summary: res.meta?.summary,
+        summary,
+        summaryUnavailable,
         pagination: {
           total: res.meta?.total ?? res.data.length,
           page: res.meta?.page ?? page,
@@ -282,8 +303,10 @@ export interface ListPagination {
 export interface InvoiceListResult {
   /** Rows for the CURRENT PAGE only. */
   rows: Invoice[];
-  /** Authoritative summary over the ENTIRE filtered collection. */
-  summary?: MonetaryCollectionSummary;
+  /** Strictly validated v1/v2 summary over the entire filtered collection. */
+  summary: NormalizedMonetaryCollectionSummary | null;
+  /** Sanitized, non-leaking fail-closed state for a missing/invalid summary. */
+  summaryUnavailable: string | null;
   pagination: ListPagination;
 }
 

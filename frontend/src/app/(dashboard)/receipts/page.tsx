@@ -40,6 +40,7 @@ export default function ReceiptsListPage() {
   const receipts = data?.rows ?? [];
   // Batch 9D-D authoritative aggregation (per-currency subtotals + base total).
   const summary = data?.summary;
+  const summaryUnavailable = data?.summaryUnavailable;
 
   // B9DD-FEIR-001: real backend pagination — `total` is the filtered
   // COLLECTION size, not this page's row count.
@@ -107,11 +108,16 @@ export default function ReceiptsListPage() {
       />
 
       {/* Authoritative multi-currency aggregation (Batch 9D-D) */}
-      {summary && receipts.length > 0 && (
+      {summary && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <MoneySummary summary={summary.document_total_summary} title="Received" />
-          <MoneySummary summary={summary.current_balance_summary} title="Unapplied" />
+          <MoneySummary summary={summary.documentTotal} title="Received" />
+          <MoneySummary summary={summary.currentBalance} title="Unapplied" />
         </div>
+      )}
+      {summaryUnavailable && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {summaryUnavailable}
+        </p>
       )}
 
       {/* Table */}

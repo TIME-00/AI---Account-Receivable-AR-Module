@@ -22,7 +22,14 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useApi } from "@/hooks/use-api";
 import { fetchAgingRowsForCustomerIds } from "@/lib/aging-lookup";
-import type { Customer, CustomerAgingRow } from "@/types";
+import { useAuthContext } from "@/hooks/use-auth-context";
+import { useCompanyStore } from "@/stores/company-store";
+import {
+  CREDIT_RATINGS,
+  type CreditRating,
+  type Customer,
+  type CustomerAgingRow,
+} from "@/types";
 import type { ListPagination } from "@/hooks/use-invoices";
 
 /** Server page size for the Customer list (backend clamps to MAX_PAGE_SIZE=100). */
@@ -43,6 +50,69 @@ export interface CustomerListFilters {
 export interface CustomerListResult {
   rows: Customer[];
   pagination: ListPagination;
+}
+
+export interface RatingCustomerQueryOptions {
+  rating: CreditRating | null;
+  page: number;
+  open: boolean;
+}
+
+/**
+ * Server-paginated customer roster for the dashboard rating dialog.
+ * Tenant/user identity participates in cache identity but is never sent as
+ * request authority; `useApi` supplies the authenticated context.
+ */
+export function useRatingCustomers({
+  rating,
+  page,
+  open,
+}: RatingCustomerQueryOptions) {
+  const api = useApi();
+  const companyId = useCompanyStore((state) => state.companyId);
+  const { data: auth, isSuccess: authReady } = useAuthContext();
+  const userId = auth?.user.id ?? "";
+  const validRating =
+    rating !== null && CREDIT_RATINGS.includes(rating);
+  const enabled =
+    open &&
+    authReady &&
+    companyId.trim().length > 0 &&
+    userId.trim().length > 0 &&
+    validRating;
+
+  return useQuery<CustomerListResult>({
+    queryKey: [
+      "customers",
+      "rating-dialog",
+      companyId,
+      userId,
+      rating,
+      page,
+      CUSTOMER_PAGE_SIZE,
+    ],
+    queryFn: async () => {
+      if (!rating) throw new Error("A valid credit rating is required.");
+      const response = await api.getWithMeta<Customer[]>("/customers", {
+        params: {
+          credit_rating: rating,
+          page,
+          page_size: CUSTOMER_PAGE_SIZE,
+        },
+      });
+      return {
+        rows: response.data,
+        pagination: {
+          total: response.meta?.total ?? response.data.length,
+          page: response.meta?.page ?? page,
+          page_size: response.meta?.page_size ?? CUSTOMER_PAGE_SIZE,
+        },
+      };
+    },
+    enabled,
+    retry: false,
+    staleTime: 30_000,
+  });
 }
 
 /**

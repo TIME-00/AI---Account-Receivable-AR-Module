@@ -10,17 +10,14 @@ import {
   callRpc,
   getNextSequence,
   fetchById,
-  isFiscalPeriodOpen,
-  getConfigValue,
-  getGLAccountId,
 } from '../_shared/db.ts';
 import {
+  AuthorizationError,
   BusinessError,
   NotFoundError,
   BRErrors,
   ValidationError,
 } from '../_shared/errors.ts';
-import { CONFIG_KEYS } from '../_shared/constants.ts';
 import type { AuthContext } from '../_shared/auth.ts';
 import {
   requireRole,
@@ -44,6 +41,10 @@ import {
   isBaseValueAvailable,
   withOptionalReadEnrichment,
 } from '../_shared/fx-read-contracts.ts';
+import {
+  CURRENT_OUTSTANDING_AMOUNT_BASIS,
+  parseMonetaryCollectionSummary,
+} from '../reports/monetary-contracts.ts';
 import type { MonetaryCollectionSummary } from '../reports/monetary-contracts.ts';
 
 export interface CreateInvoiceOptions {
@@ -134,16 +135,54 @@ export class InvoiceService {
       p_page: pagination.page,
       p_page_size: pagination.page_size,
     });
-    if (error) throw new Error(`Failed to list invoices: ${error.message}`);
-    if (!data || typeof data !== 'object') throw new Error('Failed to list invoices: invalid RPC response');
-    const result = data as { rows?: Invoice[]; total?: number; summary?: MonetaryCollectionSummary };
-    if (!result.summary || typeof result.summary !== 'object') {
-      throw new Error('Failed to list invoices: missing authoritative summary');
+    if (error) {
+      if (error.code === '42501') {
+        throw new AuthorizationError();
+      }
+      throw new BusinessError(
+        'REPORT_QUERY_FAILED',
+        'Unable to retrieve the requested collection.',
+        500,
+      );
+    }
+    if (!data || typeof data !== 'object') {
+      throw new BusinessError(
+        'REPORT_CONTRACT_INVALID',
+        'Failed to list invoices: invalid response.',
+        500,
+      );
+    }
+    const result = data as {
+      rows?: unknown;
+      total?: unknown;
+      summary?: unknown;
+    };
+    if (
+      !Array.isArray(result.rows) || !Number.isSafeInteger(result.total) ||
+      Number(result.total) < 0
+    ) {
+      throw new BusinessError(
+        'REPORT_CONTRACT_INVALID',
+        'Failed to list invoices: invalid response.',
+        500,
+      );
+    }
+    let summary: MonetaryCollectionSummary;
+    try {
+      summary = parseMonetaryCollectionSummary(result.summary, {
+        currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS,
+      });
+    } catch {
+      throw new BusinessError(
+        'REPORT_CONTRACT_INVALID',
+        'Failed to list invoices: invalid monetary summary contract.',
+        500,
+      );
     }
     return {
-      rows: result.rows ?? [],
-      total: Number(result.total ?? 0),
-      summary: result.summary,
+      rows: result.rows as Invoice[],
+      total: Number(result.total),
+      summary,
     };
   }
 

@@ -62,6 +62,17 @@ export interface DashboardCreditRatingRow {
   outstanding_base: number;
 }
 
+export interface DashboardVisibleCustomerCreditRatingRow {
+  rating: DashboardCreditRatingRow['rating'];
+  customer_count: number;
+}
+
+export interface DashboardVisibleCustomerCreditRatingDistribution {
+  population: 'VISIBLE_CUSTOMERS';
+  included_statuses: ['Active', 'Inactive', 'Blocked', 'On Hold'];
+  rows: DashboardVisibleCustomerCreditRatingRow[];
+}
+
 export interface LiveDashboardMetrics {
   meta: DashboardMeta;
   kpis: DashboardKpis;
@@ -70,6 +81,8 @@ export interface LiveDashboardMetrics {
   collection_trend: DashboardCollectionTrendPoint[];
   top_outstanding_customers: DashboardTopCustomer[];
   credit_rating_distribution: DashboardCreditRatingRow[];
+  customer_credit_rating_distribution:
+    DashboardVisibleCustomerCreditRatingDistribution;
 
   /** @deprecated Temporary compatibility alias. */
   total_invoices: number;
@@ -100,14 +113,21 @@ const AGING_KEYS = new Set<AgingBucketKey>([
   '61_90',
   'over_90',
 ]);
-const RATINGS = new Set<DashboardCreditRatingRow['rating']>([
+const RATING_ORDER: DashboardCreditRatingRow['rating'][] = [
   'AAA',
   'AA',
   'A',
   'B',
   'C',
   'D',
-]);
+];
+const RATINGS = new Set<DashboardCreditRatingRow['rating']>(RATING_ORDER);
+const INCLUDED_CUSTOMER_STATUSES = [
+  'Active',
+  'Inactive',
+  'Blocked',
+  'On Hold',
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -125,6 +145,21 @@ function requireArray(value: unknown, path: string): unknown[] {
     throw new Error(`Dashboard metrics response has invalid ${path}.`);
   }
   return value;
+}
+
+function requireExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+  path: string,
+): void {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  if (
+    actual.length !== sortedExpected.length ||
+    actual.some((key, index) => key !== sortedExpected[index])
+  ) {
+    throw new Error(`Dashboard metrics response has invalid ${path}.`);
+  }
 }
 
 function requireString(value: unknown, path: string): string {
@@ -184,7 +219,9 @@ export function validateDashboardMetricsResponse(
     'meta.base_currency',
   );
   if (!/^[A-Z]{3}$/.test(baseCurrency)) {
-    throw new Error('Dashboard metrics response has invalid meta.base_currency.');
+    throw new Error(
+      'Dashboard metrics response has invalid meta.base_currency.',
+    );
   }
 
   const asOfDate = requireString(meta.as_of_date, 'meta.as_of_date');
@@ -197,7 +234,9 @@ export function validateDashboardMetricsResponse(
     'meta.calculated_at',
   );
   if (!Number.isFinite(Date.parse(calculatedAt))) {
-    throw new Error('Dashboard metrics response has invalid meta.calculated_at.');
+    throw new Error(
+      'Dashboard metrics response has invalid meta.calculated_at.',
+    );
   }
 
   if (meta.scope !== 'assigned_customers' && meta.scope !== 'company') {
@@ -209,7 +248,9 @@ export function validateDashboardMetricsResponse(
     'meta.trend_months',
   );
   if (trendMonths < 1 || trendMonths > 12) {
-    throw new Error('Dashboard metrics response has invalid meta.trend_months.');
+    throw new Error(
+      'Dashboard metrics response has invalid meta.trend_months.',
+    );
   }
 
   validateMetricFields(
@@ -335,6 +376,64 @@ export function validateDashboardMetricsResponse(
       ['customer_count'],
       ['outstanding_base'],
       `credit_rating_distribution[${index}]`,
+    );
+  });
+
+  const customerCreditRatingDistribution = requireRecord(
+    root.customer_credit_rating_distribution,
+    'customer_credit_rating_distribution',
+  );
+  requireExactKeys(
+    customerCreditRatingDistribution,
+    ['population', 'included_statuses', 'rows'],
+    'customer_credit_rating_distribution',
+  );
+  if (customerCreditRatingDistribution.population !== 'VISIBLE_CUSTOMERS') {
+    throw new Error(
+      'Dashboard metrics response has invalid customer_credit_rating_distribution.population.',
+    );
+  }
+  const includedStatuses = requireArray(
+    customerCreditRatingDistribution.included_statuses,
+    'customer_credit_rating_distribution.included_statuses',
+  );
+  if (
+    includedStatuses.length !== INCLUDED_CUSTOMER_STATUSES.length ||
+    includedStatuses.some(
+      (status, index) => status !== INCLUDED_CUSTOMER_STATUSES[index],
+    )
+  ) {
+    throw new Error(
+      'Dashboard metrics response has invalid customer_credit_rating_distribution.included_statuses.',
+    );
+  }
+  const visibleCustomerRatings = requireArray(
+    customerCreditRatingDistribution.rows,
+    'customer_credit_rating_distribution.rows',
+  );
+  if (visibleCustomerRatings.length !== RATING_ORDER.length) {
+    throw new Error(
+      'Dashboard metrics response has invalid customer_credit_rating_distribution.rows.',
+    );
+  }
+  visibleCustomerRatings.forEach((item, index) => {
+    const row = requireRecord(
+      item,
+      `customer_credit_rating_distribution.rows[${index}]`,
+    );
+    requireExactKeys(
+      row,
+      ['rating', 'customer_count'],
+      `customer_credit_rating_distribution.rows[${index}]`,
+    );
+    if (row.rating !== RATING_ORDER[index]) {
+      throw new Error(
+        `Dashboard metrics response has invalid customer_credit_rating_distribution.rows[${index}].rating.`,
+      );
+    }
+    requireNonNegativeInteger(
+      row.customer_count,
+      `customer_credit_rating_distribution.rows[${index}].customer_count`,
     );
   });
 

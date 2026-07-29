@@ -16,6 +16,7 @@ import type {
   MonetaryCollectionSummary,
   MonetarySummary,
   Receipt,
+  Customer,
   CustomerAgingRow,
   ARSummary,
   FxDecisionReadSummary,
@@ -167,8 +168,13 @@ export function monetarySummary(
   baseTotal: number,
   baseCurrency = "MYR",
   amountBasis: MonetarySummary["amount_basis"] = "current_outstanding",
-  normalizationBasis: MonetarySummary["meta"]["normalization_basis"] = "current_balance_x_booked_rate",
+  normalizationBasis?: MonetarySummary["meta"]["normalization_basis"],
 ): MonetarySummary {
+  const resolvedNormalizationBasis =
+    normalizationBasis ??
+    (amountBasis === "original_document_total"
+      ? "original_booked_base_snapshot"
+      : "current_balance_x_booked_rate");
   return {
     row_count: by.reduce((s, c) => s + c.count, 0),
     amount_basis: amountBasis,
@@ -178,7 +184,7 @@ export function monetarySummary(
     meta: {
       base_currency: baseCurrency,
       multi_currency: by.length > 1,
-      normalization_basis: normalizationBasis,
+      normalization_basis: resolvedNormalizationBasis,
     },
   };
 }
@@ -188,6 +194,112 @@ export function collectionSummary(
   document: MonetarySummary,
 ): MonetaryCollectionSummary {
   return { current_balance_summary: balance, document_total_summary: document };
+}
+
+export type V2SummaryVariant =
+  | "complete"
+  | "partial"
+  | "all-unavailable"
+  | "empty";
+
+function v2Summary(
+  amountBasis: "current_outstanding" | "current_unallocated" | "original_document_total",
+  normalizationBasis: "current_balance_x_booked_rate" | "original_booked_base_snapshot",
+  variant: V2SummaryVariant,
+) {
+  const groups =
+    variant === "empty"
+      ? []
+      : variant === "all-unavailable"
+        ? [
+            {
+              currency: "USD",
+              amount: "100.00",
+              base_amount: null,
+              count: 2,
+              authoritative_document_count: 0,
+              unavailable_count: 2,
+              base_available: false,
+            },
+          ]
+        : [
+            {
+              currency: "MYR",
+              amount: "125.50",
+              base_amount: "125.50",
+              count: 1,
+              authoritative_document_count: 1,
+              unavailable_count: 0,
+              base_available: true,
+            },
+            {
+              currency: "USD",
+              amount: "100.00",
+              base_amount: variant === "complete" ? "450.00" : null,
+              count: 2,
+              authoritative_document_count: variant === "complete" ? 2 : 0,
+              unavailable_count: variant === "complete" ? 0 : 2,
+              base_available: variant === "complete",
+            },
+          ];
+  const matching = groups.reduce((sum, group) => sum + group.count, 0);
+  const authoritative = groups.reduce(
+    (sum, group) => sum + group.authoritative_document_count,
+    0,
+  );
+  const unavailable = matching - authoritative;
+  const baseTotal =
+    variant === "empty"
+      ? "0.00"
+      : variant === "all-unavailable"
+        ? null
+        : variant === "complete"
+          ? "575.50"
+          : "125.50";
+
+  return {
+    row_count: matching,
+    matching_document_count: matching,
+    authoritative_document_count: authoritative,
+    unavailable_count: unavailable,
+    base_available: unavailable === 0,
+    amount_basis: amountBasis,
+    base_currency: "MYR",
+    base_total: baseTotal,
+    by_currency: groups,
+    unavailable_by_currency: groups
+      .filter((group) => group.unavailable_count > 0)
+      .map((group) => ({
+        currency: group.currency,
+        document_count: group.unavailable_count,
+      })),
+    meta: {
+      contract_version: 2,
+      base_currency: "MYR",
+      multi_currency: groups.length > 1,
+      normalization_basis: normalizationBasis,
+      authority_basis: "current_consistent_booked_fx_decision",
+    },
+  };
+}
+
+/** Exact Gate D v2 wire fixture for Invoice/Receipt collection tests. */
+export function collectionSummaryV2(
+  currentAmountBasis: "current_outstanding" | "current_unallocated",
+  variant: V2SummaryVariant = "complete",
+) {
+  return {
+    current_balance_summary: v2Summary(
+      currentAmountBasis,
+      "current_balance_x_booked_rate",
+      variant,
+    ),
+    document_total_summary: v2Summary(
+      "original_document_total",
+      "original_booked_base_snapshot",
+      variant,
+    ),
+  };
 }
 
 export function fxDecision(overrides: Partial<FxDecisionReadSummary> = {}): FxDecisionReadSummary {
@@ -256,6 +368,50 @@ export function receiptFixture(overrides: Partial<Receipt> = {}): Receipt {
     fx_decision_id: "dec-1",
   };
   return { ...base, ...overrides } as unknown as Receipt;
+}
+
+export function customerFixture(overrides: Partial<Customer> = {}): Customer {
+  return {
+    id: "cust-uuid-1",
+    company_id: "co-1",
+    customer_id: "C0001",
+    customer_name: "Acme Sdn Bhd",
+    short_name: null,
+    customer_type: "Corporate",
+    registration_no: null,
+    tax_id: null,
+    status: "Active",
+    customer_group_id: null,
+    parent_id: null,
+    is_deleted: false,
+    is_hidden: false,
+    hidden_reason: null,
+    hidden_at: null,
+    normalized_customer_name: "acme sdn bhd",
+    bill_addr_line1: "",
+    bill_addr_line2: null,
+    bill_city: "",
+    bill_state: "",
+    bill_postal: "",
+    bill_country: "MY",
+    contact_name: "",
+    contact_phone: "",
+    contact_email: "",
+    shipping_addresses: [],
+    alt_contacts: [],
+    default_currency: "MYR",
+    ar_control_acct_id: null,
+    revenue_acct_id: null,
+    payment_term_id: null,
+    credit_limit: 0,
+    credit_rating: "A",
+    e_invoice_enabled: false,
+    created_by: null,
+    updated_by: null,
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+    ...overrides,
+  };
 }
 
 export function agingRowFixture(overrides: Partial<CustomerAgingRow> = {}): CustomerAgingRow {

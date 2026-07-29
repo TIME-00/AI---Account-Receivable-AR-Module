@@ -52,6 +52,7 @@ export default function InvoicesPage() {
   // Batch 9D-D authoritative aggregation over the ENTIRE filtered collection
   // (not just this page) — per-currency subtotals + company-base total.
   const summary = data?.summary;
+  const summaryUnavailable = data?.summaryUnavailable;
   const { baseCurrency } = useBaseCurrency();
 
   // B9DD-FEIR-001: real backend pagination. `totalCount` is the filtered
@@ -190,16 +191,21 @@ export default function InvoicesPage() {
           These totals cover the whole filtered collection, NOT just this page —
           the heading says so explicitly so a collection total is never mistaken
           for a page subtotal. */}
-      {summary && invoices.length > 0 && (
+      {summary && (
         <div className="space-y-1">
           <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
             Totals for all {totalCount} matching document(s) — not just this page
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <MoneySummary summary={summary.current_balance_summary} title="Outstanding" />
-            <MoneySummary summary={summary.document_total_summary} title="Invoiced (document total)" />
+            <MoneySummary summary={summary.currentBalance} title="Outstanding" />
+            <MoneySummary summary={summary.documentTotal} title="Invoiced (document total)" />
           </div>
         </div>
+      )}
+      {summaryUnavailable && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {summaryUnavailable}
+        </p>
       )}
 
       {/* Table */}

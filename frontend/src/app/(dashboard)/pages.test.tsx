@@ -63,6 +63,10 @@ const anchorSummary = collectionSummary(
   monetarySummary(ANCHOR_BY_CURRENCY, ANCHOR_BASE_TOTAL, "MYR", "current_outstanding"),
   monetarySummary(ANCHOR_BY_CURRENCY, ANCHOR_BASE_TOTAL, "MYR", "original_document_total", "original_booked_base_snapshot"),
 );
+const receiptAnchorSummary = collectionSummary(
+  monetarySummary(ANCHOR_BY_CURRENCY, ANCHOR_BASE_TOTAL, "MYR", "current_unallocated"),
+  monetarySummary(ANCHOR_BY_CURRENCY, ANCHOR_BASE_TOTAL, "MYR", "original_document_total"),
+);
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -82,8 +86,8 @@ describe("Invoice list page", () => {
 
     // Collection scope stated explicitly.
     expect(screen.getByText(/Totals for all 1001 matching document\(s\) — not just this page/i)).toBeInTheDocument();
-    // MYR 545 anchor rendered from the backend base_total.
-    expect(screen.getAllByText("MYR 545.00").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not verified").length).toBeGreaterThan(0);
+    expect(screen.queryByText("MYR 545.00")).not.toBeInTheDocument();
     // Native subtotals stay separate — no 200 native "total".
     expect(screen.queryByText("MYR 200.00")).toBeNull();
   });
@@ -151,10 +155,8 @@ describe("Invoice Summary report page", () => {
 
     // Full filtered collection size, from the backend — not a 100-row cap.
     await waitFor(() => expect(screen.getByText(/Server-side filter — 1001 invoice\(s\) in range/i)).toBeInTheDocument());
-    // MYR 545 anchor present; native 200 sum never rendered as a total.
-    expect(screen.getAllByText("MYR 545.00").length).toBeGreaterThan(0);
-    // Both summary panels (Invoiced + Outstanding) carry the disclaimer.
-    expect(screen.getAllByText(/not the sum of native subtotals/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not verified").length).toBeGreaterThan(0);
+    expect(screen.queryByText("MYR 545.00")).not.toBeInTheDocument();
   });
 
   it("labels percentages as count-based, not amount-based", async () => {
@@ -276,13 +278,13 @@ describe("Receipt list page", () => {
     fakeApi = createFakeApi([
       route("/receipts", () => ({
         data: [receiptFixture()],
-        meta: { total: 1, page: 1, page_size: 15, summary: anchorSummary },
+        meta: { total: 1, page: 1, page_size: 15, summary: receiptAnchorSummary },
       })),
       routePrefix("/customers", () => ({ data: [] })),
     ]);
 
     renderWithProviders(<ReceiptsPage />);
     await waitFor(() => expect(screen.getByText("RCP-0001")).toBeInTheDocument());
-    expect(screen.getAllByText("MYR 545.00").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not verified").length).toBeGreaterThan(0);
   });
 });

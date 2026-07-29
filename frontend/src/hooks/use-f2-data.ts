@@ -29,9 +29,13 @@ import type {
   Invoice,
   Receipt,
   ARSummary,
-  MonetaryCollectionSummary,
+  NormalizedMonetaryCollectionSummary,
 } from "@/types";
 import { INVOICE_STATUSES, RECEIPT_STATUSES } from "@/types";
+import {
+  parseCollectionSummary,
+  SUMMARY_UNAVAILABLE_MESSAGE,
+} from "@/lib/monetary-summary";
 
 /**
  * `useQueries` widens its result union across heterogeneous queries, so each
@@ -54,8 +58,8 @@ function asType<T>(value: unknown): T | undefined {
 // ─── Authoritative collection summaries ─────────────────────────────────────
 
 export interface CollectionSummaryResult {
-  /** Authoritative totals over the entire server-filtered collection. */
-  summary: MonetaryCollectionSummary;
+  /** Validated v1/v2 totals over the entire server-filtered collection. */
+  summary: NormalizedMonetaryCollectionSummary;
   /** Row count of the entire server-filtered collection. */
   total: number;
 }
@@ -93,19 +97,27 @@ async function fetchCollectionSummary(
     params: toParams(filters, 1, SUMMARY_ONLY_PAGE_SIZE),
   });
   const summary = res.meta?.summary;
-  if (!summary) {
-    // The backend guarantees this envelope (`listInvoices` throws without it).
-    // Fail loudly rather than degrading to a client-side approximation.
-    throw new Error(`Authoritative monetary summary missing from ${path} response.`);
+  try {
+    return {
+      summary: parseCollectionSummary(summary, {
+        currentAmountBasis:
+          path === "/invoices"
+            ? "current_outstanding"
+            : "current_unallocated",
+      }),
+      total: res.meta?.total ?? 0,
+    };
+  } catch {
+    // Report consumers must never receive raw or partially validated totals.
+    throw new Error(SUMMARY_UNAVAILABLE_MESSAGE);
   }
-  return { summary, total: res.meta?.total ?? 0 };
 }
 
 // ─── Invoice Summary report ─────────────────────────────────────────────────
 
 export interface StatusSummaryEntry {
   status: string;
-  summary: MonetaryCollectionSummary;
+  summary: NormalizedMonetaryCollectionSummary;
   total: number;
 }
 
@@ -173,7 +185,7 @@ export function useInvoiceReport(filters: { date_from?: string; date_to?: string
 
 export interface MethodSummaryEntry {
   method: string;
-  summary: MonetaryCollectionSummary;
+  summary: NormalizedMonetaryCollectionSummary;
   total: number;
 }
 

@@ -54,6 +54,7 @@ export default function CreditNotesPage() {
 
   const notes = data?.rows ?? [];
   const summary = data?.summary;
+  const summaryUnavailable = data?.summaryUnavailable;
   const pagination = data?.pagination;
   const totalCount = pagination?.total ?? 0;
   const totalPages = totalPagesFrom(pagination);
@@ -104,16 +105,21 @@ export default function CreditNotesPage() {
       </div>
 
       {/* Authoritative aggregation for the whole filtered collection */}
-      {summary && notes.length > 0 && (
+      {summary && (
         <div className="space-y-1">
           <p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
             Totals for all {totalCount} matching {docType.toLowerCase()}(s) — not just this page
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <MoneySummary summary={summary.document_total_summary} title="Note total" />
-            <MoneySummary summary={summary.current_balance_summary} title="Outstanding" />
+            <MoneySummary summary={summary.documentTotal} title="Note total" />
+            <MoneySummary summary={summary.currentBalance} title="Outstanding" />
           </div>
         </div>
+      )}
+      {summaryUnavailable && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {summaryUnavailable}
+        </p>
       )}
 
       {/* Search */}

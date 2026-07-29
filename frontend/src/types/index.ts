@@ -5,7 +5,6 @@
 // ============================================================================
 
 import type {
-  MonetaryCollectionSummary,
   CurrencyTotal,
   MonetaryAggregationMeta,
   NormalizationBasis,
@@ -31,6 +30,12 @@ export type {
   FxSourceCategory,
   FxApprovalStatus,
   FxLifecycleStatus,
+  NormalizedMonetaryCollectionSummary,
+  NormalizedCurrencyGroupV1,
+  NormalizedCurrencyGroupV2,
+  NormalizedMonetarySummary,
+  NormalizedMonetarySummaryV1,
+  NormalizedMonetarySummaryV2,
 } from "./monetary";
 
 // ─── Enums ──────────────────────────────────────────────────────────────────
@@ -117,7 +122,7 @@ export interface APIMeta {
    * and the company-base total. Never derive a mixed-currency base total in
    * the browser — use this.
    */
-  summary?: MonetaryCollectionSummary;
+  summary?: unknown;
 }
 
 export interface PaginationParams {
@@ -536,6 +541,15 @@ export interface DashboardCreditRatingRow {
   outstanding_base: number;
 }
 
+export interface DashboardCustomerCreditRatingDistribution {
+  population: "VISIBLE_CUSTOMERS";
+  included_statuses: ["Active", "Inactive", "Blocked", "On Hold"];
+  rows: Array<{
+    rating: CreditRating;
+    customer_count: number;
+  }>;
+}
+
 /**
  * Nested live dashboard contract returned by `GET /reports/dashboard`.
  * Source of truth for all dashboard visuals. The deprecated top-level aliases
@@ -549,6 +563,7 @@ export interface LiveDashboardMetrics {
   collection_trend: DashboardCollectionTrendPoint[];
   top_outstanding_customers: DashboardTopCustomer[];
   credit_rating_distribution: DashboardCreditRatingRow[];
+  customer_credit_rating_distribution: DashboardCustomerCreditRatingDistribution;
 
   /** @deprecated Compatibility alias — use invoice_status_counts / kpis. */
   total_invoices: number;

@@ -71,6 +71,7 @@ describe("Credit / Debit Notes page", () => {
 
     await waitFor(() => expect(screen.getByText("CN-001")).toBeInTheDocument());
     expect(screen.getByText("CN-002")).toBeInTheDocument();
+    expect(screen.getAllByText("Not verified")).toHaveLength(2);
     const call = fakeApi.calls.find((c) => c.path === "/invoices");
     expect(call?.params.doc_type).toBe("Credit Note");
   });

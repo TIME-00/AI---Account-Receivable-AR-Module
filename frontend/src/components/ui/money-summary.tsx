@@ -1,84 +1,143 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
+import { CurrencyTotals } from "@/components/ui/currency-subtotals";
 import { cn } from "@/lib/utils";
-import { formatMoneyNumber, normalizeCurrency } from "@/lib/currency";
-import type { MonetarySummary, NormalizationBasis, SummaryAmountBasis } from "@/types/monetary";
+import { formatExactDecimal } from "@/lib/monetary-summary";
+import type {
+  NormalizedMonetarySummary,
+  NormalizedMonetarySummaryV2,
+} from "@/types";
 
-const BASIS_LABELS: Record<NormalizationBasis, string> = {
-  current_balance_x_booked_rate: "current balance × booked rate",
-  original_booked_base_snapshot: "original booked base snapshot",
-  stored_booked_base_snapshot: "stored booked base snapshot",
-};
-
-const AMOUNT_BASIS_LABELS: Record<SummaryAmountBasis, string> = {
+const AMOUNT_BASIS_LABELS = {
   current_outstanding: "Outstanding",
   current_unallocated: "Unapplied",
   original_document_total: "Document total",
-};
+} as const;
 
 interface MoneySummaryProps {
-  summary: MonetarySummary;
+  summary: NormalizedMonetarySummary;
   title?: string;
   className?: string;
 }
 
-/**
- * Authoritative aggregation display. Shows per-currency NATIVE subtotals and,
- * separately, the company-base total supplied by the backend from stored
- * booking snapshots. It never implies the base total is the arithmetic sum of
- * the native subtotals, and it never sums across currencies in the browser.
- */
-export function MoneySummary({ summary, title, className }: MoneySummaryProps) {
-  const { by_currency, base_total, base_currency, meta, amount_basis } = summary;
-  const baseCode = normalizeCurrency(base_currency) ?? base_currency;
-  const multi = meta.multi_currency || by_currency.length > 1;
-  const amountLabel = AMOUNT_BASIS_LABELS[amount_basis] ?? "Total";
-  const basisLabel = BASIS_LABELS[meta.normalization_basis] ?? meta.normalization_basis;
+function exclusionWarning(count: number): string {
+  return `Company-base total excludes ${count} document${count === 1 ? "" : "s"} without verified booked FX.`;
+}
+
+function CompanyBaseTotal({ summary }: { summary: NormalizedMonetarySummary }) {
+  if (summary.contractVersion === 1) {
+    return (
+      <>
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-xs font-medium text-slate-500">Company-base total</span>
+          <span className="font-semibold text-slate-700">Not verified</span>
+        </div>
+        <p className="mt-1 text-xs text-amber-700">
+          Company-base total verification is unavailable for this legacy summary.
+        </p>
+      </>
+    );
+  }
+
+  return <CompanyBaseTotalV2 summary={summary} />;
+}
+
+/** Compact authority-aware base state for report breakdown tables/cards. */
+export function CompactCompanyBase({
+  summary,
+}: {
+  summary: NormalizedMonetarySummary;
+}) {
+  if (summary.contractVersion === 1) {
+    return (
+      <span className="text-sm font-medium text-amber-700" title="Legacy summary">
+        Not verified
+      </span>
+    );
+  }
+  if (
+    summary.matchingDocumentCount > 0 &&
+    summary.authoritativeDocumentCount === 0
+  ) {
+    return <span className="text-sm font-medium text-amber-700">Not available</span>;
+  }
+  return (
+    <span className="text-sm font-semibold tabular-nums text-slate-800">
+      {summary.baseCurrency} {formatExactDecimal(summary.baseTotal ?? "0.00")}
+      {summary.unavailableCount > 0 && (
+        <span className="ml-1 text-xs font-normal text-amber-700">(partial)</span>
+      )}
+    </span>
+  );
+}
+
+function CompanyBaseTotalV2({
+  summary,
+}: {
+  summary: NormalizedMonetarySummaryV2;
+}) {
+  const empty = summary.matchingDocumentCount === 0;
+  const allUnavailable =
+    summary.matchingDocumentCount > 0 &&
+    summary.authoritativeDocumentCount === 0;
+  const partial =
+    summary.authoritativeDocumentCount > 0 && summary.unavailableCount > 0;
+  const label = partial
+    ? "Authoritative company-base subtotal"
+    : "Company-base total";
+  const value = allUnavailable
+    ? "Not available"
+    : `${summary.baseCurrency} ${formatExactDecimal(summary.baseTotal ?? "0.00")}`;
 
   return (
-    <div className={cn("rounded-lg border border-slate-200 bg-white p-3", className)}>
-      {title && <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>}
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-xs font-medium text-slate-500">{label}</span>
+        <span className="font-semibold tabular-nums text-slate-900">{value}</span>
+      </div>
+      {!empty && summary.unavailableCount > 0 && (
+        <p className="mt-1 flex items-start gap-1.5 text-xs text-amber-700">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>{exclusionWarning(summary.unavailableCount)}</span>
+        </p>
+      )}
+    </>
+  );
+}
 
-      {/* Per-currency native subtotals */}
+/**
+ * Shared Invoice/Receipt monetary presentation. It renders backend-produced
+ * native subtotals verbatim and never performs a cross-currency aggregation or
+ * client-side FX conversion.
+ */
+export function MoneySummary({ summary, title, className }: MoneySummaryProps) {
+  const amountLabel = AMOUNT_BASIS_LABELS[summary.amountBasis];
+
+  return (
+    <section
+      className={cn("rounded-lg border border-slate-200 bg-white p-3", className)}
+      aria-label={title ?? amountLabel}
+    >
+      {title && (
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {title}
+        </h3>
+      )}
       <div className="space-y-1">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
           {amountLabel} by currency
-        </div>
-        {by_currency.length === 0 ? (
-          <div className="text-sm text-slate-400">No records</div>
-        ) : (
-          <ul className="space-y-0.5">
-            {by_currency.map((c) => (
-              <li key={c.currency} className="flex items-center justify-between gap-4 text-sm">
-                <span className="text-slate-500">
-                  {c.currency}
-                  <span className="ml-1 text-[11px] text-slate-400">({c.count})</span>
-                </span>
-                <span className="font-medium tabular-nums text-slate-800">
-                  {c.currency} {formatMoneyNumber(c.amount)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        </p>
+        <CurrencyTotals
+          byCurrency={summary.byCurrency}
+          baseCurrency={summary.baseCurrency}
+          showBaseContribution
+          emptyLabel="No records"
+        />
       </div>
-
-      {/* Separate company-base total */}
       <div className="mt-2 border-t border-slate-100 pt-2">
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-xs font-medium text-slate-500">
-            Company-base total
-            {multi && <span className="ml-1 text-[11px] text-slate-400">(converted)</span>}
-          </span>
-          <span className="font-semibold tabular-nums text-slate-900">
-            {baseCode} {formatMoneyNumber(base_total)}
-          </span>
-        </div>
-        <div className="mt-0.5 text-[10px] text-slate-400">
-          Basis: {basisLabel}
-          {multi && " — not the sum of native subtotals"}
-        </div>
+        <CompanyBaseTotal summary={summary} />
       </div>
-    </div>
+    </section>
   );
 }

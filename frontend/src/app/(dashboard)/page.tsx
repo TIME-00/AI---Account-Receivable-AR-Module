@@ -1,8 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDashboardMetrics } from "@/hooks/use-dashboard";
+import { useRatingCustomers } from "@/hooks/use-customers";
+import { useAuthContext } from "@/hooks/use-auth-context";
 import { ApiError } from "@/hooks/use-api";
+import { useCompanyStore } from "@/stores/company-store";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { formatMoneySafe } from "@/lib/currency";
 import {
@@ -21,8 +24,13 @@ import { AgingChart, AGING_COLORS } from "@/components/features/dashboard/aging-
 import { CompositionChart } from "@/components/features/dashboard/composition-chart";
 import { CollectionTrendChart } from "@/components/features/dashboard/collection-trend-chart";
 import { CreditRiskChart } from "@/components/features/dashboard/credit-risk-chart";
+import {
+  CreditRatingCustomerDialog,
+  type ReconciliationState,
+} from "@/components/features/dashboard/credit-rating-customer-dialog";
 import { QuickStats } from "@/components/features/dashboard/quick-stats";
 import { TopCustomers } from "@/components/features/dashboard/top-customers";
+import type { CreditRating } from "@/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -30,6 +38,7 @@ const RATING_COLORS: Record<string, string> = {
   AAA: "#22c55e", AA: "#10b981", A: "#3b82f6",
   B: "#f59e0b", C: "#f97316", D: "#ef4444",
 };
+const DASHBOARD_RATINGS = ["AAA", "AA", "A", "B", "C", "D"] as const;
 
 const SCOPE_LABELS: Record<string, string> = {
   assigned_customers: "Assigned Customers",
@@ -65,8 +74,32 @@ function formatAsOf(date: string): string {
 // ─── Dashboard Page ─────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { metrics, isLoading, isError, error, refetch } = useDashboardMetrics(6);
+  const {
+    metrics,
+    isLoading,
+    isError,
+    error,
+    refetch: refetchDashboard,
+  } = useDashboardMetrics(6);
+  const companyId = useCompanyStore((state) => state.companyId);
+  const { data: auth } = useAuthContext();
+  const userId = auth?.user.id ?? "";
+  const [selectedRating, setSelectedRating] = useState<CreditRating | null>(null);
+  const [customerPage, setCustomerPage] = useState(1);
+  const [reconciliationState, setReconciliationState] =
+    useState<ReconciliationState>("matched");
+  const [triggerElement, setTriggerElement] =
+    useState<HTMLButtonElement | null>(null);
+  const ratingButtons = useRef(
+    new Map<string, HTMLButtonElement>(),
+  );
+  const attemptedIdentity = useRef<string | null>(null);
+  const previousIdentity = useRef(`${companyId}:${userId}`);
+  const customerQuery = useRatingCustomers({
+    rating: selectedRating,
+    page: customerPage,
+    open: selectedRating !== null,
+  });
 
   const meta = metrics?.meta;
   // Batch 9D-D: the dashboard contract is company-base. Use the backend base
@@ -76,42 +109,6 @@ export default function DashboardPage() {
   const statusCounts = metrics?.invoice_status_counts;
 
   // ── Access / error handling (never crash the dashboard) ──
-  const isForbidden = error instanceof ApiError && error.status === 403;
-
-  if (isError && !metrics) {
-    return (
-      <div className="space-y-6">
-        <DashboardHeader meta={meta} />
-        <div className="glass-card flex flex-col items-center justify-center gap-3 p-12 text-center">
-          {isForbidden ? (
-            <>
-              <ShieldAlert className="h-10 w-10 text-amber-500" />
-              <h2 className="text-lg font-semibold text-slate-900">Dashboard not available for your role</h2>
-              <p className="max-w-md text-sm text-slate-500">
-                Your role does not have access to the AR dashboard metrics. If you believe this is
-                an error, contact your administrator.
-              </p>
-            </>
-          ) : (
-            <>
-              <AlertTriangle className="h-10 w-10 text-red-500" />
-              <h2 className="text-lg font-semibold text-slate-900">Couldn&apos;t load the dashboard</h2>
-              <p className="max-w-md text-sm text-slate-500">
-                {error instanceof Error ? error.message : "An unexpected error occurred."}
-              </p>
-              <button
-                onClick={() => refetch()}
-                className="mt-2 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
-              >
-                <RefreshCw className="h-4 w-4" /> Retry
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   // ── Derived chart data (nested live contract is the source of truth) ──
   const agingChartData =
     metrics?.aging_buckets.map((bucket, i) => ({
@@ -138,13 +135,146 @@ export default function DashboardPage() {
       receipts: point.receipt_count,
     })) ?? [];
 
-  const creditRatingData =
-    metrics?.credit_rating_distribution.map((row) => ({
-      rating: row.rating,
-      count: row.customer_count,
-      amount: row.outstanding_base,
-      fill: RATING_COLORS[row.rating] ?? "#94a3b8",
-    })) ?? [];
+  const customerRatingRows =
+    metrics?.customer_credit_rating_distribution?.rows ?? [];
+  const creditRatingData = DASHBOARD_RATINGS.map((rating) => ({
+    rating,
+    count:
+      customerRatingRows.find((row) => row.rating === rating)?.customer_count ??
+      0,
+    fill: RATING_COLORS[rating],
+  }));
+
+  const selectedChartCount =
+    metrics?.customer_credit_rating_distribution?.rows.find(
+      (row) => row.rating === selectedRating,
+    )?.customer_count;
+  const reconciliationIdentity =
+    selectedRating === null
+      ? null
+      : `${companyId}:${userId}:${selectedRating}`;
+
+  const runReconciliation = useCallback(async () => {
+    if (!selectedRating) return;
+    setReconciliationState("refreshing");
+    const [dashboardResult, customerResult] = await Promise.all([
+      refetchDashboard(),
+      customerQuery.refetch(),
+    ]);
+    if (dashboardResult.isError || customerResult.isError) {
+      setReconciliationState("matched");
+      return;
+    }
+    const refreshedChartCount =
+      dashboardResult.data?.customer_credit_rating_distribution?.rows.find(
+        (row) => row.rating === selectedRating,
+      )?.customer_count;
+    const refreshedListCount = customerResult.data?.pagination.total;
+    setReconciliationState(
+      refreshedChartCount !== undefined &&
+          refreshedListCount !== undefined &&
+          refreshedChartCount === refreshedListCount
+        ? "matched"
+        : "persistent",
+    );
+  }, [customerQuery, refetchDashboard, selectedRating]);
+
+  useEffect(() => {
+    const identity = `${companyId}:${userId}`;
+    if (previousIdentity.current !== identity) {
+      previousIdentity.current = identity;
+      attemptedIdentity.current = null;
+      setSelectedRating(null);
+      setCustomerPage(1);
+      setReconciliationState("matched");
+    }
+  }, [companyId, userId]);
+
+  useEffect(() => {
+    const listCount = customerQuery.data?.pagination.total;
+    if (
+      !reconciliationIdentity ||
+      selectedChartCount === undefined ||
+      listCount === undefined ||
+      customerQuery.isLoading ||
+      customerQuery.isError
+    ) {
+      return;
+    }
+    if (selectedChartCount === listCount) {
+      attemptedIdentity.current = null;
+      setReconciliationState("matched");
+      return;
+    }
+    if (attemptedIdentity.current !== reconciliationIdentity) {
+      attemptedIdentity.current = reconciliationIdentity;
+      void runReconciliation();
+    }
+  }, [
+    customerQuery.data,
+    customerQuery.isError,
+    customerQuery.isLoading,
+    reconciliationIdentity,
+    runReconciliation,
+    selectedChartCount,
+  ]);
+
+  const selectRating = (rating: string) => {
+    const typedRating = rating as CreditRating;
+    setTriggerElement(ratingButtons.current.get(rating) ?? null);
+    attemptedIdentity.current = null;
+    setCustomerPage(1);
+    setReconciliationState("matched");
+    setSelectedRating(typedRating);
+  };
+
+  const closeDialog = () => {
+    setSelectedRating(null);
+    setCustomerPage(1);
+    setReconciliationState("matched");
+    attemptedIdentity.current = null;
+  };
+
+  const isForbidden = error instanceof ApiError && error.status === 403;
+  if (isError && !metrics) {
+    return (
+      <div className="space-y-6">
+        <DashboardHeader meta={meta} />
+        <div className="glass-card flex flex-col items-center justify-center gap-3 p-12 text-center">
+          {isForbidden ? (
+            <>
+              <ShieldAlert className="h-10 w-10 text-amber-500" />
+              <h2 className="text-lg font-semibold text-slate-900">
+                Dashboard not available for your role
+              </h2>
+              <p className="max-w-md text-sm text-slate-500">
+                Your role does not have access to the AR dashboard metrics. If
+                you believe this is an error, contact your administrator.
+              </p>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="h-10 w-10 text-red-500" />
+              <h2 className="text-lg font-semibold text-slate-900">
+                Couldn&apos;t load the dashboard
+              </h2>
+              <p className="max-w-md text-sm text-slate-500">
+                {error instanceof Error
+                  ? error.message
+                  : "An unexpected error occurred."}
+              </p>
+              <button
+                onClick={() => refetchDashboard()}
+                className="mt-2 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
+              >
+                <RefreshCw className="h-4 w-4" /> Retry
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -219,13 +349,38 @@ export default function DashboardPage() {
         <CollectionTrendChart data={trendData} currency={currency} isLoading={isLoading} />
         <CreditRiskChart
           data={creditRatingData}
-          currency={currency}
           isLoading={isLoading}
-          onSelectRating={(rating) =>
-            router.push(`/reports/aging?credit_rating=${encodeURIComponent(rating)}`)
-          }
+          onSelectRating={selectRating}
+          onButtonRef={(rating, element) => {
+            if (element) ratingButtons.current.set(rating, element);
+            else ratingButtons.current.delete(rating);
+          }}
+          activeRating={selectedRating}
         />
       </div>
+
+      <CreditRatingCustomerDialog
+        open={selectedRating !== null}
+        rating={selectedRating}
+        page={customerPage}
+        result={customerQuery.data}
+        isLoading={customerQuery.isLoading}
+        isFetching={customerQuery.isFetching}
+        isError={customerQuery.isError}
+        reconciliationState={reconciliationState}
+        triggerElement={triggerElement}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
+        onPageChange={setCustomerPage}
+        onRetry={() => {
+          void customerQuery.refetch();
+        }}
+        onRefresh={() => {
+          attemptedIdentity.current = reconciliationIdentity;
+          void runReconciliation();
+        }}
+      />
 
       {/* ─── Top Outstanding Customers ─────────────────────────────── */}
       <TopCustomers

@@ -6,7 +6,10 @@ import { cn } from "@/lib/utils";
 import { ExportMenu } from "@/components/features/reports/export-menu";
 import { useInvoiceReport, formatDate } from "@/hooks/use-f2-data";
 import { formatMoney } from "@/lib/currency";
-import { MoneySummary } from "@/components/ui/money-summary";
+import {
+  CompactCompanyBase,
+  MoneySummary,
+} from "@/components/ui/money-summary";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
 import { localTodayISODate } from "@/lib/export";
 
@@ -38,9 +41,9 @@ export default function InvoiceSummaryPage() {
   const { data, isLoading, isError } = useInvoiceReport({ date_from: dateFrom, date_to: dateTo });
 
   const overall = data?.overall;
-  const documentSummary = overall?.summary.document_total_summary;
-  const balanceSummary = overall?.summary.current_balance_summary;
-  const paid = data?.byStatus.find((s) => s.status === "Paid")?.summary.document_total_summary;
+  const documentSummary = overall?.summary.documentTotal;
+  const balanceSummary = overall?.summary.currentBalance;
+  const paid = data?.byStatus.find((s) => s.status === "Paid")?.summary.documentTotal;
 
   return (
     <div className="space-y-6">
@@ -107,7 +110,7 @@ export default function InvoiceSummaryPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid (by currency)</p>
           {paid ? (
-            <CurrencyTotals byCurrency={paid.by_currency} color="text-emerald-600" className="mt-1" />
+            <CurrencyTotals byCurrency={paid.byCurrency} color="text-emerald-600" className="mt-1" />
           ) : (
             <p className="mt-1 text-xs text-slate-400">None</p>
           )}
@@ -119,7 +122,7 @@ export default function InvoiceSummaryPage() {
         <div className="border-b border-slate-200 px-4 py-3">
           <h2 className="text-sm font-semibold text-slate-700">Status Breakdown</h2>
           <p className="mt-0.5 text-[10px] text-slate-400">
-            Each row is an authoritative backend summary for that status over the full filtered range.
+            Each row uses the validated server summary for that status over the full filtered range.
           </p>
         </div>
         {data.byStatus.length === 0 ? (
@@ -142,7 +145,7 @@ export default function InvoiceSummaryPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {data.byStatus.map((row) => {
-                  const s = row.summary.document_total_summary;
+                  const s = row.summary.documentTotal;
                   const pct = overall.total > 0 ? (row.total / overall.total) * 100 : 0;
                   return (
                     <tr key={row.status} className="hover:bg-slate-50/80">
@@ -153,10 +156,10 @@ export default function InvoiceSummaryPage() {
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono text-xs">{row.total}</td>
                       <td className="px-4 py-2.5 text-right">
-                        <CurrencyTotals byCurrency={s.by_currency} className="text-xs" />
+                        <CurrencyTotals byCurrency={s.byCurrency} className="text-xs" />
                       </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-slate-700">
-                        {formatMoney(s.base_total, s.base_currency)}
+                      <td className="px-4 py-2.5 text-right">
+                        <CompactCompanyBase summary={s} />
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-500">{pct.toFixed(1)}%</td>
                     </tr>
@@ -217,7 +220,7 @@ export default function InvoiceSummaryPage() {
       </div>
 
       <p className="text-center text-[10px] text-slate-400">
-        All totals are supplied by the backend monetary aggregation contract over the full filtered collection.
+        Native totals are supplied by the server over the full filtered collection. Legacy company-base totals are not presented as verified.
       </p>
       </>
       )}

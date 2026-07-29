@@ -11,6 +11,12 @@ import {
   route,
   agingRowFixture,
   currencyTotal,
+  receiptFixture,
+  collectionSummary,
+  collectionSummaryV2,
+  monetarySummary,
+  ANCHOR_BY_CURRENCY,
+  ANCHOR_BASE_TOTAL,
   type FakeApi,
 } from "@/test/harness";
 
@@ -21,7 +27,91 @@ vi.mock("@/hooks/use-api", async (importOriginal) => {
   return { ...actual, useApi: () => fakeApi };
 });
 
-import { useCustomerExposure } from "@/hooks/use-receipts";
+import { useCustomerExposure, useReceipts } from "@/hooks/use-receipts";
+
+const receiptV1 = collectionSummary(
+  monetarySummary(
+    ANCHOR_BY_CURRENCY,
+    ANCHOR_BASE_TOTAL,
+    "MYR",
+    "current_unallocated",
+  ),
+  monetarySummary(
+    ANCHOR_BY_CURRENCY,
+    ANCHOR_BASE_TOTAL,
+    "MYR",
+    "original_document_total",
+  ),
+);
+
+describe("useReceipts — strict summary boundary", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("accepts legacy v1 explicitly without fabricating authority", async () => {
+    fakeApi = createFakeApi([
+      route("/receipts", () => ({
+        data: [receiptFixture()],
+        meta: { total: 1, page: 1, page_size: 20, summary: receiptV1 },
+      })),
+    ]);
+    const { result } = renderHook(() => useReceipts({}), {
+      wrapper: Providers,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.summary?.contractVersion).toBe(1);
+    expect(result.current.data?.summaryUnavailable).toBeNull();
+  });
+
+  it("strictly normalizes v2 partial authority", async () => {
+    fakeApi = createFakeApi([
+      route("/receipts", () => ({
+        data: [receiptFixture()],
+        meta: {
+          total: 3,
+          page: 1,
+          page_size: 20,
+          summary: collectionSummaryV2("current_unallocated", "partial"),
+        },
+      })),
+    ]);
+    const { result } = renderHook(() => useReceipts({}), {
+      wrapper: Providers,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.summary?.currentBalance).toMatchObject({
+      contractVersion: 2,
+      baseTotal: "125.50",
+      unavailableCount: 2,
+    });
+  });
+
+  it("keeps valid rows and exposes only a sanitized unavailable state for a mixed contract", async () => {
+    const v2 = collectionSummaryV2("current_unallocated", "complete");
+    fakeApi = createFakeApi([
+      route("/receipts", () => ({
+        data: [receiptFixture()],
+        meta: {
+          total: 1,
+          page: 1,
+          page_size: 20,
+          summary: {
+            current_balance_summary: v2.current_balance_summary,
+            document_total_summary: receiptV1.document_total_summary,
+          },
+        },
+      })),
+    ]);
+    const { result } = renderHook(() => useReceipts({}), {
+      wrapper: Providers,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.rows).toHaveLength(1);
+    expect(result.current.data?.summary).toBeNull();
+    expect(result.current.data?.summaryUnavailable).toBe(
+      "Summary data is unavailable.",
+    );
+  });
+});
 
 describe("useCustomerExposure — authoritative multi-currency exposure", () => {
   beforeEach(() => vi.clearAllMocks());

@@ -10,6 +10,7 @@ import {
   route,
   invoiceFixture,
   collectionSummary,
+  collectionSummaryV2,
   monetarySummary,
   ANCHOR_BY_CURRENCY,
   ANCHOR_BASE_TOTAL,
@@ -76,7 +77,8 @@ describe("useInvoiceList — scope, summary and pagination", () => {
     );
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(result.current.data?.summary).toBe(summary);
+    expect(result.current.data?.summary?.contractVersion).toBe(1);
+    expect(result.current.data?.summaryUnavailable).toBeNull();
     expect(fakeApi.calls[0].params).toMatchObject({ status: "Open", customer_id: "cust-1" });
   });
 
@@ -116,8 +118,8 @@ describe("useInvoiceList — scope, summary and pagination", () => {
 
     // Rows differ per page; the collection-wide summary does not.
     expect(p1.result.current.data!.rows[0].id).not.toBe(p2.result.current.data!.rows[0].id);
-    expect(p1.result.current.data!.summary!.current_balance_summary.base_total).toBe(
-      p2.result.current.data!.summary!.current_balance_summary.base_total,
+    expect(p1.result.current.data!.summary!.currentBalance.contractVersion).toBe(
+      p2.result.current.data!.summary!.currentBalance.contractVersion,
     );
     expect(p2.result.current.data!.pagination.total).toBe(40);
   });
@@ -141,7 +143,7 @@ describe("useInvoiceList — scope, summary and pagination", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const rows = result.current.data!.rows;
-    const summaryCount = result.current.data!.summary!.current_balance_summary.row_count;
+    const summaryCount = result.current.data!.summary!.currentBalance.rowCount;
     expect(rows).toHaveLength(summaryCount);
     expect(result.current.data!.pagination.total).toBe(summaryCount);
   });
@@ -159,6 +161,73 @@ describe("useInvoiceList — scope, summary and pagination", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(fakeApi.calls[0].params.doc_type).toBe("Credit Note");
+  });
+
+  it("strictly normalizes a valid v2 collection summary", async () => {
+    fakeApi = createFakeApi([
+      route("/invoices", () => ({
+        data: [invoiceFixture()],
+        meta: {
+          total: 3,
+          page: 1,
+          page_size: 20,
+          summary: collectionSummaryV2("current_outstanding", "partial"),
+        },
+      })),
+    ]);
+
+    const { result } = renderHook(() => useInvoiceList({}), {
+      wrapper: Providers,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data?.summary?.contractVersion).toBe(2);
+    expect(result.current.data?.summary?.currentBalance).toMatchObject({
+      contractVersion: 2,
+      baseTotal: "125.50",
+      unavailableCount: 2,
+      baseAvailable: false,
+    });
+    expect(result.current.data?.summaryUnavailable).toBeNull();
+  });
+
+  it("preserves rows but fails the summary closed for mixed or malformed contracts", async () => {
+    const v2 = collectionSummaryV2("current_outstanding", "complete");
+    fakeApi = createFakeApi([
+      route("/invoices", (params) => ({
+        data: [invoiceFixture()],
+        meta: {
+          total: 1,
+          page: 1,
+          page_size: 20,
+          summary:
+            params.search === "mixed"
+              ? {
+                  current_balance_summary: v2.current_balance_summary,
+                  document_total_summary: summary.document_total_summary,
+                }
+              : { current_balance_summary: null },
+        },
+      })),
+    ]);
+
+    const mixed = renderHook(() => useInvoiceList({ search: "mixed" }), {
+      wrapper: Providers,
+    });
+    const malformed = renderHook(
+      () => useInvoiceList({ search: "malformed" }),
+      { wrapper: Providers },
+    );
+    await waitFor(() => expect(mixed.result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(malformed.result.current.isSuccess).toBe(true));
+
+    for (const hook of [mixed, malformed]) {
+      expect(hook.result.current.data?.rows).toHaveLength(1);
+      expect(hook.result.current.data?.summary).toBeNull();
+      expect(hook.result.current.data?.summaryUnavailable).toBe(
+        "Summary data is unavailable.",
+      );
+    }
   });
 });
 
