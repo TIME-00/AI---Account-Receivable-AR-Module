@@ -149,3 +149,55 @@ The browser coverage includes all-visible counts, zero-outstanding data, activat
 - Deployments: none.
 - Production remains unchanged. Gates A, B, and C remain closed.
 - Gate D is complete locally and is not claimed Live; it remains pending independent read-only review and later authorized rollout.
+
+## 2026-07-29 legacy v1 wire-compatibility remediation
+
+The first authorized Production rollout of commit
+`463d4b75807d81fc045ac2c0c3ae8971cf44296a` stopped at the required
+pre-migration compatibility gate. The shared Edge mapper had added
+`meta.contract_version = 1` to legacy v1 summaries, while the strict frontend
+parser correctly requires the pre-existing v1 wire contract to omit that
+property. The UI therefore failed closed to `Summary data is unavailable.`
+
+Migration 033 was not applied, and rollback-only Migration 033b was not run
+against Production. Reports, Invoices, and Receipts were restored from the
+exact parent-commit function sources. All 14 protected Production table counts
+and opaque hashes matched their pre-rollout values; no financial, provenance,
+journal, allocation, or import data changed.
+
+The local correction separates the internal versioned parse result from the
+public serializer:
+
+- Internal v1 and v2 results remain explicitly tagged with
+  `contractVersion: 1` or `contractVersion: 2`.
+- Serialized v1 current-balance and document-total summaries retain the exact
+  legacy fields and omit `meta.contract_version` and all v2
+  authority/completeness fields.
+- Serialized v2 summaries retain `meta.contract_version = 2`, strict decimal
+  strings, nullable base totals, authority counts, completeness flags, and
+  unavailable-currency reconciliation.
+- Invoice, Receipt, and Reports export collection consumers execute the same
+  corrected shared boundary.
+- The frontend parser remains unchanged. Its focused suite accepts corrected
+  v1 and v2 responses and explicitly rejects the non-legacy
+  `meta.contract_version = 1` form.
+
+Remediation validation:
+
+| Validation | Result |
+| --- | --- |
+| Gate D contract tests | `11/11` passed |
+| Multi-currency contract tests | `112/112` passed |
+| Focused governed FX and Gates A/B/C/D | `174/174` passed |
+| Full backend regression | `12 files`, `251/251` passed |
+| Frontend monetary parser | `24/24` passed |
+| Full frontend Vitest | `56 files`, `765/765` passed |
+| Backend Deno lint | Passed for all three changed backend TypeScript files |
+| Strict Deno check | Passed for Reports, Invoices, Receipts, and both changed backend test files |
+| Frontend ESLint and TypeScript | Passed |
+| Next.js production build | Passed; `27 routes`, `25 static pages` |
+| Both npm audits | `0 vulnerabilities` |
+
+This remediation made no migration, deployment, or Production call. It remains
+local and unstaged, pending a new independent read-only review and a separately
+reauthorized Production rollout.

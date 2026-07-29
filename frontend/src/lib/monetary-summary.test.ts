@@ -184,6 +184,13 @@ describe("parseCollectionSummary — valid v2", () => {
 // ─── Rejections ──────────────────────────────────────────────────────────────
 
 describe("parseCollectionSummary — fails closed", () => {
+  it("rejects the non-legacy explicit contract_version 1 wire form", () => {
+    const raw = v1Collection();
+    (raw.current_balance_summary.meta as Record<string, unknown>).contract_version = 1;
+    (raw.document_total_summary.meta as Record<string, unknown>).contract_version = 1;
+    expectReject(raw);
+  });
+
   it("rejects one-v1 / one-v2 mixed collection", () => {
     expectReject({
       current_balance_summary: v2Summary("current_outstanding", "current_balance_x_booked_rate"),

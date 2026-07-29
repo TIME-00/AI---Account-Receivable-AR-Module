@@ -7,7 +7,9 @@ import {
   monetarySummaryFromEntries,
   monetaryAggregationMeta,
   parseMonetaryCollectionSummary,
+  parseVersionedMonetaryCollectionSummary,
   roundMoney,
+  serializeMonetaryCollectionSummary,
   CURRENT_BALANCE_BOOKED_RATE_BASIS,
   CURRENT_OUTSTANDING_AMOUNT_BASIS,
   CURRENT_UNALLOCATED_AMOUNT_BASIS,
@@ -51,6 +53,7 @@ import { DebitNoteService } from '../debit-notes/service.ts';
 import { AllocationService } from '../allocations/service.ts';
 import { ImportService } from '../imports/service.ts';
 import { ReportService } from './service.ts';
+import { SupabaseExportRepository } from './export-repository.ts';
 import { throwDatabaseError } from '../_shared/db.ts';
 
 const read = (path: string) => Deno.readTextFile(new URL(path, import.meta.url));
@@ -5560,6 +5563,103 @@ Deno.test('Batch 9D-D Migration 029 hidden and nonexistent reference targets hav
   assertEquals(
     (hidden.body.error as MockRow).message,
     'NOT_FOUND: Financial document not found',
+  );
+});
+
+Deno.test('Gate D legacy v1 mapper keeps its internal tag out of Invoice and Receipt API envelopes', () => {
+  const build = (
+    currentAmountBasis:
+      | typeof CURRENT_OUTSTANDING_AMOUNT_BASIS
+      | typeof CURRENT_UNALLOCATED_AMOUNT_BASIS,
+  ) => ({
+    current_balance_summary: monetarySummaryFromEntries(
+      [{
+        currency: 'USD',
+        transaction_amount: 10,
+        base_amount: 42.5,
+      }],
+      'MYR',
+      CURRENT_BALANCE_BOOKED_RATE_BASIS,
+      currentAmountBasis,
+    ),
+    document_total_summary: monetarySummaryFromEntries(
+      [{
+        currency: 'USD',
+        transaction_amount: 12,
+        base_amount: 51,
+      }],
+      'MYR',
+      ORIGINAL_BOOKED_BASE_BASIS,
+      ORIGINAL_DOCUMENT_AMOUNT_BASIS,
+    ),
+  });
+
+  for (
+    const [raw, currentAmountBasis] of [
+      [build(CURRENT_OUTSTANDING_AMOUNT_BASIS), CURRENT_OUTSTANDING_AMOUNT_BASIS],
+      [build(CURRENT_UNALLOCATED_AMOUNT_BASIS), CURRENT_UNALLOCATED_AMOUNT_BASIS],
+    ] as const
+  ) {
+    const internal = parseVersionedMonetaryCollectionSummary(raw, {
+      currentAmountBasis,
+    });
+    assertEquals(internal.contractVersion, 1);
+
+    const summary = serializeMonetaryCollectionSummary(internal);
+    const envelope = successResponse([], { summary });
+    const wire = JSON.parse(JSON.stringify(envelope)) as {
+      meta: { summary: MonetaryCollectionSummary };
+    };
+    for (
+      const entry of [
+        wire.meta.summary.current_balance_summary,
+        wire.meta.summary.document_total_summary,
+      ]
+    ) {
+      assert(
+        !('contract_version' in entry.meta),
+        'Legacy API summary meta must omit the internal v1 discriminator',
+      );
+      assert(
+        !('authoritative_document_count' in entry),
+        'Legacy API summary must not fabricate v2 authority',
+      );
+    }
+  }
+});
+
+Deno.test('Gate D Reports export collection consumers accept corrected pre-033 v1 summaries', async () => {
+  const client = new MockSupabaseClient({
+    companies: [{ id: 'co-1', base_currency: 'MYR' }],
+    customers: [],
+    user_customer_assignments: [],
+    invoices: [],
+    receipts: [],
+  });
+  const repository = Object.create(
+    SupabaseExportRepository.prototype,
+  ) as SupabaseExportRepository;
+  Object.assign(repository, {
+    invoiceService: new InvoiceService(client as never, client as never),
+    receiptService: new ReceiptService(client as never, client as never),
+  });
+
+  const invoices = await repository.getInvoicePage(clerkAuth, {}, 1);
+  const receipts = await repository.getReceiptPage(clerkAuth, {}, 1);
+
+  assertEquals(invoices.total, 0);
+  assertEquals(receipts.total, 0);
+  assertEquals(
+    client.rpcCalls.filter((call) =>
+      call.functionName === 'ar_invoice_collection'
+    ).length,
+    1,
+  );
+  assertEquals(
+    client.rpcCalls.filter((call) =>
+      call.functionName === 'ar_receipt_collection'
+    ).length,
+    1,
   );
 });
 

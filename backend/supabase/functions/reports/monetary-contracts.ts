@@ -38,7 +38,7 @@ export interface CurrencyTotal {
 }
 
 export interface MonetaryAggregationMeta {
-  contract_version?: 1;
+  contract_version?: never;
   base_currency: string;
   multi_currency: boolean;
   normalization_basis: NormalizationBasis;
@@ -104,6 +104,18 @@ export interface MonetaryCollectionSummary {
   current_balance_summary: VersionedMonetarySummary;
   document_total_summary: VersionedMonetarySummary;
 }
+
+export type ParsedMonetaryCollectionSummary =
+  | {
+    contractVersion: 1;
+    current_balance_summary: MonetarySummary;
+    document_total_summary: MonetarySummary;
+  }
+  | {
+    contractVersion: 2;
+    current_balance_summary: MonetaryAuthoritySummary;
+    document_total_summary: MonetaryAuthoritySummary;
+  };
 
 /** Canonical success envelope for invoice/receipt collection contracts. */
 export type MonetaryCollectionAPIResponse<T> = APIResponse<
@@ -363,7 +375,6 @@ function parseV1Summary(
     base_currency: baseCurrency,
     by_currency: byCurrency,
     meta: {
-      contract_version: 1,
       base_currency: baseCurrency,
       multi_currency: byCurrency.length > 1,
       normalization_basis: expectedNormalizationBasis,
@@ -566,13 +577,14 @@ function parseV2Summary(
 }
 
 /**
- * Parse the deployment-transition contract without promoting v1 numeric totals
- * to v2 authority. Both summaries must be entirely v1 or entirely v2.
+ * Parse the deployment-transition contract into an internal tagged union
+ * without promoting v1 numeric totals to v2 authority. Both summaries must be
+ * entirely v1 or entirely v2.
  */
-export function parseMonetaryCollectionSummary(
+export function parseVersionedMonetaryCollectionSummary(
   value: unknown,
   options: MonetaryCollectionParseOptions,
-): MonetaryCollectionSummary {
+): ParsedMonetaryCollectionSummary {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -601,6 +613,7 @@ export function parseMonetaryCollectionSummary(
 
   if (isV2) {
     return {
+      contractVersion: 2,
       current_balance_summary: parseV2Summary(
         value.current_balance_summary,
         options.currentAmountBasis,
@@ -615,6 +628,7 @@ export function parseMonetaryCollectionSummary(
   }
 
   return {
+    contractVersion: 1,
     current_balance_summary: parseV1Summary(
       value.current_balance_summary,
       options.currentAmountBasis,
@@ -626,6 +640,33 @@ export function parseMonetaryCollectionSummary(
       ORIGINAL_BOOKED_BASE_BASIS,
     ),
   };
+}
+
+/**
+ * Serialize an internally versioned collection without exposing the internal
+ * v1 discriminator on the legacy public wire contract.
+ */
+export function serializeMonetaryCollectionSummary(
+  parsed: ParsedMonetaryCollectionSummary,
+): MonetaryCollectionSummary {
+  return {
+    current_balance_summary: parsed.current_balance_summary,
+    document_total_summary: parsed.document_total_summary,
+  };
+}
+
+/**
+ * Parse and serialize the public deployment-transition contract. Legacy v1
+ * responses retain their exact pre-Migration-033 wire shape, while v2 keeps
+ * its explicit meta.contract_version discriminator.
+ */
+export function parseMonetaryCollectionSummary(
+  value: unknown,
+  options: MonetaryCollectionParseOptions,
+): MonetaryCollectionSummary {
+  return serializeMonetaryCollectionSummary(
+    parseVersionedMonetaryCollectionSummary(value, options),
+  );
 }
 
 export function buildStatementCurrencyBalances(

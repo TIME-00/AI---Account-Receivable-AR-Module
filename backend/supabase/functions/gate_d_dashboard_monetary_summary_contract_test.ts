@@ -7,6 +7,8 @@ import {
   CURRENT_OUTSTANDING_AMOUNT_BASIS,
   CURRENT_UNALLOCATED_AMOUNT_BASIS,
   parseMonetaryCollectionSummary,
+  parseVersionedMonetaryCollectionSummary,
+  serializeMonetaryCollectionSummary,
 } from './reports/monetary-contracts.ts';
 import { validateDashboardMetricsResponse } from './reports/dashboard-types.ts';
 
@@ -189,19 +191,41 @@ class CollectionResultClient {
   }
 }
 
-Deno.test('Gate D parser preserves explicit v1 compatibility without fabricating authority', () => {
-  const invoice = parseMonetaryCollectionSummary(
-    v1Summary('current_outstanding'),
+Deno.test('Gate D internal v1 tag serializes to the exact legacy wire contract without authority', () => {
+  const invoiceInput = v1Summary('current_outstanding');
+  const receiptInput = v1Summary('current_unallocated');
+  const internalInvoice = parseVersionedMonetaryCollectionSummary(
+    invoiceInput,
     { currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS },
   );
-  const receipt = parseMonetaryCollectionSummary(
-    v1Summary('current_unallocated'),
+  const internalReceipt = parseVersionedMonetaryCollectionSummary(
+    receiptInput,
     { currentAmountBasis: CURRENT_UNALLOCATED_AMOUNT_BASIS },
   );
 
-  for (const parsed of [invoice, receipt]) {
-    assertEquals(parsed.current_balance_summary.meta.contract_version, 1);
+  assertEquals(internalInvoice.contractVersion, 1);
+  assertEquals(internalReceipt.contractVersion, 1);
+
+  const invoice = serializeMonetaryCollectionSummary(internalInvoice);
+  const receipt = serializeMonetaryCollectionSummary(internalReceipt);
+  for (const [parsed, input] of [
+    [invoice, invoiceInput],
+    [receipt, receiptInput],
+  ] as const) {
+    assertEquals(
+      JSON.stringify(parsed),
+      JSON.stringify(input),
+      'Legacy native and base fields must be unchanged',
+    );
     assertEquals(parsed.current_balance_summary.base_total, 425);
+    assert(
+      !('contract_version' in parsed.current_balance_summary.meta),
+      'v1 current-balance meta must retain the legacy wire shape',
+    );
+    assert(
+      !('contract_version' in parsed.document_total_summary.meta),
+      'v1 document-total meta must retain the legacy wire shape',
+    );
     assert(
       !('base_available' in parsed.current_balance_summary),
       'v1 must not be promoted to v2 authority',
@@ -210,20 +234,31 @@ Deno.test('Gate D parser preserves explicit v1 compatibility without fabricating
       !('authoritative_document_count' in parsed.current_balance_summary),
       'v1 must not fabricate authority counts',
     );
+    assert(
+      !JSON.stringify(parsed).includes('"contract_version":1'),
+      'The internal v1 tag must not be serialized',
+    );
   }
 });
 
 Deno.test('Gate D parser strictly accepts the exact Invoice and Receipt v2 contract', () => {
-  const invoice = parseMonetaryCollectionSummary(
+  const internalInvoice = parseVersionedMonetaryCollectionSummary(
     v2Summary('current_outstanding'),
     { currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS },
   );
-  const receipt = parseMonetaryCollectionSummary(
+  const internalReceipt = parseVersionedMonetaryCollectionSummary(
     v2Summary('current_unallocated'),
     { currentAmountBasis: CURRENT_UNALLOCATED_AMOUNT_BASIS },
   );
+  assertEquals(internalInvoice.contractVersion, 2);
+  assertEquals(internalReceipt.contractVersion, 2);
 
-  for (const parsed of [invoice, receipt]) {
+  for (
+    const parsed of [
+      serializeMonetaryCollectionSummary(internalInvoice),
+      serializeMonetaryCollectionSummary(internalReceipt),
+    ]
+  ) {
     assertEquals(parsed.current_balance_summary.meta.contract_version, 2);
     assertEquals(parsed.current_balance_summary.base_total, '125.50');
     assertEquals(
@@ -322,14 +357,27 @@ Deno.test('Gate D Invoice and Receipt services map v1 before migration and v2 af
       {},
       { page: 1, page_size: 50 },
     );
-    assertEquals(
-      invoices.summary.current_balance_summary.meta.contract_version,
-      version,
-    );
-    assertEquals(
-      receipts.summary.current_balance_summary.meta.contract_version,
-      version,
-    );
+    for (const summary of [invoices.summary, receipts.summary]) {
+      if (version === 1) {
+        assert(
+          !('contract_version' in summary.current_balance_summary.meta),
+          'Invoice and Receipt v1 APIs must omit contract_version',
+        );
+        assert(
+          !('contract_version' in summary.document_total_summary.meta),
+          'Both v1 summaries must use the same legacy wire version',
+        );
+      } else {
+        assertEquals(
+          summary.current_balance_summary.meta.contract_version,
+          2,
+        );
+        assertEquals(
+          summary.document_total_summary.meta.contract_version,
+          2,
+        );
+      }
+    }
   }
 });
 
