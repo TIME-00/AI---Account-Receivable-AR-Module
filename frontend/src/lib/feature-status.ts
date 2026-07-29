@@ -1,5 +1,5 @@
 // Truthful, phase-aware capability status used by the read-only Settings page.
-// Gate A, Gate B and Gate C are deployed.
+// Gates A, B, C and D are deployed. Gate D is closed.
 export const FEATURE_STATUS_ROWS = [
   { feature: "Dashboard", status: "Live", color: "bg-emerald-50 text-emerald-700" },
   { feature: "Invoices (CRUD + Post + Cancel)", status: "Live", color: "bg-emerald-50 text-emerald-700" },
@@ -48,6 +48,26 @@ export const FEATURE_STATUS_ROWS = [
   { feature: "Daily FX Sync", status: "Live (Automated)", color: "bg-emerald-50 text-emerald-700" },
   {
     feature: "Report Export (PDF/Excel) (Gate C)",
+    status: "Live",
+    color: "bg-emerald-50 text-emerald-700",
+  },
+  {
+    feature: "Dashboard Customer Credit-Rating Drill-Down (Gate D)",
+    status: "Live",
+    color: "bg-emerald-50 text-emerald-700",
+  },
+  {
+    feature: "Invoice Provenance-Aware Monetary Summary (Gate D)",
+    status: "Live",
+    color: "bg-emerald-50 text-emerald-700",
+  },
+  {
+    feature: "Receipt Provenance-Aware Monetary Summary (Gate D)",
+    status: "Live",
+    color: "bg-emerald-50 text-emerald-700",
+  },
+  {
+    feature: "Gate D Production Rollout",
     status: "Live",
     color: "bg-emerald-50 text-emerald-700",
   },
