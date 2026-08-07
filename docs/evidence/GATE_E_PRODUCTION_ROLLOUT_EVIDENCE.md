@@ -173,86 +173,144 @@ No operating mode was forced and no kill switch was enabled.
 
 ## Required continuation
 
-Gate E remains open and pending activation. Continuation requires:
+Gate E remains open and pending activation. No credential value should be
+pasted into chat, logs, evidence, or Git.
 
-1. Re-authenticate the existing authorized demo Finance Playwright session
-   locally without exposing credentials or auth-state content, then repeat the
-   authenticated read-only Production UI/API smoke.
-2. Implement and independently review an approved secure OAuth token writer and
-   an unambiguous per-provider or generic callback contract.
-3. Provision Google and Microsoft client configuration and perform human OAuth
-   consent with only the documented least-privilege scopes.
-4. Independently review the now-selected local OpenAI Responses API document-
-   intelligence adapter, then provision its Edge secret only after deployment
-   authorization.
-5. Provision a dedicated worker secret together with the reviewed external
-   scheduler, never one without the other.
-6. Configure a controlled synthetic mailbox/recipient, then progress through
-   `observe_only`, `draft_only`, and `straight_through` only after each preceding
-   phase passes.
+## Activation-prerequisite Production continuation
 
-No credential value should be pasted into chat, logs, evidence, or Git.
+The independently reviewed activation implementation was committed and pushed:
 
-## Local activation-prerequisite remediation (pending independent review)
+- commit: `9f4d358e00740c6309f22d1bdea7a4f67e97a6b3`;
+- parent: `fbed6b6ff23be577834f6fdbc7ccfa358c93c249`;
+- subject: `feat(gate-e): add secure provider activation`;
+- scope: exactly 12 reviewed files, comprising seven modifications and five
+  additions; and
+- push: `HEAD == origin/main`, ahead/behind `0/0` immediately after push.
 
-The Production facts above remain unchanged. A local, unstaged and uncommitted
-remediation now addresses the repository-owned OAuth and scheduling
-prerequisites but has not been applied or deployed:
+The reviewed implementation includes the Supabase Vault OAuth store,
+provider-specific redirect contract, refresh/rotation lifecycle, bounded worker
+boundary, and the direct OpenAI Responses API document-intelligence adapter.
+The OpenAI adapter uses strict Structured Outputs, bounded Base64 PDF/image
+input, no tools, a 25-second whole-response timeout, at most one transient
+retry, and the default server-side model `gpt-5.6-luna`. OpenAI supplies only
+untrusted classification/extraction candidates; tenant, customer, arithmetic,
+FX, posting, and allocation remain deterministic backend/PostgreSQL authority.
 
-- forward-only `035_gate_e_secure_oauth_vault.sql` adds service-role-only,
-  tenant/mailbox/provider/capability-bound Supabase Vault write, resolve,
-  rotate, and delete RPCs plus opaque-reference collision guards;
-- the Production composition is changed locally from
-  `DisabledOAuthSecretWriter` to `VaultOAuthSecretStore`;
-- OAuth redirects are split into `GMAIL_OAUTH_REDIRECT_URI` and
-  `MICROSOFT_OAUTH_REDIRECT_URI`, each constrained to its exact callback path
-  and the Edge runtime's exact `SUPABASE_URL` HTTPS origin;
-- callback completion is bound to the hashed, expiring, single-use state rather
-  than browser authentication headers that providers do not return;
-- Gmail/Microsoft access-token refresh rotates the Vault bundle and persists
-  only safe expiry/reconnect metadata;
-- Microsoft offline authority is proven from the returned refresh token rather
-  than incorrectly requiring `offline_access` in the access-token scope string;
-- local disconnect deletes the Vault credential and disables the requested
-  capability without exposing token or secret-reference values;
-- Vault operations verify the exact Gate E context description, so an unrelated
-  pre-existing Vault name cannot be overwritten, resolved, or deleted; and
-- the scheduler design is frozen to the project's established Supabase
-  `pg_cron` + `pg_net` invocation with a dedicated Vault-backed
-  `AUTOMATION_WORKER_SECRET`, provisioned together only during a later
-  authorized activation; and
-- the approved document-intelligence provider is implemented locally as a
-  direct OpenAI Responses API adapter using strict Structured Outputs, bounded
-  Base64 PDF/image input, no tools, a 25-second timeout, at most one transient
-  retry, and the default server-side model `gpt-5.6-luna`.
+### Migration 035
 
-The OpenAI adapter requires the Supabase Edge secret `OPENAI_API_KEY` and
-optionally accepts the server-side `OPENAI_DOCUMENT_MODEL` override. Neither is
-provisioned in this local phase. Missing or invalid configuration selects
-`DisabledDocumentIntelligenceProvider`; no dashboard read performs a provider
-request, and `document_intelligence_ready` therefore remains false in the
-currently deployed Production version. No real OpenAI request or document
-upload occurred during implementation or tests.
+- reviewed source: `database/035_gate_e_secure_oauth_vault.sql`;
+- reviewed SHA-256:
+  `5EAA0F78822F036D0535BDD41751D39C8F802E83CC432872B5AD08296E234BB3`;
+- preflight: the existing four remote migrations matched the isolated local
+  ledger and only `20260808000000_gate_e_secure_oauth_vault.sql` was pending;
+- Vault prerequisite: `vault.secrets`, `vault.decrypted_secrets`,
+  `vault.create_secret(text,text,text,uuid)`, and
+  `vault.update_secret(uuid,text,text,text,uuid)` were present;
+- application: PASS, exactly once;
+- remote ledger version: `20260808000000`;
+- remote ledger name: `gate_e_secure_oauth_vault`;
+- rollback-only `035b` was not executed in Production;
+- `automation_oauth_secret_write`, `automation_oauth_secret_resolve`, and
+  `automation_oauth_secret_delete` are owned by `postgres`, are security
+  definers with fixed empty `search_path`, and are executable by `service_role`
+  but not `anon`, `authenticated`, or `PUBLIC`;
+- both OAuth-reference unique indexes and the enabled collision-guard trigger
+  exist;
+- Gate E RLS and policy coverage remains 16/16; and
+- settings, mailboxes, OAuth states, and Gate E Vault metadata rows remain zero.
 
-OpenAI structured output supplies conservative boolean uncertainty gates rather
-than a provider-calibrated probability. The adapter maps these to the existing
-internal `0`/`1` confidence policy, after which semantic dates, exact decimal
-arithmetic, customer resolution, duplicates, FX, posting, and allocation remain
-deterministic backend/PostgreSQL authority. Document content is explicitly
-untrusted data and cannot alter the fixed model instructions.
+Migration 035 performed no Invoice, Receipt, allocation, FX, journal, customer,
+mailbox, provider-credential, or other financial/business backfill.
 
-Local validation is complete: the OpenAI document-intelligence suite is 41/41,
-the activation-prerequisite suite remains 21/21, and the existing Gate E suite
-remains 81/81, for a combined focused result of 143/143. The complete recursive
-backend suite is 394/394. The full Automation scope passes Deno format and lint,
-and all 17 deployable Edge entry points type-check.
-A disposable PostgreSQL 17.6 database rebuilt the project public schema through
-Migration 035 from the explicit 001-035 manifest; both rollback-only 034b and
-035b completed with `ROLLBACK`, all 16 Gate E tables retained RLS and policies,
-all three Vault RPCs were service-role-only with fixed empty `search_path`, and
-mailbox/OAuth-state/Vault smoke residue was zero.
+### Automation Edge deployment
 
-This section is not activation or closure evidence. Gate E remains **OPEN**,
-the deployed operating mode remains **disabled**, no provider or scheduler is
-configured, and the local remediation requires one Claude Code independent
-read-only review before any source commit, push, migration, or deployment.
+- function: `automation`;
+- deployed version: 2;
+- status: ACTIVE;
+- platform JWT verification: disabled, with the reviewed in-function user and
+  dedicated worker boundaries active;
+- deployment bundle SHA-256:
+  `d47291b8f44d17e817338bb483c5329aaaae3e4d4dafbbf1c35ce75ac9fc083a`.
+
+Post-deployment fail-closed checks passed:
+
+- unauthenticated Overview request: HTTP 401, `gate-e.1`, sanitized
+  `AUTHENTICATION_ERROR`;
+- worker request without a configured worker secret: HTTP 503, `gate-e.1`,
+  sanitized `AUTOMATION_WORKER_NOT_CONFIGURED`; and
+- no worker cycle or provider request was executed.
+
+### Frontend deployment status
+
+The push triggered one Vercel Git Production deployment for the activation
+commit; no manual duplicate was created:
+
+- GitHub deployment ID: `5794696394`;
+- deployment URL:
+  `https://account-receivable-module-l6mu8dz7q-time-00s-projects.vercel.app`;
+- status: success, Production;
+- canonical alias: `https://account-receivable-module.vercel.app/`;
+- canonical public health: HTTP 200.
+
+No frontend source changed in the activation commit. Authenticated protected-page
+smoke remains pending because the previously authorized demo Finance session is
+expired; its auth-state file was not read, printed, copied, or modified.
+
+### Provider, worker, and scheduler status
+
+Production secret-name inspection found all activation-specific configuration
+absent:
+
+- `OPENAI_API_KEY`: missing;
+- `OPENAI_DOCUMENT_MODEL`: missing; the deployed default remains
+  `gpt-5.6-luna`;
+- `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, and
+  `GMAIL_OAUTH_REDIRECT_URI`: missing;
+- `MICROSOFT_OAUTH_CLIENT_ID`, `MICROSOFT_OAUTH_CLIENT_SECRET`,
+  `MICROSOFT_OAUTH_REDIRECT_URI`, and optional
+  `MICROSOFT_OAUTH_TENANT`: missing; and
+- `AUTOMATION_WORKER_SECRET`: missing.
+
+No OpenAI request, document upload, Google/Microsoft consent, Vault token write,
+mailbox connection, token refresh, reminder email, or scheduler execution
+occurred. The worker secret was not provisioned alone: the reviewed repository
+defines the `pg_cron`/`pg_net` design but contains no reviewed installable cron
+DDL or operator script. Installing persistent scheduler SQL would therefore
+require a separately reviewed forward implementation rather than rollout-time
+improvisation.
+
+The actual derived readiness remains:
+
+- `ingestion_ready`: false;
+- `delivery_ready`: false;
+- `document_intelligence_ready`: false.
+
+The operating mode remains `disabled`. Disabled fail-closed deployment checks
+passed, but activation Phase 0 is incomplete because provider credentials,
+controlled provider smoke, worker/scheduler installation, and authenticated UI
+smoke are not yet available. `observe_only`, `draft_only`, and
+`straight_through` were not started.
+
+### Remaining prerequisites
+
+1. Provision `OPENAI_API_KEY` through Supabase Edge secret management without
+   exposing the value, then run synthetic invoice and receipt smoke tests.
+2. Provision provider-specific Google and Microsoft client configuration and
+   complete human consent with only the documented least-privilege scopes.
+3. Add and independently review the persistent Vault-backed `pg_cron`/`pg_net`
+   scheduler installation before provisioning `AUTOMATION_WORKER_SECRET` and the
+   job together.
+4. Re-authenticate the authorized demo Finance session locally through the
+   normal login flow and run the authenticated read-only Production UI/API
+   smoke without exposing auth-state content.
+5. Configure only controlled synthetic mailbox, customer, representative, and
+   recipient data before progressing through `observe_only`, `draft_only`, and
+   `straight_through` one phase at a time.
+
+Local validation remains independently accepted: OpenAI 41/41,
+activation-prerequisites 21/21, Gate E 81/81, combined focused 143/143, complete
+backend 394/394, Deno format/lint PASS, and deployable Edge entrypoints 17/17.
+
+**Gate E remains OPEN and PENDING ACTIVATION.** Production remains deployed and
+fail-closed in `disabled` mode. No Production financial/business DML occurred
+during this continuation.
