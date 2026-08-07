@@ -2,10 +2,13 @@
 
 ## Status and safety posture
 
-This document describes the local, undeployed Gate E backend foundation. It does
-not claim that Migration 034 has been applied, a mailbox has been connected,
-OAuth consent has completed, a document-intelligence provider is active, an
-email has been sent, a scheduler is active, or Production automation is enabled.
+Migration 034 and the reviewed Gate E application are deployed to Production,
+but Gate E remains open, disabled, and unactivated. This document also describes
+the local Migration 035/OAuth/OpenAI activation-prerequisite remediation,
+which is pending independent review and has not been committed, pushed,
+migrated, or deployed. No mailbox has been connected, OAuth consent completed,
+document-intelligence provider activated, email sent, scheduler activated, or
+Production automation mode advanced.
 
 Every company starts with no `automation_settings` row, which the API interprets
 as `disabled` with every kill switch off. Inserted settings also default to
@@ -29,6 +32,11 @@ remains fail-closed until its own switch and prerequisites are satisfied.
 - OAuth token values are not stored in application tables. Tables store only
   uppercase secret-reference names plus separate non-secret ingestion/delivery
   expiry and readiness metadata.
+- Migration 035 uses the project's existing Supabase Vault facility. Three
+  service-role-only, tenant/mailbox/provider/capability-bound RPCs write,
+  resolve, rotate, and delete the versioned OAuth token bundle. Normal users
+  have no table/view/RPC path to decrypted Vault data. Opaque references are
+  globally guarded against cross-mailbox and cross-capability reuse.
 - Document provider output is untrusted candidate data. It cannot issue SQL,
   select a tenant, create a customer, select an ambiguous customer, calculate
   authoritative FX, allocate a receipt, or perform a financial write.
@@ -71,8 +79,15 @@ part of read DTOs. Overview readiness is split into `ingestion_ready` and
 `delivery_ready`. Each requires an enabled connected mailbox, its matching
 capability switch, no reconnect state, current semantic expiry metadata, a
 capable provider adapter, and successful resolution of the matching opaque
-secret reference. Missing/unavailable secrets and invalid/expired token
-metadata produce `false`; no token or reference name is returned.
+secret reference. The resolved bundle must contain non-blank access and refresh
+tokens, a current semantic expiry, and the exact provider scope for that
+capability. Missing/unavailable secrets and invalid/expired token metadata
+produce `false`; no token, scope list, or reference name is returned.
+
+Migration 035 also binds each Vault record's description to the exact
+company-owned mailbox/provider/capability context. A pre-existing unrelated
+Vault secret with a colliding name cannot be overwritten, resolved, or deleted
+through the Gate E RPCs.
 
 Audit/exception metadata passes through an explicit per-key validator map.
 Identifiers must be UUIDs, lifecycle/provider/action fields must be known enums,
@@ -153,13 +168,33 @@ idempotent replay, fixture rollback, and absence of a Gate E cron job.
 Migration 034 performs no invoice, receipt, allocation, journal, reminder,
 mailbox, or customer data backfill and installs no scheduler.
 
-The Edge Function exposes a bounded `POST /worker/run` integration point for an
-external scheduler. It is protected by a dedicated constant-time-checked worker
+Forward-only Migration `database/035_gate_e_secure_oauth_vault.sql` requires the
+already-approved `supabase_vault` extension and installs only:
+
+- a cross-capability opaque-reference uniqueness trigger and partial indexes;
+- `automation_oauth_secret_write(...)` for initial persistence and rotation;
+- `automation_oauth_secret_resolve(...)` for server-side token use; and
+- `automation_oauth_secret_delete(...)` for local disconnect/revocation.
+
+All three RPCs are `SECURITY DEFINER`, owned by `postgres`, have an empty fixed
+`search_path`, validate the mailbox tenant/provider/capability/reference, and
+grant execution only to `service_role`. Tokens remain encrypted in Vault and
+never enter `automation_mailboxes`, audit metadata, public DTOs, or logs.
+Migration 035 installs no settings, mailbox, provider credential, cron job, or
+financial/business DML. `035b` is rollback-only local smoke coverage.
+
+The Edge Function exposes a bounded `POST /worker/run` integration point for a
+scheduler. It is protected by a dedicated constant-time-checked worker
 secret, does not accept tenant authority in the request, and derives each
 company and acting Finance Manager/AR Supervisor from `automation_settings`.
 The cycle bounds companies, mailboxes, provider pages, attachments, reminders,
 and retries. With no worker secret or no non-disabled tenant settings it fails
-closed or performs no work.
+closed or performs no work. The selected infrastructure is the project's
+established Supabase `pg_cron` + `pg_net` pattern, with the dedicated
+`AUTOMATION_WORKER_SECRET` stored in Vault and injected only as the
+`X-Automation-Worker-Secret` header. The secret and job must be provisioned
+together in the later activation phase. Neither Migration 035 nor this local
+remediation installs the job or secret.
 
 ## Provider setup
 
@@ -181,10 +216,13 @@ Provisioning dependencies:
 
 - `GMAIL_OAUTH_CLIENT_ID`
 - secret reference `GMAIL_OAUTH_CLIENT_SECRET`
-- `AUTOMATION_OAUTH_REDIRECT_URI`
-- a secure `OAuthSecretWriter` implementation backed by the approved Vault or
-  Edge-secret mechanism
+- `GMAIL_OAUTH_REDIRECT_URI`, exactly the Gmail callback path
+- runtime `SUPABASE_URL`; the redirect origin must match it exactly
+- deployed Migration 035 Vault RPCs
 - per-mailbox ingestion and delivery token secret-reference names
+
+The Production Gmail value must be exactly
+`https://kusseuycqgdilychphpq.supabase.co/functions/v1/automation/oauth/gmail/callback`.
 
 ### Microsoft Outlook / Microsoft 365
 
@@ -203,14 +241,34 @@ Provisioning dependencies:
 - `MICROSOFT_OAUTH_CLIENT_ID`
 - secret reference `MICROSOFT_OAUTH_CLIENT_SECRET`
 - optional `MICROSOFT_OAUTH_TENANT` (default `common`)
-- `AUTOMATION_OAUTH_REDIRECT_URI`
-- the same approved secure token writer and per-mailbox token references
+- `MICROSOFT_OAUTH_REDIRECT_URI`, exactly the Microsoft callback path
+- runtime `SUPABASE_URL`; the redirect origin must match it exactly
+- the same approved Vault store and per-mailbox token references
 
-Concrete HTTP adapters are wired behind secure environment secret resolution.
-No real provider is called until opaque token references resolve and the
-relevant company and mailbox switches are deliberately enabled. OAuth token
-writing remains fail-closed until an approved Vault/Edge-secret writer is
-provisioned.
+The Production Microsoft value must be exactly
+`https://kusseuycqgdilychphpq.supabase.co/functions/v1/automation/oauth/microsoft/callback`.
+
+OAuth initiation and completion validate the same exact provider-specific
+redirect. The callback is authorized by the hashed, 256-bit, ten-minute,
+single-use state created by the authenticated start route; it does not depend
+on browser authorization headers that Google or Microsoft will not return.
+Wrong-provider, changed-redirect, expired/reused-state, missing code/state,
+provider-denial, exchange, and Vault-write failures are sanitized and fail
+closed. A refresh within five minutes of expiry uses the refresh token, rotates
+the Vault bundle, and updates only safe expiry metadata. A revoked credential
+sets reconnect-required; a transient provider/Vault outage does not expose or
+erase token material. Disconnect deletes the Vault value before disabling and
+clearing expiry metadata.
+
+Microsoft consent requests `offline_access`, while the returned access-token
+scope is checked independently for `Mail.Read` or `Mail.Send`. Initial
+completion proves offline authority from the returned refresh token and only
+then adds the normalized `offline_access` marker to the Vault bundle; it does
+not incorrectly require the access-token scope string to echo that marker.
+
+Concrete Gmail/Microsoft HTTP adapters are wired behind secure environment and
+Vault resolution. No real provider is called until the relevant company and
+mailbox switches are deliberately enabled and the exact token bundle resolves.
 
 ## Ingestion and storage
 
@@ -259,10 +317,53 @@ Classification schema version 1 supports:
 - `unsupported`
 - `ambiguous`
 
-Only invoice and receipt candidates may continue. The fixture provider is
-deterministic. The production default provider is disabled. A future real
-provider must implement the same schema-bound interface, bounded timeout, and
-redacted failure contract.
+Only invoice and receipt candidates may continue. The fixture provider remains
+deterministic and test-only. The selected Production-minded provider is the
+OpenAI Responses API at `POST https://api.openai.com/v1/responses`, using
+`gpt-5.6-luna` by default. The Edge-only `OPENAI_API_KEY` secret is mandatory;
+`OPENAI_DOCUMENT_MODEL` may supply a defensively validated server-side model
+override. Neither value is accepted from a browser request or persisted in an
+application table.
+
+The direct HTTPS adapter sends only already-validated PDF, PNG, JPEG, or WebP
+bytes as bounded Base64 `input_file`/`input_image` data. It never supplies an
+arbitrary provider-fetchable URL. PDF detail and image detail are `low`, output
+is capped at 12,000 tokens, the response body is capped at 1 MiB, and one
+request has a 25-second timeout. At most one retry is permitted for `429`,
+selected `5xx`, or a transient network failure; timeout, authentication,
+malformed input, refusal, incomplete output, and schema failure fail closed.
+No tools are enabled and `store` is false.
+
+The request uses Responses API Structured Outputs with `strict: true`, a root
+object, required fields, nested `additionalProperties: false`, bounded arrays,
+and the existing document-class enum. Provider output cannot contain tenant,
+customer-ID, FX, SQL, posting, or allocation authority. Fixed instructions say
+that file/OCR content is untrusted data and that embedded directions must never
+be followed. The validated normalized candidate alone is persisted; raw OpenAI
+requests, file bytes, response bodies, API response IDs, and authorization data
+are not logged, audited, or stored.
+
+OpenAI does not expose a calibrated probability for this structured extraction.
+The adapter therefore does not invent one: it maps conservative model-declared
+`classification_confident` and `critical_fields_confident` policy gates to the
+legacy internal numeric values `1` or `0`. Uncertain fields similarly map to
+`0`. These are explicitly non-probabilistic gates, after which the existing
+threshold, schema, date, decimal, arithmetic, customer-resolution, duplicate,
+and financial-authority checks remain mandatory.
+
+The provider is instantiated only when `OPENAI_API_KEY` is nonblank and bounded
+and the configured model name passes deterministic validation. Overview makes
+no OpenAI request. Missing or invalid configuration selects
+`DisabledDocumentIntelligenceProvider`, so `document_intelligence_ready` stays
+false. Production is still running the prior disabled deployment because this
+adapter is local and unreviewed.
+
+Financial/business document bytes are sent server-side to OpenAI after the
+existing intake safety checks. OpenAI states that API inputs and outputs are not
+used to train its models by default; this integration does not claim zero
+retention, Malaysian data residency, or regulatory compliance. See
+https://openai.com/business-data/ and the applicable OpenAI API terms/data
+controls before activation.
 
 Validation checks schema version, ISO dates, currencies, decimal strings,
 positive/non-negative amounts, database-compatible precision bounds, due-date
@@ -315,7 +416,7 @@ message, attachment hash, command type, and schema version.
 The scheduled worker can synchronize ready mailboxes, process a bounded set of
 accepted attachments, persist decisions, execute the same mode-governed command
 path, evaluate reminders in each configured timezone, and deliver only through
-a separately ready delivery mailbox. No scheduler job is installed.
+a separately ready delivery mailbox. No Gate E scheduler job is installed yet.
 
 ## Reminders
 
@@ -347,14 +448,15 @@ personal data. Evaluation and delivery have independent kill switches.
 
 ## Rollout prerequisites
 
-1. Independent code/security/financial review.
-2. Isolated database application of Migration 034 and rollback-only 034b smoke.
-3. Provision approved secret resolver/writer without placing token values in
-   application tables or Git.
-4. Provision a dedicated `AUTOMATION_WORKER_SECRET` only when an external
-   scheduler is separately authorized.
-5. Deploy only the reviewed `automation` function.
-6. Keep mode disabled; validate read APIs and fixture providers.
+1. Independently review this local Migration 035 and Edge remediation.
+2. Apply Migration 035 once and deploy only the reviewed `automation` function.
+3. Independently review the selected local OpenAI Responses API document
+   adapter, then provision `OPENAI_API_KEY` through Supabase Edge secrets only.
+4. Provision mailbox provider client IDs/secrets and the exact provider-specific
+   callback URIs, then perform human consent with least-privilege scopes.
+5. Provision a dedicated `AUTOMATION_WORKER_SECRET` and its Vault-backed
+   `pg_cron`/`pg_net` job together.
+6. Keep mode disabled; validate read APIs and authenticated Production UI.
 7. Configure one synthetic mailbox and observe-only mode in a separately
    authorized environment.
 8. Validate cursor recovery, deduplication, exceptions, and zero financial DML.
@@ -367,12 +469,15 @@ From `backend/supabase/functions`:
 
 ```powershell
 deno test --node-modules-dir=auto --allow-read --allow-env gate_e_automation_contract_test.ts
-deno check automation/index.ts gate_e_automation_contract_test.ts
-deno lint automation gate_e_automation_contract_test.ts
-deno fmt --check automation gate_e_automation_contract_test.ts
+deno test --node-modules-dir=auto --allow-read --allow-env gate_e_activation_prerequisites_test.ts
+deno test --node-modules-dir=auto --allow-read --allow-env gate_e_openai_document_test.ts
+deno check automation/index.ts gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts
+deno lint automation gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts
+deno fmt --check automation gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts
 ```
 
 The same checks should be followed by every backend test file and strict checks
 for all deployable Edge Function entry points. Local database verification
-installs Migration 034 in repository order, executes 034b with
-`ON_ERROR_STOP=1`, and proves zero fixture residue after its final `ROLLBACK`.
+installs through Migration 035 in repository order, executes both rollback-only
+smokes with `ON_ERROR_STOP=1`, and proves zero fixture residue after their final
+`ROLLBACK`.

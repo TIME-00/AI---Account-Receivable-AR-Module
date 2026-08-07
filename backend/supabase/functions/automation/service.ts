@@ -50,16 +50,21 @@ import {
 } from "./providers.ts";
 import {
   assertProviderTextIsDataOnly,
-  DisabledDocumentIntelligenceProvider,
   type DocumentIntelligenceProvider,
   type DocumentIntelligenceResult,
   validateDocumentResult,
 } from "./document.ts";
+import { createOpenAIDocumentProvider } from "./openai-document.ts";
 import {
   buildOAuthAuthorizationUrl,
   completeOAuthCallback,
-  DisabledOAuthSecretWriter,
-  type OAuthSecretWriter,
+  type OAuthCapability,
+  type OAuthSecretContext,
+  type OAuthSecretStore,
+  type OAuthTokenSet,
+  refreshOAuthTokens,
+  validateOAuthRedirectUri,
+  VaultOAuthSecretStore,
 } from "./oauth.ts";
 import {
   allocationResultDto,
@@ -133,7 +138,8 @@ export interface AutomationServiceDependencies {
   >;
   documentProvider?: DocumentIntelligenceProvider;
   now?: () => Date;
-  oauthWriter?: OAuthSecretWriter;
+  oauthSecretStore?: OAuthSecretStore;
+  oauthFetcher?: typeof fetch;
 }
 
 export interface PagedRows {
@@ -474,7 +480,8 @@ export class AutomationService {
   >;
   private readonly documentProvider: DocumentIntelligenceProvider;
   private readonly now: () => Date;
-  private readonly oauthWriter: OAuthSecretWriter;
+  private readonly oauthSecretStore: OAuthSecretStore;
+  private readonly oauthFetcher: typeof fetch;
 
   constructor(dependencies: AutomationServiceDependencies = {}) {
     this.client = dependencies.client ?? getAdminClient();
@@ -489,10 +496,215 @@ export class AutomationService {
       microsoft: new MicrosoftDeliveryProvider(),
     };
     this.documentProvider = dependencies.documentProvider ??
-      new DisabledDocumentIntelligenceProvider();
+      createOpenAIDocumentProvider({
+        apiKey: Deno.env.get("OPENAI_API_KEY"),
+        model: Deno.env.get("OPENAI_DOCUMENT_MODEL"),
+      });
     this.now = dependencies.now ?? (() => new Date());
-    this.oauthWriter = dependencies.oauthWriter ??
-      new DisabledOAuthSecretWriter();
+    this.oauthSecretStore = dependencies.oauthSecretStore ??
+      new VaultOAuthSecretStore(this.client);
+    this.oauthFetcher = dependencies.oauthFetcher ?? fetch;
+  }
+
+  private oauthRedirectUri(provider: MailboxProviderType): string {
+    return validateOAuthRedirectUri(
+      provider,
+      Deno.env.get(
+        provider === "gmail"
+          ? "GMAIL_OAUTH_REDIRECT_URI"
+          : "MICROSOFT_OAUTH_REDIRECT_URI",
+      ),
+      Deno.env.get("SUPABASE_URL"),
+    );
+  }
+
+  private oauthClientId(provider: MailboxProviderType): string {
+    const value = Deno.env.get(
+      provider === "gmail"
+        ? "GMAIL_OAUTH_CLIENT_ID"
+        : "MICROSOFT_OAUTH_CLIENT_ID",
+    );
+    if (!value || value.length > 512) {
+      throw new BusinessError(
+        "OAUTH_NOT_CONFIGURED",
+        "OAuth provider configuration has not been provisioned.",
+        503,
+      );
+    }
+    return value;
+  }
+
+  private oauthRequiredScopes(
+    provider: MailboxProviderType,
+    capability: OAuthCapability,
+  ): string[] {
+    return provider === "gmail"
+      ? capability === "ingestion"
+        ? ["https://www.googleapis.com/auth/gmail.readonly"]
+        : ["https://www.googleapis.com/auth/gmail.send"]
+      : capability === "ingestion"
+      ? ["offline_access", "Mail.Read"]
+      : ["offline_access", "Mail.Send"];
+  }
+
+  private oauthSecretContext(
+    mailbox: Row,
+    capability: OAuthCapability,
+  ): OAuthSecretContext {
+    return {
+      company_id: String(mailbox.company_id),
+      mailbox_id: String(mailbox.id),
+      provider: mailbox.provider_type as MailboxProviderType,
+      capability,
+      secret_reference: String(
+        mailbox[`${capability}_secret_ref`] ?? "",
+      ),
+    };
+  }
+
+  private oauthTokenSupportsCapability(
+    token: OAuthTokenSet,
+    provider: MailboxProviderType,
+    capability: OAuthCapability,
+    now: Date,
+  ): boolean {
+    return token.access_token.trim().length > 0 &&
+      typeof token.refresh_token === "string" &&
+      token.refresh_token.trim().length > 0 &&
+      tokenExpiryIsCurrent(token.expires_at, now) &&
+      this.oauthRequiredScopes(provider, capability).every((required) =>
+        token.scope.some((granted) =>
+          granted.toLowerCase() === required.toLowerCase()
+        )
+      );
+  }
+
+  private async markMailboxReconnectRequired(
+    mailbox: Row,
+    code: string,
+  ): Promise<void> {
+    const { error } = await this.client.from("automation_mailboxes").update({
+      reconnect_required: true,
+      connection_status: "reconnect_required",
+      redacted_error_code: code,
+      updated_at: this.now().toISOString(),
+    }).eq("id", mailbox.id).eq("company_id", mailbox.company_id);
+    if (error) throw error;
+  }
+
+  async resolveOAuthAccessTokenForRuntime(
+    mailbox: Row,
+    capability: OAuthCapability,
+  ): Promise<string> {
+    const provider = mailbox.provider_type as MailboxProviderType;
+    const context = this.oauthSecretContext(mailbox, capability);
+    let current: OAuthTokenSet;
+    try {
+      current = await this.oauthSecretStore.resolveTokenSet(context);
+    } catch (error) {
+      if (
+        error instanceof BusinessError &&
+        ["OAUTH_SECRET_UNAVAILABLE", "OAUTH_SECRET_INVALID"].includes(
+          error.code,
+        )
+      ) {
+        await this.markMailboxReconnectRequired(
+          mailbox,
+          "OAUTH_CREDENTIAL_INVALID",
+        );
+      }
+      throw error;
+    }
+    const requiredScopes = this.oauthRequiredScopes(provider, capability);
+    if (
+      requiredScopes.some((scope) =>
+        !current.scope.some((granted) =>
+          granted.toLowerCase() === scope.toLowerCase()
+        )
+      )
+    ) {
+      await this.markMailboxReconnectRequired(
+        mailbox,
+        "OAUTH_SCOPE_INSUFFICIENT",
+      );
+      throw new BusinessError(
+        "OAUTH_RECONNECT_REQUIRED",
+        "OAuth authorization must be reconnected.",
+        409,
+      );
+    }
+    if (!current.refresh_token) {
+      await this.markMailboxReconnectRequired(
+        mailbox,
+        "OAUTH_REFRESH_TOKEN_REQUIRED",
+      );
+      throw new BusinessError(
+        "OAUTH_RECONNECT_REQUIRED",
+        "OAuth authorization must be reconnected.",
+        409,
+      );
+    }
+    const refreshBefore = this.now().getTime() + 5 * 60 * 1000;
+    if (Date.parse(current.expires_at) > refreshBefore) {
+      return current.access_token;
+    }
+    try {
+      const refreshed = await refreshOAuthTokens({
+        configuration: {
+          provider,
+          client_id: this.oauthClientId(provider),
+          client_secret: await this.secretResolver.resolve(
+            provider === "gmail"
+              ? "GMAIL_OAUTH_CLIENT_SECRET"
+              : "MICROSOFT_OAUTH_CLIENT_SECRET",
+          ),
+          redirect_uri: this.oauthRedirectUri(provider),
+          tenant: provider === "microsoft"
+            ? Deno.env.get("MICROSOFT_OAUTH_TENANT") ?? "common"
+            : undefined,
+        },
+        current,
+        fetcher: this.oauthFetcher,
+        now: this.now(),
+      });
+      if (
+        requiredScopes.some((scope) =>
+          !refreshed.scope.some((granted) =>
+            granted.toLowerCase() === scope.toLowerCase()
+          )
+        )
+      ) {
+        throw new BusinessError(
+          "OAUTH_RECONNECT_REQUIRED",
+          "OAuth authorization must be reconnected.",
+          409,
+        );
+      }
+      await this.oauthSecretStore.writeTokenSet(context, refreshed);
+      const { error } = await this.client.from("automation_mailboxes").update({
+        [`${capability}_token_expires_at`]: refreshed.expires_at,
+        reconnect_required: false,
+        redacted_error_code: null,
+        updated_at: this.now().toISOString(),
+      }).eq("id", mailbox.id).eq("company_id", mailbox.company_id);
+      if (error) throw error;
+      return refreshed.access_token;
+    } catch (error) {
+      if (
+        error instanceof BusinessError &&
+        [
+          "OAUTH_RECONNECT_REQUIRED",
+          "OAUTH_SECRET_INVALID",
+          "OAUTH_SECRET_UNAVAILABLE",
+        ].includes(error.code)
+      ) {
+        await this.markMailboxReconnectRequired(
+          mailbox,
+          "OAUTH_TOKEN_REFRESH_REJECTED",
+        );
+      }
+      throw error;
+    }
   }
 
   private async purgeExpiredAttachmentContent(): Promise<{
@@ -862,7 +1074,7 @@ export class AutomationService {
     const { data: mailboxes, error: mailboxError } = await this.client
       .from("automation_mailboxes")
       .select(
-        "provider_type,connection_status,reconnect_required,is_enabled,ingestion_enabled,delivery_enabled,ingestion_secret_ref,delivery_secret_ref,ingestion_token_expires_at,delivery_token_expires_at,last_successful_sync_at,last_failed_sync_at",
+        "id,company_id,provider_type,connection_status,reconnect_required,is_enabled,ingestion_enabled,delivery_enabled,ingestion_secret_ref,delivery_secret_ref,ingestion_token_expires_at,delivery_token_expires_at,last_successful_sync_at,last_failed_sync_at",
       )
       .eq("company_id", auth.companyId)
       .order("id", { ascending: true })
@@ -900,10 +1112,17 @@ export class AutomationService {
           )
         ) continue;
         try {
-          const token = await this.secretResolver.resolve(
-            String(row[`${capability}_secret_ref`]),
+          const token = await this.oauthSecretStore.resolveTokenSet(
+            this.oauthSecretContext(row, capability),
           );
-          if (token.trim().length > 0) return true;
+          if (
+            this.oauthTokenSupportsCapability(
+              token,
+              row.provider_type as MailboxProviderType,
+              capability,
+              now,
+            )
+          ) return true;
         } catch {
           // Readiness is a bounded boolean. Secret-provider details remain
           // private and an unavailable opaque token fails closed.
@@ -1593,6 +1812,20 @@ export class AutomationService {
       mailboxId,
     );
     const next = { ...current, ...patch };
+    for (const capability of ["ingestion", "delivery"] as const) {
+      const referenceField = `${capability}_secret_ref`;
+      if (
+        patch[referenceField] !== undefined &&
+        patch[referenceField] !== current[referenceField] &&
+        current[`${capability}_token_expires_at`] !== null
+      ) {
+        throw new BusinessError(
+          "OAUTH_DISCONNECT_REQUIRED",
+          "Disconnect the existing OAuth capability before changing its secret reference.",
+          409,
+        );
+      }
+    }
     if (
       (next.is_enabled === true || next.ingestion_enabled === true) &&
       (next.connection_status !== "connected" ||
@@ -1619,6 +1852,88 @@ export class AutomationService {
         409,
       );
     }
+    for (const capability of ["ingestion", "delivery"] as const) {
+      const enabled = capability === "ingestion"
+        ? next.is_enabled === true || next.ingestion_enabled === true
+        : next.delivery_enabled === true;
+      if (!enabled) continue;
+      try {
+        const token = await this.oauthSecretStore.resolveTokenSet(
+          this.oauthSecretContext(next, capability),
+        );
+        if (
+          !this.oauthTokenSupportsCapability(
+            token,
+            next.provider_type as MailboxProviderType,
+            capability,
+            this.now(),
+          )
+        ) {
+          throw new Error("expired");
+        }
+      } catch {
+        throw new BusinessError(
+          "MAILBOX_NOT_READY",
+          `Mailbox ${capability} cannot be enabled until its secure OAuth token resolves.`,
+          409,
+        );
+      }
+    }
+    const { data, error } = await this.client.from("automation_mailboxes")
+      .update(patch).eq("id", mailboxId).eq("company_id", auth.companyId)
+      .select("*").maybeSingle();
+    if (error) throw error;
+    return mailboxDto(requiredId(data as Row | null, "Mailbox", mailboxId));
+  }
+
+  async disconnectMailboxOAuth(
+    auth: AuthContext,
+    mailboxId: string,
+    capability: OAuthCapability | "all",
+  ): Promise<Row> {
+    requireAnyRole(auth, ["Finance Manager", "System Admin"]);
+    validateUUID(mailboxId, "mailbox_id");
+    const { data: mailboxRaw, error: mailboxError } = await this.client
+      .from("automation_mailboxes").select("*")
+      .eq("id", mailboxId).eq("company_id", auth.companyId).maybeSingle();
+    if (mailboxError) throw mailboxError;
+    const mailbox = requiredId(
+      mailboxRaw as Row | null,
+      "Mailbox",
+      mailboxId,
+    );
+    const capabilities: OAuthCapability[] = capability === "all"
+      ? ["ingestion", "delivery"]
+      : [capability];
+    for (const currentCapability of capabilities) {
+      if (mailbox[`${currentCapability}_secret_ref`]) {
+        await this.oauthSecretStore.deleteTokenSet(
+          this.oauthSecretContext(mailbox, currentCapability),
+        );
+      }
+    }
+    const patch: Row = {
+      reconnect_required: false,
+      redacted_error_code: null,
+      updated_by: auth.userId,
+      updated_at: this.now().toISOString(),
+    };
+    if (capabilities.includes("ingestion")) {
+      patch.is_enabled = false;
+      patch.ingestion_enabled = false;
+      patch.ingestion_token_expires_at = null;
+    }
+    if (capabilities.includes("delivery")) {
+      patch.delivery_enabled = false;
+      patch.delivery_token_expires_at = null;
+    }
+    const ingestionRemains = !capabilities.includes("ingestion") &&
+      tokenExpiryIsCurrent(mailbox.ingestion_token_expires_at, this.now());
+    const deliveryRemains = !capabilities.includes("delivery") &&
+      tokenExpiryIsCurrent(mailbox.delivery_token_expires_at, this.now());
+    patch.connection_status = ingestionRemains || deliveryRemains
+      ? "connected"
+      : "disabled";
     const { data, error } = await this.client.from("automation_mailboxes")
       .update(patch).eq("id", mailboxId).eq("company_id", auth.companyId)
       .select("*").maybeSingle();
@@ -1643,31 +1958,14 @@ export class AutomationService {
       mailboxId,
     );
     const provider = mailbox.provider_type as MailboxProviderType;
-    const clientId = Deno.env.get(
-      provider === "gmail"
-        ? "GMAIL_OAUTH_CLIENT_ID"
-        : "MICROSOFT_OAUTH_CLIENT_ID",
-    );
-    const redirectUri = Deno.env.get("AUTOMATION_OAUTH_REDIRECT_URI");
-    if (!clientId || !redirectUri) {
-      throw new BusinessError(
-        "OAUTH_NOT_CONFIGURED",
-        "OAuth provider configuration has not been provisioned.",
-        503,
-      );
-    }
+    const clientId = this.oauthClientId(provider);
+    const redirectUri = this.oauthRedirectUri(provider);
     const state = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll(
       "-",
       "",
     );
     const stateHash = await sha256(state);
-    const scopes = provider === "gmail"
-      ? capability === "ingestion"
-        ? ["https://www.googleapis.com/auth/gmail.readonly"]
-        : ["https://www.googleapis.com/auth/gmail.send"]
-      : capability === "ingestion"
-      ? ["offline_access", "Mail.Read"]
-      : ["offline_access", "Mail.Send"];
+    const scopes = this.oauthRequiredScopes(provider, capability);
     const expiresAt = new Date(this.now().getTime() + 10 * 60 * 1000)
       .toISOString();
     const { error: stateError } = await this.client.from(
@@ -1708,19 +2006,20 @@ export class AutomationService {
   }
 
   async completeOAuth(
-    auth: AuthContext,
     provider: MailboxProviderType,
     state: string,
     code: string,
   ): Promise<Row> {
-    requireAnyRole(auth, ["Finance Manager", "System Admin"]);
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(state)) {
+      throw new ValidationError("OAuth state is invalid.");
+    }
     const stateHash = await sha256(state);
     const { data: stateRaw, error } = await this.client.from(
       "automation_oauth_states",
     )
       .select("*, mailbox:automation_mailboxes(*)")
-      .eq("state_hash", stateHash).eq("company_id", auth.companyId)
-      .eq("provider_type", provider).is("consumed_at", null).maybeSingle();
+      .eq("state_hash", stateHash).eq("provider_type", provider)
+      .is("consumed_at", null).maybeSingle();
     if (error) throw error;
     const oauthState = requiredId(
       stateRaw as Row | null,
@@ -1737,15 +2036,40 @@ export class AutomationService {
       );
     }
     const mailbox = oauthState.mailbox as Row;
+    const companyId = String(oauthState.company_id);
+    if (
+      mailbox.provider_type !== provider ||
+      String(oauthState.redirect_uri) !== this.oauthRedirectUri(provider)
+    ) {
+      throw new BusinessError(
+        "OAUTH_STATE_MISMATCH",
+        "OAuth state does not match the provider callback.",
+        409,
+      );
+    }
     const requestedScopes = Array.isArray(oauthState.requested_scopes)
       ? oauthState.requested_scopes.map(String)
       : [];
-    const deliveryScope = provider === "gmail"
-      ? "https://www.googleapis.com/auth/gmail.send"
-      : "Mail.Send";
-    const capability = requestedScopes.includes(deliveryScope)
+    const scopeKey = (scopes: readonly string[]) =>
+      scopes.map((scope) => scope.toLowerCase()).sort().join("\u0000");
+    const requestedScopeKey = scopeKey(requestedScopes);
+    const ingestionScopeKey = scopeKey(
+      this.oauthRequiredScopes(provider, "ingestion"),
+    );
+    const deliveryScopeKey = scopeKey(
+      this.oauthRequiredScopes(provider, "delivery"),
+    );
+    const capability: OAuthCapability = requestedScopeKey === ingestionScopeKey
+      ? "ingestion"
+      : requestedScopeKey === deliveryScopeKey
       ? "delivery"
-      : "ingestion";
+      : (() => {
+        throw new BusinessError(
+          "OAUTH_STATE_MISMATCH",
+          "OAuth state does not match an exact provider capability.",
+          409,
+        );
+      })();
     const secretReference = String(
       capability === "delivery"
         ? mailbox.delivery_secret_ref ?? ""
@@ -1758,24 +2082,13 @@ export class AutomationService {
         503,
       );
     }
-    const clientId = Deno.env.get(
-      provider === "gmail"
-        ? "GMAIL_OAUTH_CLIENT_ID"
-        : "MICROSOFT_OAUTH_CLIENT_ID",
-    );
-    if (!clientId) {
-      throw new BusinessError(
-        "OAUTH_NOT_CONFIGURED",
-        "OAuth provider is not configured.",
-        503,
-      );
-    }
+    const clientId = this.oauthClientId(provider);
     const claimedAt = this.now().toISOString();
     const { data: claimedState, error: claimError } = await this.client.from(
       "automation_oauth_states",
     ).update({
       consumed_at: claimedAt,
-    }).eq("id", oauthState.id).eq("company_id", auth.companyId)
+    }).eq("id", oauthState.id).eq("company_id", companyId)
       .is("consumed_at", null).select("id").maybeSingle();
     if (claimError) throw claimError;
     if (!claimedState) {
@@ -1800,9 +2113,16 @@ export class AutomationService {
           : undefined,
       },
       code,
-      secret_reference: secretReference,
+      secret_context: {
+        company_id: companyId,
+        mailbox_id: String(mailbox.id),
+        provider,
+        capability,
+        secret_reference: secretReference,
+      },
       required_scopes: requestedScopes,
-      writer: this.oauthWriter,
+      writer: this.oauthSecretStore,
+      fetcher: this.oauthFetcher,
       now: this.now(),
     });
     const completedAt = this.now().toISOString();
@@ -1816,9 +2136,9 @@ export class AutomationService {
             : "ingestion_token_expires_at"
         ]: result.expires_at,
         redacted_error_code: null,
-        updated_by: auth.userId,
+        updated_by: oauthState.created_by,
         updated_at: completedAt,
-      }).eq("id", mailbox.id).eq("company_id", auth.companyId).select("id")
+      }).eq("id", mailbox.id).eq("company_id", companyId).select("id")
       .maybeSingle();
     if (mailboxUpdateError) throw mailboxUpdateError;
     if (!connectedMailbox) {
@@ -1838,6 +2158,67 @@ export class AutomationService {
     };
   }
 
+  async rejectOAuth(
+    provider: MailboxProviderType,
+    state: string,
+  ): Promise<never> {
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(state)) {
+      throw new ValidationError("OAuth state is invalid.");
+    }
+    const stateHash = await sha256(state);
+    const { data: stateRaw, error } = await this.client.from(
+      "automation_oauth_states",
+    ).select("id,company_id,mailbox_id,expires_at,consumed_at")
+      .eq("state_hash", stateHash).eq("provider_type", provider)
+      .is("consumed_at", null).maybeSingle();
+    if (error) throw error;
+    const oauthState = requiredId(
+      stateRaw as Row | null,
+      "OAuthState",
+      stateHash,
+    );
+    if (
+      new Date(String(oauthState.expires_at)).getTime() <= this.now().getTime()
+    ) {
+      throw new BusinessError(
+        "OAUTH_STATE_EXPIRED",
+        "OAuth state has expired.",
+        409,
+      );
+    }
+    const claimedAt = this.now().toISOString();
+    const { data: claimed, error: claimError } = await this.client.from(
+      "automation_oauth_states",
+    ).update({ consumed_at: claimedAt }).eq("id", oauthState.id)
+      .eq("company_id", oauthState.company_id).is("consumed_at", null)
+      .select("id").maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) {
+      throw new BusinessError(
+        "OAUTH_STATE_ALREADY_USED",
+        "OAuth state has already been consumed.",
+        409,
+      );
+    }
+    const { error: mailboxError } = await this.client.from(
+      "automation_mailboxes",
+    ).update({
+      connection_status: "error",
+      reconnect_required: true,
+      redacted_error_code: "OAUTH_PROVIDER_DENIED",
+      updated_at: claimedAt,
+    }).eq("id", oauthState.mailbox_id).eq(
+      "company_id",
+      oauthState.company_id,
+    );
+    if (mailboxError) throw mailboxError;
+    throw new BusinessError(
+      "OAUTH_PROVIDER_DENIED",
+      "OAuth consent was not completed.",
+      409,
+    );
+  }
+
   async syncMailbox(auth: AuthContext, mailboxId: string): Promise<Row> {
     requireAnyRole(auth, ["AR Supervisor", "Finance Manager"]);
     validateUUID(mailboxId, "mailbox_id");
@@ -1846,25 +2227,6 @@ export class AutomationService {
       .eq("id", mailboxId).eq("company_id", auth.companyId).maybeSingle();
     if (mailboxError) throw mailboxError;
     const mailbox = requiredId(mailboxRaw as Row | null, "Mailbox", mailboxId);
-    if (
-      mailbox.ingestion_secret_ref &&
-      !tokenExpiryIsCurrent(mailbox.ingestion_token_expires_at, this.now())
-    ) {
-      const { error: reconnectError } = await this.client.from(
-        "automation_mailboxes",
-      ).update({
-        reconnect_required: true,
-        connection_status: "reconnect_required",
-        last_failed_sync_at: this.now().toISOString(),
-        redacted_error_code: "OAUTH_TOKEN_EXPIRED",
-      }).eq("id", mailboxId).eq("company_id", auth.companyId);
-      if (reconnectError) throw reconnectError;
-      throw new BusinessError(
-        "MAILBOX_RECONNECT_REQUIRED",
-        "Mailbox OAuth authorization has expired and must be reconnected.",
-        409,
-      );
-    }
     const settings = await this.getSettings(auth);
     if (
       settings.operating_mode === "disabled" ||
@@ -1872,7 +2234,7 @@ export class AutomationService {
       mailbox.is_enabled !== true ||
       mailbox.ingestion_enabled !== true ||
       mailbox.reconnect_required === true ||
-      !tokenExpiryIsCurrent(mailbox.ingestion_token_expires_at, this.now())
+      !mailbox.ingestion_secret_ref
     ) {
       throw new BusinessError(
         "MAILBOX_SYNC_DISABLED",
@@ -1880,8 +2242,10 @@ export class AutomationService {
         409,
       );
     }
-    const secretRef = String(mailbox.ingestion_secret_ref ?? "");
-    const accessToken = await this.secretResolver.resolve(secretRef);
+    const accessToken = await this.resolveOAuthAccessTokenForRuntime(
+      mailbox,
+      "ingestion",
+    );
     const provider =
       this.mailboxProviders[mailbox.provider_type as MailboxProviderType];
     if (!provider) {
@@ -3530,29 +3894,10 @@ export class AutomationService {
       mailboxId,
     );
     if (
-      mailbox.delivery_secret_ref &&
-      !tokenExpiryIsCurrent(mailbox.delivery_token_expires_at, this.now())
-    ) {
-      const { error: reconnectError } = await this.client.from(
-        "automation_mailboxes",
-      ).update({
-        reconnect_required: true,
-        connection_status: "reconnect_required",
-        redacted_error_code: "OAUTH_TOKEN_EXPIRED",
-      }).eq("id", mailboxId).eq("company_id", auth.companyId);
-      if (reconnectError) throw reconnectError;
-      throw new BusinessError(
-        "MAILBOX_RECONNECT_REQUIRED",
-        "Mailbox delivery authorization has expired and must be reconnected.",
-        409,
-      );
-    }
-    if (
       mailbox.connection_status !== "connected" ||
       mailbox.delivery_enabled !== true ||
       mailbox.reconnect_required === true ||
-      !mailbox.delivery_secret_ref ||
-      !tokenExpiryIsCurrent(mailbox.delivery_token_expires_at, this.now())
+      !mailbox.delivery_secret_ref
     ) {
       throw new BusinessError(
         "REMINDER_DELIVERY_DISABLED",
@@ -3630,8 +3975,9 @@ export class AutomationService {
         mailbox.provider_type as MailboxProviderType
       ];
       delivered = await provider.send({
-        accessToken: await this.secretResolver.resolve(
-          String(mailbox.delivery_secret_ref),
+        accessToken: await this.resolveOAuthAccessTokenForRuntime(
+          mailbox,
+          "delivery",
         ),
         fromAddress: String(mailbox.mailbox_address),
         toAddress: String(reminder.recipient_email_snapshot),

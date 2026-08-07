@@ -204,6 +204,10 @@ const ROUTES: Route[] = [
     pattern: /^\/mailboxes\/([0-9a-f-]{36})\/oauth\/start\/?$/i,
   },
   {
+    name: "oauth-disconnect",
+    pattern: /^\/mailboxes\/([0-9a-f-]{36})\/oauth\/disconnect\/?$/i,
+  },
+  {
     name: "oauth-callback",
     pattern: /^\/oauth\/(gmail|microsoft)\/callback\/?$/,
   },
@@ -315,6 +319,46 @@ export async function handleAutomationRequest(
       return jsonResponse(
         automationSuccess(await service.runScheduledCycle()),
       );
+    }
+    if (route.name === "oauth-callback" && req.method === "GET") {
+      assertQueryParameters(url, [
+        "code",
+        "state",
+        "error",
+        "error_description",
+        "error_uri",
+        "scope",
+        "authuser",
+        "prompt",
+        "session_state",
+      ]);
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      const providerError = url.searchParams.get("error");
+      const provider = route.params.id;
+      if (
+        req.url.length > 8_192 ||
+        !state || !/^[A-Za-z0-9_-]{32,256}$/.test(state) ||
+        (provider !== "gmail" && provider !== "microsoft") ||
+        (code !== null &&
+          (code.length === 0 || code.length > 4_096 ||
+            Array.from(code).some((character) => {
+              const value = character.charCodeAt(0);
+              return value <= 31 || value === 127;
+            }))) ||
+        (providerError !== null &&
+          (providerError.length === 0 || providerError.length > 128))
+      ) {
+        throw new ValidationError("OAuth callback is invalid.");
+      }
+      const service = dependencies.createService();
+      if (providerError !== null) {
+        await service.rejectOAuth(provider, state);
+      }
+      if (!code) throw new ValidationError("OAuth callback is invalid.");
+      return jsonResponse(automationSuccess(
+        await service.completeOAuth(provider, state, code),
+      ));
     }
     const companyId = extractCompanyId(req);
     const auth = await dependencies.authenticate(req, companyId);
@@ -470,19 +514,23 @@ export async function handleAutomationRequest(
         ),
       ));
     }
-    if (route.name === "oauth-callback" && req.method === "GET") {
-      assertQueryParameters(url, ["code", "state"]);
-      const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      const provider = route.params.id;
+    if (route.name === "oauth-disconnect" && req.method === "POST") {
+      const request = await body(req);
+      assertExactKeys(request, ["capability"], ["capability"]);
       if (
-        !code || !state ||
-        (provider !== "gmail" && provider !== "microsoft")
+        request.capability !== "ingestion" &&
+        request.capability !== "delivery" && request.capability !== "all"
       ) {
-        throw new ValidationError("OAuth callback is invalid.");
+        throw new ValidationError(
+          "capability must be ingestion, delivery, or all.",
+        );
       }
       return jsonResponse(automationSuccess(
-        await service.completeOAuth(auth, provider, state, code),
+        await service.disconnectMailboxOAuth(
+          auth,
+          route.params.id,
+          request.capability,
+        ),
       ));
     }
     if (route.name === "document-process" && req.method === "POST") {

@@ -1387,6 +1387,8 @@ Deno.test("OAuth authorization URLs use exact provider endpoints and scopes", ()
   }));
   assertEquals(gmail.origin, "https://accounts.google.com");
   assert(gmail.searchParams.get("scope")?.includes("gmail.readonly"));
+  assert(!gmail.searchParams.get("scope")?.includes("gmail.send"));
+  assertEquals(gmail.searchParams.get("include_granted_scopes"), null);
   const microsoft = new URL(buildOAuthAuthorizationUrl({
     configuration: {
       provider: "microsoft",
@@ -1432,7 +1434,7 @@ Deno.test("OAuth token exchange is fixture-only and secret writer receives opaqu
       refresh_token: "fixture-refresh",
       expires_in: 3600,
       token_type: "Bearer",
-      scope: "Mail.Read offline_access",
+      scope: "Mail.Read",
     }));
   const writer = new FixtureOAuthSecretWriter();
   const result = await completeOAuthCallback({
@@ -1443,7 +1445,13 @@ Deno.test("OAuth token exchange is fixture-only and secret writer receives opaqu
       redirect_uri: "https://example.test/callback",
     },
     code: "fixture-code",
-    secret_reference: "AUTOMATION_MAILBOX_TOKEN_1",
+    secret_context: {
+      company_id: companyId,
+      mailbox_id: mailboxId,
+      provider: "microsoft",
+      capability: "ingestion",
+      secret_reference: "AUTOMATION_MAILBOX_TOKEN_1",
+    },
     required_scopes: ["Mail.Read", "offline_access"],
     writer,
     fetcher,
@@ -1466,7 +1474,13 @@ Deno.test("OAuth completion rejects missing capability scope before secret write
           redirect_uri: "https://example.test/callback",
         },
         code: "fixture-code",
-        secret_reference: "AUTOMATION_MAILBOX_TOKEN_2",
+        secret_context: {
+          company_id: companyId,
+          mailbox_id: mailboxId,
+          provider: "microsoft",
+          capability: "delivery",
+          secret_reference: "AUTOMATION_MAILBOX_TOKEN_2",
+        },
         required_scopes: ["Mail.Send", "offline_access"],
         writer,
         fetcher: () =>
@@ -1496,7 +1510,7 @@ Deno.test("OAuth callback state is atomically claimed before token exchange", as
   assert(service.includes('"OAUTH_STATE_ALREADY_USED"'));
 });
 
-Deno.test("Production-default OAuth secret writer fails closed", async () => {
+Deno.test("Explicit disabled OAuth secret store fails closed", async () => {
   const tokens = await exchangeOAuthCode({
     configuration: {
       provider: "gmail",
@@ -1513,7 +1527,14 @@ Deno.test("Production-default OAuth secret writer fails closed", async () => {
       })),
   });
   await rejects(
-    () => new DisabledOAuthSecretWriter().writeTokenSet("TOKEN_REF", tokens),
+    () =>
+      new DisabledOAuthSecretWriter().writeTokenSet({
+        company_id: companyId,
+        mailbox_id: mailboxId,
+        provider: "gmail",
+        capability: "ingestion",
+        secret_reference: "TOKEN_REF",
+      }, tokens),
     "OAUTH_SECRET_WRITER_DISABLED",
   );
 });
@@ -1627,6 +1648,8 @@ Deno.test("Automation service overview derives every tenant count and readiness 
     ["automation_exceptions:lifecycle_status=retryable", 1],
   ]);
   let mailboxFixtures: Array<Record<string, unknown>> = [{
+    id: mailboxId,
+    company_id: companyId,
     provider_type: "gmail",
     connection_status: "connected",
     reconnect_required: false,
@@ -1640,6 +1663,8 @@ Deno.test("Automation service overview derives every tenant count and readiness 
     last_successful_sync_at: "2026-08-06T03:00:00.000Z",
     last_failed_sync_at: null,
   }, {
+    id: "10000000-0000-4000-8000-000000000004",
+    company_id: companyId,
     provider_type: "microsoft",
     connection_status: "connected",
     reconnect_required: false,
@@ -1657,8 +1682,10 @@ Deno.test("Automation service overview derives every tenant count and readiness 
     from(table: string) {
       const filters: Record<string, unknown> = {};
       let head = false;
+      let selectedColumns = "";
       const query = {
-        select(_columns: string, options?: { head?: boolean }) {
+        select(columns: string, options?: { head?: boolean }) {
+          selectedColumns = columns;
           head = options?.head === true;
           return query;
         },
@@ -1687,8 +1714,19 @@ Deno.test("Automation service overview derives every tenant count and readiness 
               error: null,
             }).then(resolve);
           }
+          const selected = new Set(
+            selectedColumns.split(",").map((column) => column.trim()),
+          );
           return Promise.resolve({
-            data: table === "automation_mailboxes" ? mailboxFixtures : [],
+            data: table === "automation_mailboxes"
+              ? mailboxFixtures.map((mailbox) =>
+                Object.fromEntries(
+                  Object.entries(mailbox).filter(([column]) =>
+                    selected.has(column)
+                  ),
+                )
+              )
+              : [],
             error: null,
           }).then(resolve);
         },
@@ -1696,13 +1734,37 @@ Deno.test("Automation service overview derives every tenant count and readiness 
       return query;
     },
   };
+  const oauthSecretStore = new FixtureOAuthSecretWriter();
+  await oauthSecretStore.writeTokenSet({
+    company_id: companyId,
+    mailbox_id: mailboxId,
+    provider: "gmail",
+    capability: "ingestion",
+    secret_reference: "FIXTURE_INGESTION_SECRET_REFERENCE",
+  }, {
+    access_token: "fixture-ingestion-access-token",
+    refresh_token: "fixture-ingestion-refresh-token",
+    expires_at: "2026-08-07T00:00:00.000Z",
+    scope: [...OAUTH_SCOPES.gmail_ingestion],
+    token_type: "Bearer",
+  });
+  await oauthSecretStore.writeTokenSet({
+    company_id: companyId,
+    mailbox_id: "10000000-0000-4000-8000-000000000004",
+    provider: "microsoft",
+    capability: "delivery",
+    secret_reference: "FIXTURE_DELIVERY_SECRET_REFERENCE",
+  }, {
+    access_token: "fixture-delivery-access-token",
+    refresh_token: "fixture-delivery-refresh-token",
+    expires_at: "2026-08-07T00:00:00.000Z",
+    scope: [...OAUTH_SCOPES.microsoft_delivery],
+    token_type: "Bearer",
+  });
   const service = new AutomationService({
     client: client as never,
     now: () => new Date("2026-08-06T04:00:00.000Z"),
-    secretResolver: new FixtureSecretResolver({
-      FIXTURE_INGESTION_SECRET_REFERENCE: "fixture-ingestion-access-token",
-      FIXTURE_DELIVERY_SECRET_REFERENCE: "fixture-delivery-access-token",
-    }),
+    oauthSecretStore,
     documentProvider: new FixtureDocumentIntelligenceProvider(invoiceFixture),
   });
   const overview = await service.overview({ ...auth, companyId });
@@ -1722,7 +1784,7 @@ Deno.test("Automation service overview derives every tenant count and readiness 
   const missingOpaqueSecret = await new AutomationService({
     client: client as never,
     now: () => new Date("2026-08-06T04:00:00.000Z"),
-    secretResolver: new FixtureSecretResolver({}),
+    oauthSecretStore: new FixtureOAuthSecretWriter(),
   }).overview({ ...auth, companyId });
   assertEquals(missingOpaqueSecret.ingestion_ready, false);
   assertEquals(missingOpaqueSecret.delivery_ready, false);
@@ -1730,13 +1792,63 @@ Deno.test("Automation service overview derives every tenant count and readiness 
   const blankOpaqueSecret = await new AutomationService({
     client: client as never,
     now: () => new Date("2026-08-06T04:00:00.000Z"),
-    secretResolver: new FixtureSecretResolver({
-      FIXTURE_INGESTION_SECRET_REFERENCE: "   ",
-      FIXTURE_DELIVERY_SECRET_REFERENCE: "   ",
-    }),
+    oauthSecretStore: {
+      writeTokenSet: () => Promise.resolve(),
+      deleteTokenSet: () => Promise.resolve(),
+      resolveTokenSet: () =>
+        Promise.resolve({
+          access_token: "   ",
+          refresh_token: null,
+          expires_at: "2026-08-07T00:00:00.000Z",
+          scope: [],
+          token_type: "Bearer" as const,
+        }),
+    },
   }).overview({ ...auth, companyId });
   assertEquals(blankOpaqueSecret.ingestion_ready, false);
   assertEquals(blankOpaqueSecret.delivery_ready, false);
+
+  const wrongScopeSecret = await new AutomationService({
+    client: client as never,
+    now: () => new Date("2026-08-06T04:00:00.000Z"),
+    oauthSecretStore: {
+      writeTokenSet: () => Promise.resolve(),
+      deleteTokenSet: () => Promise.resolve(),
+      resolveTokenSet: (secretContext) =>
+        Promise.resolve({
+          access_token: "fixture-wrong-capability-access-token",
+          refresh_token: "fixture-wrong-capability-refresh-token",
+          expires_at: "2026-08-07T00:00:00.000Z",
+          scope: secretContext.capability === "ingestion"
+            ? [...OAUTH_SCOPES.gmail_delivery]
+            : [...OAUTH_SCOPES.microsoft_ingestion],
+          token_type: "Bearer" as const,
+        }),
+    },
+  }).overview({ ...auth, companyId });
+  assertEquals(wrongScopeSecret.ingestion_ready, false);
+  assertEquals(wrongScopeSecret.delivery_ready, false);
+
+  const missingRefreshSecret = await new AutomationService({
+    client: client as never,
+    now: () => new Date("2026-08-06T04:00:00.000Z"),
+    oauthSecretStore: {
+      writeTokenSet: () => Promise.resolve(),
+      deleteTokenSet: () => Promise.resolve(),
+      resolveTokenSet: (secretContext) =>
+        Promise.resolve({
+          access_token: "fixture-nonrenewable-access-token",
+          refresh_token: null,
+          expires_at: "2026-08-07T00:00:00.000Z",
+          scope: secretContext.capability === "ingestion"
+            ? [...OAUTH_SCOPES.gmail_ingestion]
+            : [...OAUTH_SCOPES.microsoft_delivery],
+          token_type: "Bearer" as const,
+        }),
+    },
+  }).overview({ ...auth, companyId });
+  assertEquals(missingRefreshSecret.ingestion_ready, false);
+  assertEquals(missingRefreshSecret.delivery_ready, false);
 
   mailboxFixtures = [];
   const noMailbox = await service.overview({ ...auth, companyId });
@@ -1988,6 +2100,7 @@ Deno.test("Every Gate E mutation route returns the frozen success envelope", asy
     createMailbox: () => Promise.resolve(marker("mailbox_create")),
     updateMailbox: () => Promise.resolve(marker("mailbox_update")),
     beginOAuth: () => Promise.resolve(marker("oauth_start")),
+    disconnectMailboxOAuth: () => Promise.resolve(marker("oauth_disconnect")),
     completeOAuth: () => Promise.resolve(marker("oauth_callback")),
     syncMailbox: () => Promise.resolve(marker("mailbox_sync")),
     processAttachment: () => Promise.resolve(marker("document_process")),
@@ -2024,9 +2137,16 @@ Deno.test("Every Gate E mutation route returns the frozen success envelope", asy
     ],
     [
       "GET",
-      "/oauth/gmail/callback?code=fixture&state=fixture",
+      `/oauth/gmail/callback?code=fixture&state=${"a".repeat(64)}`,
       undefined,
       "oauth_callback",
+      200,
+    ],
+    [
+      "POST",
+      `/mailboxes/${id}/oauth/disconnect`,
+      { capability: "ingestion" },
+      "oauth_disconnect",
       200,
     ],
     ["POST", `/mailboxes/${id}/sync`, undefined, "mailbox_sync", 200],

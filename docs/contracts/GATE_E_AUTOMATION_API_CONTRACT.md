@@ -2,10 +2,12 @@
 
 Base Edge Function path: `/automation`
 
-All user routes require the normal bearer token plus `X-Company-Id`. The
-authenticated role binding is authoritative; a body/query `company_id` or
-`user_id` is not accepted as business authority. The frozen contract version
-is `gate-e.1`. Success responses use:
+All user routes except the provider callback require the normal bearer token
+plus `X-Company-Id`. The authenticated role binding is authoritative; a
+body/query `company_id` or `user_id` is not accepted as business authority.
+The provider callback is instead authorized by the provider-specific route and
+the hashed, 256-bit, one-time state created by an authenticated OAuth-start
+request. The frozen contract version is `gate-e.1`. Success responses use:
 
 ```json
 {
@@ -64,7 +66,8 @@ descending). Empty collections return `data: []`, `total: 0`.
 | `/mailboxes` | POST | Finance Manager or System Admin | provider, mailbox address, secret-reference names, optional default bank account | disabled mailbox |
 | `/mailboxes/:id` | PATCH | Finance Manager or System Admin | bank mapping, opaque secret-reference names, and enable switches only | updated readiness; enablement fails until the capability is connected |
 | `/mailboxes/:id/oauth/start` | POST | Finance Manager or System Admin | `{capability:"ingestion"|"delivery"}` | `{provider,authorization_url,expires_at,capability}` with a fixed provider origin |
-| `/oauth/:provider/callback` | GET | Finance Manager or System Admin | provider `code` and one-time `state` | readiness metadata; never token values |
+| `/mailboxes/:id/oauth/disconnect` | POST | Finance Manager or System Admin | `{capability:"ingestion"|"delivery"|"all"}` | redacted mailbox DTO after Vault deletion and capability disablement |
+| `/oauth/:provider/callback` | GET | one-time state created by Finance Manager or System Admin | provider `code` and `state`, or bounded provider `error` and `state`; browser bearer/company headers are not required | readiness metadata or sanitized denial; never token values |
 | `/mailboxes/:id/sync` | POST | AR Supervisor or Finance Manager | no body authority | completed run or fail-closed provider error |
 | `/runs` | GET | AR Supervisor, Finance Manager, Auditor | pagination and exact `status`/`provider_type` | sync runs |
 | `/documents` | GET | AR Supervisor, Finance Manager, Auditor | pagination and exact `document_type`/`status` | classifications with bounded attachment metadata and nullable extraction |
@@ -88,8 +91,9 @@ headers, client-computed financial totals, SQL, tenant inference, or AI-selected
 customer IDs.
 
 System Admin is configuration-only. It may read/update settings within the
-limits above, read/create/update mailbox configuration, start/complete OAuth,
-and read the sales-representative directory. It cannot read overview, runs,
+limits above, read/create/update mailbox configuration, start/disconnect OAuth,
+and read the sales-representative directory. A callback completes only a state
+that one of those authorized users already created. System Admin cannot read overview, runs,
 documents, commands, exceptions, reminders, attempts, audit, or customer
 ownership. AR Clerk access remains limited to the explicitly documented
 customer-scoped reads and command/allocation operations.
@@ -143,15 +147,70 @@ there is no generic `provider_ready` field. A capability is `true` only when at
 least one mailbox is enabled, connected, not reconnect-required, has that exact
 capability enabled, has current semantically valid token-expiry metadata, has a
 ready provider adapter, and its matching opaque secret reference resolves to a
-non-empty token through the server-side resolver. A missing mailbox, disabled
+strict, unexpired `gate-e-oauth.1` token set through the service-role-only Vault
+resolver. That resolved set must contain non-blank access and refresh tokens and
+the exact provider scope required for the requested capability. A missing mailbox, disabled
 switch, absent/unresolvable secret, expired or invalid timestamp, reconnect
 state, unknown provider, disabled adapter, or resolver failure returns `false`.
 The readiness calculation never returns the token, reference name, provider
 response, scope list, cursor, or resolver error.
 
 `document_intelligence_ready` is separate and reports only whether the bounded
-server-side document provider adapter is enabled. No readiness field activates
-a mode or kill switch.
+server-side document provider adapter is concretely configured and enabled. The
+selected local adapter is OpenAI Responses API. It is enabled only when the
+Edge-only `OPENAI_API_KEY` is present and passes bounded validation and the
+server-side `OPENAI_DOCUMENT_MODEL` value (default `gpt-5.6-luna`) is valid.
+Missing or malformed configuration selects the disabled adapter. Overview does
+not call OpenAI merely to calculate readiness. No readiness field activates a
+mode or kill switch.
+
+## Document-intelligence provider boundary
+
+The selected Production-minded provider contract is:
+
+- endpoint: `POST https://api.openai.com/v1/responses`;
+- default model: `gpt-5.6-luna`;
+- required Supabase Edge secret: `OPENAI_API_KEY`;
+- optional server-side override: `OPENAI_DOCUMENT_MODEL`;
+- supported intake: already-validated PDF, PNG, JPEG/JPG, and WebP only;
+- transport: bounded direct Base64 `input_file` or `input_image`, never a
+  user-controlled URL;
+- timeout: 25 seconds;
+- attempts: at most two total, with one fixed bounded retry only for `429`,
+  selected `5xx`, or a transient network failure;
+- output cap: 12,000 tokens and a 1 MiB HTTP response-body limit;
+- tools: none;
+- provider storage request: `store: false`.
+
+The request uses Responses API `text.format` Structured Outputs with
+`type=json_schema`, `strict=true`, required fields, nested
+`additionalProperties=false`, and only the frozen document types `invoice`,
+`receipt`, `payment_advice`, `unsupported`, and `ambiguous`. The schema contains
+candidate customer text but no `company_id`, `tenant_id`, authoritative
+`customer_id`, FX rate, SQL, posting status, allocation, or payment-application
+authority.
+
+OpenAI does not provide a calibrated probability for this structured
+extraction. The internal provider result therefore uses conservative
+model-declared policy gates, not probability claims:
+
+- `classification_confident=true` maps to internal confidence `1`; false maps
+  to `0`;
+- `critical_fields_confident=true` maps to internal critical confidence `1`;
+  false maps to `0`;
+- each declared uncertain field maps to field confidence `0`.
+
+These values feed the existing fail-closed threshold contract. They never
+override strict parsing, semantic date/decimal validation, arithmetic
+reconciliation, deterministic customer resolution, duplicate checks, operating
+mode, kill switches, PostgreSQL posting, FX, or allocation authority.
+
+The provider response is not a public API DTO. Only the existing normalized
+document-decision DTO is returned to clients. Raw file bytes, prompts, provider
+responses, response IDs, API keys, authorization headers, and document text are
+never returned or included in audit/error metadata. Provider refusals,
+incomplete results, malformed output, authentication failures, timeouts, and
+exhausted retries use fixed sanitized errors.
 
 ## Automatic allocation request
 
@@ -483,6 +542,42 @@ Mailbox and OAuth start:
 }
 ```
 
+OAuth callback success contains only bounded metadata:
+
+```json
+{
+  "mailbox_id": "10000000-0000-4000-8000-000000000006",
+  "provider": "gmail",
+  "capability": "ingestion",
+  "connection_status": "connected",
+  "token_expires_at": "2026-08-06T05:15:06.000Z",
+  "granted_scopes": [
+    "https://www.googleapis.com/auth/gmail.readonly"
+  ]
+}
+```
+
+The Google callback must use `GMAIL_OAUTH_REDIRECT_URI` and the Microsoft
+callback must use `MICROSOFT_OAUTH_REDIRECT_URI`. Start and completion compare
+the exact provider URI, and both URIs must use the exact HTTPS origin supplied
+by the Edge runtime's `SUPABASE_URL`. A wrong origin/provider, changed redirect,
+expired/reused state, missing code/state, provider denial, token-exchange
+failure, or Vault write failure is rejected. Access/refresh tokens, client
+secrets, raw provider errors, and Vault payloads never enter this DTO or an
+error envelope.
+
+For Microsoft, `offline_access` is requested during consent and is proven at
+completion by the presence of a refresh token. Because the token response's
+`scope` describes access-token authority and may omit `offline_access`, the
+stored scope list adds the `offline_access` marker only after that refresh-token
+proof. `Mail.Read` and `Mail.Send` remain exact, independently checked access
+scopes.
+
+Disconnect is idempotent at the Vault deletion boundary. It clears expiry
+metadata and disables only the requested capability (or both for `all`). It
+does not claim to revoke consent at the provider account; operators may also
+revoke provider-side consent according to their Google/Microsoft policy.
+
 Sync run:
 
 ```json
@@ -756,6 +851,13 @@ count and `has_more` is derived from that count and the returned page.
 - `NOT_FOUND` — 404
 - `CONFLICT` — 409
 - `OAUTH_NOT_CONFIGURED` / `SECRET_REFERENCE_UNAVAILABLE` — 503
+- `OAUTH_SECRET_WRITE_FAILED` / `OAUTH_SECRET_RESOLUTION_FAILED` /
+  `OAUTH_SECRET_DELETE_FAILED` — sanitized 503
+- `OAUTH_SECRET_UNAVAILABLE` / `OAUTH_SECRET_INVALID` /
+  `OAUTH_RECONNECT_REQUIRED` / `OAUTH_SCOPE_INSUFFICIENT` /
+  `OAUTH_STATE_EXPIRED` / `OAUTH_STATE_ALREADY_USED` /
+  `OAUTH_STATE_MISMATCH` / `OAUTH_PROVIDER_DENIED` /
+  `OAUTH_DISCONNECT_REQUIRED` — sanitized 409
 - `MAILBOX_SYNC_DISABLED` / `DOCUMENT_INTELLIGENCE_DISABLED` /
   `REMINDER_DELIVERY_DISABLED` — 409
 - `MAILBOX_RECONNECT_REQUIRED` — 409

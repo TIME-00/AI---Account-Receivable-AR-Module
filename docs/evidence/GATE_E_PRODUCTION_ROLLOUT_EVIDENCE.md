@@ -182,8 +182,9 @@ Gate E remains open and pending activation. Continuation requires:
    an unambiguous per-provider or generic callback contract.
 3. Provision Google and Microsoft client configuration and perform human OAuth
    consent with only the documented least-privilege scopes.
-4. Implement and independently review the concrete Production document-
-   intelligence adapter.
+4. Independently review the now-selected local OpenAI Responses API document-
+   intelligence adapter, then provision its Edge secret only after deployment
+   authorization.
 5. Provision a dedicated worker secret together with the reviewed external
    scheduler, never one without the other.
 6. Configure a controlled synthetic mailbox/recipient, then progress through
@@ -191,3 +192,67 @@ Gate E remains open and pending activation. Continuation requires:
    phase passes.
 
 No credential value should be pasted into chat, logs, evidence, or Git.
+
+## Local activation-prerequisite remediation (pending independent review)
+
+The Production facts above remain unchanged. A local, unstaged and uncommitted
+remediation now addresses the repository-owned OAuth and scheduling
+prerequisites but has not been applied or deployed:
+
+- forward-only `035_gate_e_secure_oauth_vault.sql` adds service-role-only,
+  tenant/mailbox/provider/capability-bound Supabase Vault write, resolve,
+  rotate, and delete RPCs plus opaque-reference collision guards;
+- the Production composition is changed locally from
+  `DisabledOAuthSecretWriter` to `VaultOAuthSecretStore`;
+- OAuth redirects are split into `GMAIL_OAUTH_REDIRECT_URI` and
+  `MICROSOFT_OAUTH_REDIRECT_URI`, each constrained to its exact callback path
+  and the Edge runtime's exact `SUPABASE_URL` HTTPS origin;
+- callback completion is bound to the hashed, expiring, single-use state rather
+  than browser authentication headers that providers do not return;
+- Gmail/Microsoft access-token refresh rotates the Vault bundle and persists
+  only safe expiry/reconnect metadata;
+- Microsoft offline authority is proven from the returned refresh token rather
+  than incorrectly requiring `offline_access` in the access-token scope string;
+- local disconnect deletes the Vault credential and disables the requested
+  capability without exposing token or secret-reference values;
+- Vault operations verify the exact Gate E context description, so an unrelated
+  pre-existing Vault name cannot be overwritten, resolved, or deleted; and
+- the scheduler design is frozen to the project's established Supabase
+  `pg_cron` + `pg_net` invocation with a dedicated Vault-backed
+  `AUTOMATION_WORKER_SECRET`, provisioned together only during a later
+  authorized activation; and
+- the approved document-intelligence provider is implemented locally as a
+  direct OpenAI Responses API adapter using strict Structured Outputs, bounded
+  Base64 PDF/image input, no tools, a 25-second timeout, at most one transient
+  retry, and the default server-side model `gpt-5.6-luna`.
+
+The OpenAI adapter requires the Supabase Edge secret `OPENAI_API_KEY` and
+optionally accepts the server-side `OPENAI_DOCUMENT_MODEL` override. Neither is
+provisioned in this local phase. Missing or invalid configuration selects
+`DisabledDocumentIntelligenceProvider`; no dashboard read performs a provider
+request, and `document_intelligence_ready` therefore remains false in the
+currently deployed Production version. No real OpenAI request or document
+upload occurred during implementation or tests.
+
+OpenAI structured output supplies conservative boolean uncertainty gates rather
+than a provider-calibrated probability. The adapter maps these to the existing
+internal `0`/`1` confidence policy, after which semantic dates, exact decimal
+arithmetic, customer resolution, duplicates, FX, posting, and allocation remain
+deterministic backend/PostgreSQL authority. Document content is explicitly
+untrusted data and cannot alter the fixed model instructions.
+
+Local validation is complete: the OpenAI document-intelligence suite is 41/41,
+the activation-prerequisite suite remains 21/21, and the existing Gate E suite
+remains 81/81, for a combined focused result of 143/143. The complete recursive
+backend suite is 394/394. The full Automation scope passes Deno format and lint,
+and all 17 deployable Edge entry points type-check.
+A disposable PostgreSQL 17.6 database rebuilt the project public schema through
+Migration 035 from the explicit 001-035 manifest; both rollback-only 034b and
+035b completed with `ROLLBACK`, all 16 Gate E tables retained RLS and policies,
+all three Vault RPCs were service-role-only with fixed empty `search_path`, and
+mailbox/OAuth-state/Vault smoke residue was zero.
+
+This section is not activation or closure evidence. Gate E remains **OPEN**,
+the deployed operating mode remains **disabled**, no provider or scheduler is
+configured, and the local remediation requires one Claude Code independent
+read-only review before any source commit, push, migration, or deployment.
