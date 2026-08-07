@@ -71,4 +71,38 @@ export const FEATURE_STATUS_ROWS = [
     status: "Live",
     color: "bg-emerald-50 text-emerald-700",
   },
+  // Gate E — Autonomous AR Operations. Frontend implemented against the frozen
+  // gate-e.1 contract; the backend is local/unstaged and fail-closed. Nothing
+  // below is Live: no real provider, mailbox, email, scheduler, or Production
+  // straight-through processing is active.
+  {
+    feature: "Automation Overview & Monitoring (Gate E)",
+    status: "Frontend Implemented — Pending Backend Deployment",
+    color: "bg-amber-50 text-amber-700",
+  },
+  {
+    feature: "Automation Settings & Kill Switches (Gate E)",
+    status: "Implemented — Disabled by Default",
+    color: "bg-amber-50 text-amber-700",
+  },
+  {
+    feature: "Sales Representatives & Customer Assignment (Gate E)",
+    status: "Frontend Implemented — Pending Backend Deployment",
+    color: "bg-amber-50 text-amber-700",
+  },
+  {
+    feature: "Mailbox Connections (Gmail & Microsoft) (Gate E)",
+    status: "Provider Configuration Required",
+    color: "bg-amber-50 text-amber-700",
+  },
+  {
+    feature: "Document Intelligence & Auto-Allocation Monitoring (Gate E)",
+    status: "Provider Configuration Required",
+    color: "bg-amber-50 text-amber-700",
+  },
+  {
+    feature: "Invoice Reminder Monitoring (Gate E)",
+    status: "Frontend Implemented — Delivery Disabled",
+    color: "bg-amber-50 text-amber-700",
+  },
 ] as const;

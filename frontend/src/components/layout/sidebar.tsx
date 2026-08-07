@@ -13,6 +13,7 @@ import {
   BarChart3,
   BookOpen,
   CreditCard,
+  Workflow,
   ChevronLeft,
   ChevronRight,
   LifeBuoy,
@@ -32,6 +33,7 @@ const navItems = [
       { href: "/credit-notes", label: "Credit Notes", icon: CreditCard },
       { href: "/receipts",     label: "Receipts",     icon: Receipt },
       { href: "/allocations",  label: "Allocation Wizard", icon: ArrowLeftRight },
+      { href: "/automation",   label: "Automation",   icon: Workflow },
     ],
   },
   {

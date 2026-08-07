@@ -12,6 +12,11 @@ import { supabase, API_BASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase";
 import { useCompanyStore } from "@/stores/company-store";
 import { getErrorMessage } from "@/lib/error-messages";
 import type { APIResponse, APIMeta } from "@/types";
+import {
+  GATE_E_CONTRACT_VERSION,
+  successEnvelopeSchema,
+  errorEnvelopeSchema,
+} from "@/lib/automation/contract";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +29,23 @@ interface RequestOptions {
   baseUrl?: string;
   /** Custom query params */
   params?: Record<string, string | number | boolean | undefined>;
+  /**
+   * Abort signal (e.g. from TanStack Query) so a superseded request — such as
+   * one issued before a company switch — is cancelled and can never resolve
+   * into stale UI. Non-Gate-E callers may omit it (behavior unchanged).
+   */
+  signal?: AbortSignal;
+  /**
+   * When set to the Gate E contract version, the COMPLETE response envelope is
+   * strict-parsed through the frozen `successEnvelopeSchema` /
+   * `errorEnvelopeSchema` Zod schemas before EITHER its `data` or its `error` is
+   * trusted. Both schemas pin `contract_version` via `z.literal` and reject
+   * unknown top-level / nested fields, so version drift, an unknown field, a
+   * malformed error, a non-JSON body, or a 2xx `success:false` all fail closed
+   * (`MALFORMED_RESPONSE`) rather than feeding unchecked data into the UI.
+   * Non-Gate-E callers omit it (behavior unchanged).
+   */
+  contractVersion?: string;
 }
 
 export interface ApiClient {
@@ -134,11 +156,29 @@ export function useApi(): ApiClient {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
+        signal: opts.signal,
       });
 
       // Handle non-JSON responses
       const contentType = res.headers.get("content-type");
       if (!contentType?.includes("application/json")) {
+        // Gate E boundary: a versioned response MUST be a JSON envelope. A
+        // non-JSON body (HTML error page, plain text, empty body) can be neither
+        // a valid success nor a valid error envelope, so it fails closed WITHOUT
+        // surfacing the raw response text — a non-JSON Gate E error must never
+        // leak provider/stack text into the UI.
+        if (opts.contractVersion) {
+          if (!opts.silent) {
+            toast.error("Request Failed", {
+              description: "The response could not be read.",
+            });
+          }
+          throw new ApiError(
+            "MALFORMED_RESPONSE",
+            "The Gate E response was not a JSON envelope.",
+            res.status,
+          );
+        }
         if (!res.ok) {
           const text = await res.text();
           if (!opts.silent) {
@@ -151,8 +191,95 @@ export function useApi(): ApiClient {
         return { data: (await res.text()) as unknown as T, meta: undefined };
       }
 
-      // Parse API response envelope
-      const json: APIResponse<T> = await res.json();
+      // Parse API response envelope. Malformed JSON fails closed with a safe,
+      // typed error rather than surfacing a raw SyntaxError — this matters most
+      // for the Gate E versioned boundary, which must never trust an
+      // unparseable body as either a success or an error envelope.
+      let json: APIResponse<T> & { contract_version?: unknown };
+      try {
+        json = await res.json();
+      } catch {
+        if (!opts.silent) {
+          toast.error("Request Failed", {
+            description: "The response could not be read.",
+          });
+        }
+        throw new ApiError(
+          "MALFORMED_RESPONSE",
+          "The response body was not valid JSON.",
+          res.status,
+        );
+      }
+
+      // Gate E boundary: when a contract version is required, the COMPLETE
+      // envelope is strict-parsed through the frozen `gate-e.1` Zod schemas —
+      // `successEnvelopeSchema` / `errorEnvelopeSchema` — before EITHER its data
+      // or its error is trusted. This is the real network path (not a test), so
+      // a server that drifts from the wire contract can never feed unchecked
+      // data into success OR error handling. Both schemas pin
+      // `contract_version` via `z.literal` and reject unknown top-level and
+      // nested error fields (`.strict()`), so version/shape drift fails closed
+      // here — including a 2xx body that falsely carries `success:false`.
+      if (opts.contractVersion === GATE_E_CONTRACT_VERSION) {
+        const success = (json as { success?: unknown }).success === true;
+
+        if (success) {
+          const parsed = successEnvelopeSchema.safeParse(json);
+          // A success envelope is only valid on a 2xx status; a 2xx-only
+          // contract forbids `success:true` on a failed HTTP status.
+          if (!parsed.success || !res.ok) {
+            if (!opts.silent) {
+              toast.error("Request Failed", {
+                description: "The response did not match the expected contract.",
+              });
+            }
+            throw new ApiError(
+              "MALFORMED_RESPONSE",
+              "The Gate E success envelope did not match the gate-e.1 contract.",
+              res.status,
+            );
+          }
+          return { data: parsed.data.data as T, meta: parsed.data.meta };
+        }
+
+        // Anything that is not `success:true` is treated as an error envelope —
+        // including an HTTP 2xx that carries `success:false`, which is NEVER
+        // surfaced as success. It must still strict-parse (non-empty string
+        // code, no unknown nested fields, pinned version) or it fails closed.
+        const parsedError = errorEnvelopeSchema.safeParse(json);
+        if (!parsedError.success) {
+          if (!opts.silent) {
+            toast.error("Request Failed", {
+              description: "The response did not match the expected contract.",
+            });
+          }
+          throw new ApiError(
+            "MALFORMED_RESPONSE",
+            "The Gate E error envelope did not match the gate-e.1 contract.",
+            res.status,
+          );
+        }
+
+        const error = parsedError.data.error;
+        const friendlyMessage = getErrorMessage(error.code, error.message);
+        if (!opts.silent) {
+          toast.error(friendlyMessage, {
+            description: error.code !== "INTERNAL_ERROR" ? `Error code: ${error.code}` : undefined,
+            duration: 6000,
+          });
+        }
+        if (res.status === 401 || error.code === "AUTHENTICATION_ERROR") {
+          setTimeout(() => {
+            window.location.href = "/login";
+          }, 1500);
+        }
+        throw new ApiError(
+          error.code,
+          friendlyMessage,
+          res.status,
+          error.details as Record<string, unknown> | undefined,
+        );
+      }
 
       if (!json.success || json.error) {
         const error = json.error!;

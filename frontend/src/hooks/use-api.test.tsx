@@ -129,3 +129,200 @@ describe("useApi().getWithMeta", () => {
     expect(data).toEqual({ id: "x" });
   });
 });
+
+// ── Gate E strict envelope boundary (live request path uses Zod schemas) ──────
+// These assert the ACTUAL network path in use-api.ts strict-parses each response
+// through `successEnvelopeSchema` / `errorEnvelopeSchema`, not a test-only
+// `.safeParse`. Any drift (wrong/missing version, unknown field, malformed
+// error, non-JSON body, 2xx-success:false, success on a failed status) fails
+// closed before any data or error code is trusted.
+describe("useApi() Gate E strict envelope boundary", () => {
+  const V = "gate-e.1";
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", vi.fn());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function mockJson(body: unknown, status = 200) {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse(body, status));
+  }
+
+  /** Content-Type application/json, but the body itself is unparseable. */
+  function badJsonResponse(status = 200): Response {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (h: string) => (h === "content-type" ? "application/json" : null) },
+      json: async () => {
+        throw new SyntaxError("Unexpected token");
+      },
+      text: async () => "{not json",
+    } as unknown as Response;
+  }
+
+  /** A non-JSON body (e.g. an HTML error page or plain text). */
+  function nonJsonResponse(status: number, text = "<html>error</html>"): Response {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (h: string) => (h === "content-type" ? "text/html" : null) },
+      json: async () => {
+        throw new SyntaxError("not json");
+      },
+      text: async () => text,
+    } as unknown as Response;
+  }
+
+  const get = (result: { current: ReturnType<typeof useApi> }) =>
+    result.current.get("/automation/overview", { contractVersion: V, silent: true });
+
+  it("accepts a valid strict success envelope", async () => {
+    mockJson({ success: true, data: { ok: 1 }, contract_version: V });
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    const data = await result.current.get<{ ok: number }>("/automation/overview", {
+      contractVersion: V,
+      silent: true,
+    });
+    expect(data.ok).toBe(1);
+  });
+
+  it("accepts a valid strict success envelope WITH collection meta", async () => {
+    mockJson({
+      success: true,
+      data: [{ id: "x" }],
+      contract_version: V,
+      meta: { page: 0, page_size: 20, total: 1, has_more: false },
+    });
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    const res = await result.current.getWithMeta<Array<{ id: string }>>("/automation/reminders", {
+      contractVersion: V,
+      silent: true,
+    });
+    expect(res.data).toEqual([{ id: "x" }]);
+    expect(res.meta?.total).toBe(1);
+  });
+
+  it("surfaces a valid strict ERROR envelope by its own code", async () => {
+    mockJson(
+      { success: false, error: { code: "AUTHORIZATION_ERROR", message: "no" }, contract_version: V },
+      403,
+    );
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
+  });
+
+  it("rejects a MISSING version on a success response", async () => {
+    mockJson({ success: true, data: { ok: 1 } });
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a WRONG version on a success response", async () => {
+    mockJson({ success: true, data: {}, contract_version: "gate-d.1" });
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a MISSING version on an error response", async () => {
+    mockJson({ success: false, error: { code: "AUTHORIZATION_ERROR", message: "no" } }, 403);
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a WRONG version on an error response", async () => {
+    mockJson(
+      { success: false, error: { code: "AUTHORIZATION_ERROR", message: "no" }, contract_version: "gate-d.1" },
+      403,
+    );
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects an UNKNOWN top-level field on a success envelope", async () => {
+    mockJson({ success: true, data: { ok: 1 }, contract_version: V, injected: "x" });
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects an UNKNOWN top-level field on an error envelope", async () => {
+    mockJson(
+      { success: false, error: { code: "X", message: "y" }, contract_version: V, injected: "x" },
+      400,
+    );
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects an UNKNOWN NESTED field inside the error object", async () => {
+    mockJson(
+      { success: false, error: { code: "X", message: "y", leaked_stack: "boom" }, contract_version: V },
+      400,
+    );
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a versioned error whose error object has no string code", async () => {
+    mockJson({ success: false, error: { message: "x" }, contract_version: V }, 400);
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a versioned error whose code is an empty string", async () => {
+    mockJson({ success: false, error: { code: "", message: "x" }, contract_version: V }, 400);
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a versioned error whose message is not a string", async () => {
+    mockJson({ success: false, error: { code: "X", message: 42 }, contract_version: V }, 400);
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects malformed JSON safely", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(badJsonResponse(200));
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("rejects a non-JSON Gate E error response WITHOUT surfacing its raw text", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      nonJsonResponse(500, "Internal Server Error: secret stack trace"),
+    );
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({
+      code: "MALFORMED_RESPONSE",
+      message: expect.not.stringContaining("secret stack trace"),
+    });
+  });
+
+  it("rejects a non-JSON Gate E 2xx (success) response", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(nonJsonResponse(200, "OK"));
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("treats a 2xx carrying success:false as an ERROR, never as success", async () => {
+    mockJson(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "x" }, contract_version: V },
+      200,
+    );
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("rejects a success:true envelope returned on a FAILED http status", async () => {
+    mockJson({ success: true, data: { ok: 1 }, contract_version: V }, 500);
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    await expect(get(result)).rejects.toMatchObject({ code: "MALFORMED_RESPONSE" });
+  });
+
+  it("leaves non-Gate-E callers unaffected (no version enforced)", async () => {
+    mockJson({ success: true, data: { ok: 2 } });
+    const { result } = renderHook(() => useApi(), { wrapper: Providers });
+    const data = await result.current.get<{ ok: number }>("/reports/dashboard", { silent: true });
+    expect(data.ok).toBe(2);
+  });
+});

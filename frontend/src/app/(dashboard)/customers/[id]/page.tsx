@@ -15,6 +15,7 @@ import { useInvoiceList, totalPagesFrom } from "@/hooks/use-invoices";
 import { useReceipts, useCustomerExposure } from "@/hooks/use-receipts";
 import { formatMoney, formatMoneySafe, normalizeCurrency } from "@/lib/currency";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
+import { CustomerSalesRepPanel } from "@/components/features/automation/customer-sales-rep-panel";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -183,6 +184,9 @@ export default function CustomerDetailPage() {
         <span>/</span>
         <span className="text-slate-800 font-medium">{customer.customer_name}</span>
       </div>
+
+      {/* Gate E — responsible sales representative + assignment history */}
+      <CustomerSalesRepPanel customerId={customerId} />
 
       {/* Customer Info + Credit Summary */}
       <div className="grid gap-6 lg:grid-cols-3">

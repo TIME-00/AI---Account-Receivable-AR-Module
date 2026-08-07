@@ -377,6 +377,12 @@ verify_jwt = false
 [functions.daily-overdue]
 verify_jwt = false
 
+# Gate E uses the existing in-function JWT boundary for user routes and a
+# separate disabled-by-default worker-secret boundary for scheduled polling.
+# No scheduler or worker secret is installed by Migration 034.
+[functions.automation]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

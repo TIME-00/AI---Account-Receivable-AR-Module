@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
+import { InvoiceReminderPanel } from "@/components/features/automation/invoice-reminder-panel";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useInvoice, usePostInvoice, useCancelInvoice } from "@/hooks/use-invoices";
@@ -176,6 +177,9 @@ export default function InvoiceDetailPage() {
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
         <span className="font-medium text-slate-700">{invoice.invoice_no}</span>
       </nav>
+
+      {/* Gate E — Invoice-only due reminder status */}
+      <InvoiceReminderPanel invoiceId={id} />
 
       {/* Header Card */}
       <div className="glass-card p-6">

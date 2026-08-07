@@ -55,6 +55,13 @@ import type { MonetaryCollectionSummary } from '../reports/monetary-contracts.ts
 
 export interface CreateReceiptOptions {
   importOrigin?: Record<string, unknown>;
+  automationCommandId?: string;
+  /**
+   * Gate E worker-only boundary. When an automation command is supplied, the
+   * service-role client invokes a database wrapper that completes creation,
+   * optional posting, and command linkage in one PostgreSQL transaction.
+   */
+  postAtomically?: boolean;
 }
 
 interface FxDecisionSummaryRow {
@@ -367,7 +374,24 @@ export class ReceiptService {
         p_override_reason: data.fx_override_reason ?? null,
         p_fx_reference_rate_id: data.fx_reference_rate_id ?? null,
       };
-      receiptId = await callRpc<string>(this.client, 'fx_create_governed_receipt_draft', rpcArgs);
+      if (options.postAtomically && !options.automationCommandId) {
+        throw new BusinessError(
+          'AUTOMATION_COMMAND_REQUIRED',
+          'Atomic receipt posting requires an automation command.',
+          409,
+        );
+      }
+      if (options.automationCommandId) {
+        rpcArgs.p_command_id = options.automationCommandId;
+        rpcArgs.p_post = options.postAtomically === true;
+      }
+      receiptId = await callRpc<string>(
+        this.client,
+        options.automationCommandId
+          ? 'automation_execute_receipt_command'
+          : 'fx_create_governed_receipt_draft',
+        rpcArgs,
+      );
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key')) {
         throw new BusinessError('DUPLICATE_RECEIPT', `Receipt number ${receiptNo} already exists. Please retry.`, 409);
