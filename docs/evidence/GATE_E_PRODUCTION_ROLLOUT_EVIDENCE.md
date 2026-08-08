@@ -509,11 +509,16 @@ Capability status after the name-only configuration check is:
 
 The operating mode remains `disabled`. Scheduler infrastructure is PASS, but
 Phase 0 remains incomplete pending a controlled OpenAI provider smoke through an
-authorized reviewed path, Google consent, Microsoft provider configuration and
-consent, and a fresh normal demo Finance login for authenticated Production
-UI/API smoke. OAuth initiation itself requires that normal authenticated session
-and a controlled tenant mailbox. `observe_only`, `draft_only`, and
+authorized reviewed path, controlled Gmail mailbox consent, Microsoft provider
+configuration and consent, and authenticated Production UI/API smoke. The human
+operator reported completing a normal Production Finance login. A read-only
+Playwright check at `2026-08-08T05:14:22Z` showed that the repository-configured
+Playwright context remains unauthenticated and is separate from that interactive
+browser session. Its auth-state contents were not read, copied, or modified, so
+no authenticated Overview response or mailbox mutation was attempted through
+automation. OAuth initiation now requires the controlled mailbox action in the
+already authenticated human browser. `observe_only`, `draft_only`, and
 `straight_through` were not started.
 
 **Gate E remains OPEN and PENDING ACTIVATION at the controlled provider-smoke,
-external OAuth, and authenticated-login checkpoints.**
+Gmail consent, Microsoft OAuth, and authenticated-smoke checkpoints.**
