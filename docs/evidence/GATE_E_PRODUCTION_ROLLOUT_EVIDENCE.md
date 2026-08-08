@@ -671,3 +671,60 @@ financial/business data was changed.
 Gate E remains OPEN, operating mode remains `disabled`, and the exact next human
 action is: Production -> Automation -> Mailboxes -> existing Gmail mailbox ->
 `Connect ingestion`.
+
+## Mailbox activation CORS and OAuth refresh remediation
+
+After Gmail ingestion consent completed successfully, the retained controlled
+mailbox was connected with the reviewed ingestion scope and Vault-backed token
+lifecycle. The first enable attempt stopped at the browser preflight: shared
+CORS advertised `POST, GET, OPTIONS, PUT, DELETE` but the supported mailbox-item
+update route uses `PATCH`. Production returned OPTIONS 204 and the browser sent
+no PATCH request. A second bounded sequencing defect was also confirmed before
+activation: `updateMailbox()` rejected stale access-token expiry metadata before
+it could invoke the already reviewed secure refresh lifecycle. This would have
+required unnecessary repeat consent after an ordinary access-token expiry even
+when a valid refresh token remained in Vault.
+
+Commit `cda4fe887bb5f2f1851a6cfc6dee47f4a34f1d2a`
+(`fix(gate-e): enable secure mailbox activation`) contains the combined four-file
+remediation. Shared CORS now advertises exactly `POST, GET, OPTIONS, PUT, PATCH,
+DELETE`; the origin and allowed-header policy is unchanged. Mailbox enablement
+now calls the existing `resolveOAuthAccessTokenForRuntime()` boundary before the
+authoritative enable update. A current renewable token avoids provider refresh.
+An expired or near-expiry token must refresh successfully, persist to Vault, and
+update safe expiry metadata before enablement. Missing or invalid Vault data,
+missing refresh authority, insufficient scope, or provider refresh rejection
+remain fail-closed and cannot enable the mailbox. Delivery remains independently
+disabled unless its separately consented capability is explicitly enabled.
+
+Claude Code independently reviewed the exact four-file remediation read-only and
+returned PASS with no blocking defects. Independently reproduced validation was:
+Gate E Automation 85/85, activation prerequisites 28/28, OpenAI 41/41,
+scheduler 26/26, combined focused 180/180, full recursive backend 431/431, all
+17 deployable Edge entrypoints type-checked, and Deno check/format/lint PASS.
+
+Only Automation was redeployed from the canonical backend source. Production
+Automation version 14 is ACTIVE with the reviewed platform JWT setting; bundle
+SHA-256 is
+`788c9cba804a2146cda1ded19ce2dbfc351c0ee3c5d9c7870e6c500201ace1e2`, and the
+deployment source was the clean tree at commit
+`cda4fe887bb5f2f1851a6cfc6dee47f4a34f1d2a`. A safe unauthenticated OPTIONS
+request to the mailbox-item route returned HTTP 204 and advertised `PATCH` in
+`Access-Control-Allow-Methods`. It performed no mailbox mutation.
+
+The read-only Production snapshot at `2026-08-08T16:49:15Z` records one Gmail
+mailbox, one connected Gmail mailbox, zero reconnect-required Gmail mailboxes,
+and zero enabled, ingestion-enabled, or delivery-enabled Gmail mailboxes.
+Settings remain absent, so the effective operating mode remains `disabled`.
+Sync runs, source messages, source attachments, classifications, extractions,
+commands, exceptions, allocation decisions, reminders, and reminder attempts
+all remain zero. No migration, scheduler, worker secret, provider configuration,
+OAuth credential, mailbox setting, or financial/business data was changed by
+this deployment and verification.
+
+Gate E remains OPEN. The next bounded implementation is the frontend atomic
+ingestion control: replace the separate generic Enable and Enable ingestion
+actions with one `Enable ingestion` PATCH containing `is_enabled=true` and
+`ingestion_enabled=true`; the matching disable action sets both false. Delivery
+must remain a separate capability. No real mailbox enable or synchronization was
+performed at this checkpoint.
