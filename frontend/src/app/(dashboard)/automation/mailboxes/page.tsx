@@ -79,9 +79,29 @@ function MailboxCard({
     );
   }
 
-  function toggle(field: "is_enabled" | "ingestion_enabled" | "delivery_enabled") {
+  function toggle(field: "delivery_enabled") {
     update.mutate(
       { id: mailbox.id, patch: { [field]: !mailbox[field] } },
+      {
+        onSuccess: () => toast.success("Mailbox updated."),
+        onError: (error) =>
+          toast.error(error instanceof ApiError ? error.message : "Update was rejected."),
+      },
+    );
+  }
+
+  // Ingestion activation is a single atomic mutation: the mailbox master switch
+  // (is_enabled) and the ingestion capability (ingestion_enabled) are always set
+  // together, so the mailbox is never left in a half-enabled intermediate state.
+  // Backend v14 resolves/refreshes the Vault-backed OAuth token as part of this
+  // one PATCH; the frontend never touches tokens. Delivery stays independent.
+  function toggleIngestion() {
+    const enabling = !mailbox.ingestion_enabled;
+    update.mutate(
+      {
+        id: mailbox.id,
+        patch: { is_enabled: enabling, ingestion_enabled: enabling },
+      },
       {
         onSuccess: () => toast.success("Mailbox updated."),
         onError: (error) =>
@@ -184,15 +204,7 @@ function MailboxCard({
               </button>
               <button
                 type="button"
-                onClick={() => toggle("is_enabled")}
-                disabled={update.isPending}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
-              >
-                {mailbox.is_enabled ? "Disable" : "Enable"}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggle("ingestion_enabled")}
+                onClick={toggleIngestion}
                 disabled={update.isPending}
                 className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
               >

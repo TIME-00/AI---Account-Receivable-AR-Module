@@ -286,6 +286,115 @@ describe("Mailboxes", () => {
     expect(screen.queryByText(/AR_ING|AR_MAILBOX/)).toBeNull();
     expect(screen.queryByText(/ya29|refresh/i)).toBeNull();
   });
+
+  // ── Atomic ingestion activation ────────────────────────────────────────────
+  // Backend v14 supports refresh-on-enable behind ONE mailbox PATCH. The
+  // frontend must therefore drive ingestion activation as a single atomic
+  // mutation that always sets is_enabled and ingestion_enabled together, never a
+  // separate generic mailbox master switch and never a half-enabled state.
+  function connectedMailbox(overrides: Record<string, unknown> = {}) {
+    return {
+      id: MB,
+      company_id: CO,
+      provider_type: "gmail",
+      mailbox_address: "ar@example.com",
+      default_bank_account_id: null,
+      connection_status: "connected",
+      ingestion_secret_configured: true,
+      delivery_secret_configured: false,
+      ingestion_token_expires_at: "2026-08-01T00:00:00Z",
+      delivery_token_expires_at: null,
+      cursor_kind: null,
+      cursor_present: false,
+      last_successful_sync_at: null,
+      last_failed_sync_at: null,
+      reconnect_required: false,
+      is_enabled: false,
+      ingestion_enabled: false,
+      delivery_enabled: false,
+      redacted_error_code: null,
+      created_at: "2026-07-31T00:00:00Z",
+      updated_at: "2026-07-31T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  function mountMailboxes(row: Record<string, unknown>) {
+    fakeApi = createFakeApi([
+      route("/automation/mailboxes", () => ({
+        data: [row],
+        meta: { page: 1, page_size: 50, total: 1, has_more: false },
+      })),
+    ]);
+    renderWithProviders(<MailboxesPage />);
+  }
+
+  it("connected+disabled mailbox shows a single 'Enable ingestion' control, not a generic Enable", async () => {
+    mountMailboxes(connectedMailbox());
+    // The one ingestion activation control.
+    expect(await screen.findByRole("button", { name: "Enable ingestion" })).toBeInTheDocument();
+    // The removed generic mailbox master switch must not exist (exact Enable/Disable).
+    expect(screen.queryByRole("button", { name: /^(Enable|Disable)$/ })).toBeNull();
+    // OAuth connect controls and the independent delivery control remain.
+    expect(screen.getByRole("button", { name: "Connect ingestion" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect delivery" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enable delivery" })).toBeInTheDocument();
+  });
+
+  it("enabling ingestion sends exactly one atomic PATCH { is_enabled, ingestion_enabled }", async () => {
+    mountMailboxes(connectedMailbox());
+    fakeApi.patch.mockResolvedValue(
+      connectedMailbox({ is_enabled: true, ingestion_enabled: true }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Enable ingestion" }));
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalledTimes(1));
+    const [path, body] = fakeApi.patch.mock.calls[0];
+    expect(path).toBe(`/automation/mailboxes/${MB}`);
+    // Exact atomic enable payload — both fields, nothing else (no delivery, no
+    // secret refs, no operating mode).
+    expect(body).toEqual({ is_enabled: true, ingestion_enabled: true });
+    expect(fakeApi.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("enabled ingestion shows 'Disable ingestion' and disabling sends one atomic PATCH of both false", async () => {
+    mountMailboxes(connectedMailbox({ is_enabled: true, ingestion_enabled: true }));
+    fakeApi.patch.mockResolvedValue(
+      connectedMailbox({ is_enabled: false, ingestion_enabled: false }),
+    );
+    const disable = await screen.findByRole("button", { name: "Disable ingestion" });
+    expect(screen.queryByRole("button", { name: /^(Enable|Disable)$/ })).toBeNull();
+    fireEvent.click(disable);
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalledTimes(1));
+    const [path, body] = fakeApi.patch.mock.calls[0];
+    expect(path).toBe(`/automation/mailboxes/${MB}`);
+    expect(body).toEqual({ is_enabled: false, ingestion_enabled: false });
+  });
+
+  it("prevents duplicate activation submissions while the ingestion PATCH is pending", async () => {
+    mountMailboxes(connectedMailbox());
+    // Never resolves: the mutation stays pending, so the control stays disabled.
+    fakeApi.patch.mockReturnValue(new Promise(() => {}));
+    const enable = await screen.findByRole("button", { name: "Enable ingestion" });
+    fireEvent.click(enable);
+    await waitFor(() => expect(enable).toBeDisabled());
+    // Further clicks on the disabled control must not queue more mutations.
+    fireEvent.click(enable);
+    fireEvent.click(enable);
+    expect(fakeApi.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps delivery activation independent — it never mutates the ingestion fields", async () => {
+    mountMailboxes(connectedMailbox({ delivery_secret_configured: true }));
+    fakeApi.patch.mockResolvedValue(
+      connectedMailbox({ delivery_secret_configured: true, delivery_enabled: true }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalledTimes(1));
+    const [, body] = fakeApi.patch.mock.calls[0];
+    expect(body).toEqual({ delivery_enabled: true });
+    expect(body).not.toHaveProperty("is_enabled");
+    expect(body).not.toHaveProperty("ingestion_enabled");
+  });
 });
 
 describe("Production PostgreSQL UUID identifiers render through page + hook paths", () => {

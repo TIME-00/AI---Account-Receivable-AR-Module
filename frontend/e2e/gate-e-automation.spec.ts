@@ -1118,9 +1118,22 @@ test.describe("Gate E automation (desktop + mobile)", () => {
     // Secret references / raw tokens are never rendered.
     await expect(page.getByText(/AR_ING|AR_MAILBOX/)).toHaveCount(0);
 
-    // Mailbox update (PATCH) — enable the connected Gmail mailbox.
-    await page.getByRole("button", { name: "Disable", exact: true }).first().click();
-    await expect.poll(() => rec.mailboxPatches.length).toBeGreaterThan(0);
+    // The generic mailbox master switch was removed: only the single atomic
+    // ingestion activation control remains (no exact "Enable"/"Disable" button).
+    await expect(page.getByRole("button", { name: "Disable", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Enable", exact: true })).toHaveCount(0);
+
+    // Mailbox update (PATCH) — the connected+enabled Gmail mailbox exposes a
+    // single "Disable ingestion" control that sends ONE atomic PATCH clearing
+    // both is_enabled and ingestion_enabled together (never two mutations, never
+    // a half-enabled intermediate state).
+    await page.getByRole("button", { name: "Disable ingestion" }).first().click();
+    await expect.poll(() => rec.mailboxPatches.length).toBe(1);
+    expect(rec.mailboxPatches[0].id).toBe(MB_GMAIL);
+    expect(rec.mailboxPatches[0].body).toEqual({
+      is_enabled: false,
+      ingestion_enabled: false,
+    });
 
     // OAuth start returns a non-allowlisted URL → the client refuses to navigate.
     await page.getByRole("button", { name: "Connect ingestion" }).first().click();
