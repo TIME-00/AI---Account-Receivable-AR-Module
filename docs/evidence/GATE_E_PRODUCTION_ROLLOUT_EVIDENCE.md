@@ -256,10 +256,10 @@ No frontend source changed in the activation commit. Authenticated protected-pag
 smoke remains pending because the previously authorized demo Finance session is
 expired; its auth-state file was not read, printed, copied, or modified.
 
-### Provider, worker, and scheduler status
+### Provider, worker, and scheduler status at the pre-scheduler checkpoint
 
-Production secret-name inspection found all activation-specific configuration
-absent:
+Production secret-name inspection at that checkpoint found all
+activation-specific configuration absent:
 
 - `OPENAI_API_KEY`: missing;
 - `OPENAI_DOCUMENT_MODEL`: missing; the deployed default remains
@@ -291,23 +291,20 @@ controlled provider smoke, worker/scheduler installation, and authenticated UI
 smoke are not yet available. `observe_only`, `draft_only`, and
 `straight_through` were not started.
 
-### Remaining prerequisites
+### Remaining prerequisites at that checkpoint
 
 1. Provision `OPENAI_API_KEY` through Supabase Edge secret management without
    exposing the value, then run synthetic invoice and receipt smoke tests.
 2. Provision provider-specific Google and Microsoft client configuration and
    complete human consent with only the documented least-privilege scopes.
-3. Independently review the new local Vault-backed `pg_cron`/`pg_net` scheduler
-   Migration 036 and rollback-only 036b smoke before applying the migration,
-   provisioning `AUTOMATION_WORKER_SECRET`, or installing the job.
-4. Re-authenticate the authorized demo Finance session locally through the
+3. Re-authenticate the authorized demo Finance session locally through the
    normal login flow and run the authenticated read-only Production UI/API
    smoke without exposing auth-state content.
-5. Configure only controlled synthetic mailbox, customer, representative, and
+4. Configure only controlled synthetic mailbox, customer, representative, and
    recipient data before progressing through `observe_only`, `draft_only`, and
    `straight_through` one phase at a time.
 
-Local validation remains independently accepted: OpenAI 41/41,
+Pre-scheduler local validation remained independently accepted: OpenAI 41/41,
 activation-prerequisites 21/21, Gate E 81/81, combined focused 143/143, complete
 backend 394/394, Deno format/lint PASS, and deployable Edge entrypoints 17/17.
 
@@ -315,10 +312,10 @@ backend 394/394, Deno format/lint PASS, and deployable Edge entrypoints 17/17.
 fail-closed in `disabled` mode. No Production financial/business DML occurred
 during this continuation.
 
-## Local secure-scheduler remediation — pending independent review
+## Local secure-scheduler remediation — independently reviewed
 
 On 2026-08-08 the missing repository-owned scheduler contract was implemented
-locally. The current unstaged/uncommitted scope adds:
+locally. The independently reviewed scheduler commit contains:
 
 - `database/036_gate_e_secure_scheduler.sql`;
 - rollback-only `database/036b_gate_e_secure_scheduler_smoke_tests.sql`;
@@ -337,8 +334,9 @@ Vault identity `AUTOMATION_WORKER_SECRET` with the fixed description
 Automation worker request with exact `{}` and the reviewed
 `X-Automation-Worker-Secret` header.
 
-The same single random value must later be placed in the Automation Edge secret
-and Vault; no value has been generated or provisioned in this local phase.
+The same single random value must be placed in the Automation Edge secret and
+Vault. No value was generated or provisioned during the local implementation
+phase.
 Disposable Supabase validation confirmed that pg_net's extension-owned SQL
 ACLs cannot be safely revoked by the normal migration role. The implementation
 therefore queues only a three-minute HMAC authorization token with a one-time
@@ -348,13 +346,11 @@ reviewed Data API schema list excludes `net`, `cron`, and `gate_e_internal`; no
 public RPC exposes their metadata. The worker lease prevents overlapping cycles
 while existing database idempotency remains authoritative.
 
-This remediation is **pending one Claude Code independent read-only review**.
-Migration 036 is not remotely applied; 036b has not run in Production; the cron
-job is not installed; `AUTOMATION_WORKER_SECRET`, OpenAI, Gmail, and Microsoft
-credentials remain missing; the operating mode remains `disabled`; and Gate E
-remains OPEN/PENDING ACTIVATION. No new Production mutation, deployment,
-provider call, OAuth consent, mailbox connection, email, scheduler execution,
-or financial/business DML occurred during this local work.
+Claude Code independently reviewed this remediation and returned PASS with no
+blocking defect. At the end of that local review Migration 036 was not remotely
+applied, the cron job was not installed, and no credential had been
+provisioned. The subsequent authorized Production continuation is recorded
+below.
 
 Local scheduler-remediation validation is complete: scheduler-focused tests
 26/26, activation-prerequisite tests 21/21, OpenAI document-provider tests
@@ -364,3 +360,134 @@ type-checked. The exact changed Gate E scope passes Deno format and lint checks;
 the disposable PostgreSQL 17.6/Supabase chain applied forward migrations
 001-036, and rollback-only 034b, 035b, and 036b all passed with no scheduler,
 Vault-secret, queue, lease, nonce, or financial/business fixture residue.
+
+## Production secure-scheduler continuation
+
+The independently reviewed scheduler implementation was committed and pushed:
+
+- commit: `5aa8aae443ce5b2a0f0e7e5e195db05b9eca7591`;
+- parent: `d263f916168ad6c4b23a2a19a6260ef49eee981d`;
+- subject: `feat(gate-e): add secure automation scheduler`;
+- scope: exactly nine reviewed files, comprising six modifications and three
+  additions; and
+- push: `HEAD == origin/main`, ahead/behind `0/0` immediately after push.
+
+### Migration 036 and database verification
+
+- reviewed source: `database/036_gate_e_secure_scheduler.sql`;
+- reviewed SHA-256:
+  `DA62BDDFED318A8736CD0BADE2274DC3EE4DFA2517E17CD843B9983AF5ABF468`;
+- preflight: the five existing remote ledger versions matched comment-only
+  local placeholders and only
+  `20260808030000_gate_e_secure_scheduler.sql` was pending;
+- application: PASS, exactly once;
+- remote ledger version: `20260808030000`;
+- remote ledger name: `gate_e_secure_scheduler`;
+- rollback-only `036b` was not executed in Production;
+- the internal schema contains the two reviewed lease/nonce tables;
+- all seven scheduler functions are owned by `postgres`, are security
+  definers, and have fixed empty `search_path`;
+- only the three lease/nonce functions are executable by `service_role`;
+  scheduler assertion/invocation/install/removal remain postgres-only;
+- `PUBLIC`, `anon`, and `authenticated` cannot execute any of the seven
+  functions or access `gate_e_internal`;
+- Gate E RLS and policy coverage remains 16/16; and
+- migration application created no cron job, Vault credential, pg_net request,
+  settings row, mailbox row, or financial/business row.
+
+The hosted PostgREST Management configuration is exactly
+`public,graphql_public`; `net`, `cron`, and `gate_e_internal` are not exposed by
+the Data API. No public/browser RPC exposes pg_net, cron, nonce, lease, or Vault
+material.
+
+### Automation and scheduler activation
+
+- Automation Edge version: 3;
+- status: ACTIVE;
+- platform JWT verification: disabled, with reviewed in-function user and
+  dedicated worker authentication active;
+- deployed bundle SHA-256:
+  `1114b87288fa7c8b5c721be479d142624f8b3b4583a6d6b2002306cf621fcc6b`;
+- deployment source commit:
+  `5aa8aae443ce5b2a0f0e7e5e195db05b9eca7591`;
+- unauthenticated worker before provisioning: sanitized HTTP 503
+  `AUTOMATION_WORKER_NOT_CONFIGURED`;
+- unauthenticated worker after provisioning: sanitized HTTP 401
+  `AUTHENTICATION_ERROR`; and
+- unauthenticated Overview with a syntactically valid synthetic company header:
+  sanitized HTTP 401 `AUTHENTICATION_ERROR`.
+
+One 48-byte/384-bit random base64url root was generated without printing it.
+The same value was provisioned as the Edge `AUTOMATION_WORKER_SECRET` and as
+exactly one Vault record named `AUTOMATION_WORKER_SECRET` with description
+`Gate E Automation worker scheduler secret`. Presence and identity were
+verified by name/count only. Locked temporary secret files were zeroed and
+removed; no value entered Git, documentation, application tables, cron
+metadata, pg_net metadata, logs, or user-facing responses.
+
+The Edge/Vault same-secret challenge returned HTTP 200 with `gate-e.1` and a
+successful object response. Direct controlled security smokes returned:
+
+- valid signed invocation: PASS;
+- replay of the same nonce: sanitized HTTP 401, PASS;
+- tampered signature: sanitized HTTP 401, PASS;
+- token older than three minutes: sanitized HTTP 401, PASS; and
+- token more than 30 seconds in the future: sanitized HTTP 401, PASS.
+
+Lease smoke proved first acquisition, overlap rejection, release/reacquisition,
+stale-lease recovery, and a final released state. No business record was used.
+
+The postgres-only installer was run twice to verify idempotency. Final state:
+
+- active Gate E jobs: exactly one;
+- job name: `gate-e-automation-worker`;
+- cadence: `*/10 * * * *`;
+- command: only `SELECT public.automation_scheduler_invoke();`;
+- root/signed-token material in command: none; and
+- unrelated cron jobs before/after: one/one.
+
+The first real cron tick started at `2026-08-08 03:20:00.127503+00`, completed
+with cron status `succeeded`, and received HTTP 200, `gate-e.1`, success true,
+with no timeout or transport error.
+
+### Frontend and remaining activation prerequisites
+
+The backend-only push triggered one Vercel Production deployment; no manual
+duplicate was created:
+
+- GitHub deployment ID: `5804901600`;
+- deployment URL:
+  `https://account-receivable-module-ks1nmpe1p-time-00s-projects.vercel.app`;
+- status: success, Production; and
+- canonical frontend health: HTTP 200.
+
+Current secret-name inventory remains:
+
+- `OPENAI_API_KEY`: missing;
+- `OPENAI_DOCUMENT_MODEL`: missing, so the reviewed default remains
+  `gpt-5.6-luna` once configured;
+- Gmail client ID/secret/redirect: missing;
+- Microsoft client ID/secret/redirect and optional tenant: missing; and
+- `AUTOMATION_WORKER_SECRET`: present in Edge and Vault.
+
+Production still has zero settings, mailboxes, sync runs, source messages,
+attachments, classifications, extractions, commands, allocation decisions,
+reminders, reminder attempts, and Gate E audit events. Scheduler validation left
+only one released lease row and one current claimed nonce. Therefore no Invoice,
+Receipt, allocation, FX, journal, customer, reminder-email, or other
+financial/business DML occurred.
+
+Actual readiness remains:
+
+- `ingestion_ready`: false;
+- `delivery_ready`: false; and
+- `document_intelligence_ready`: false.
+
+The operating mode remains `disabled`. Scheduler infrastructure is PASS, but
+Phase 0 remains incomplete pending `OPENAI_API_KEY`, Google/Microsoft provider
+configuration and human consent, controlled provider smokes, and a fresh normal
+demo Finance login for authenticated Production UI/API smoke. `observe_only`,
+`draft_only`, and `straight_through` were not started.
+
+**Gate E remains OPEN and PENDING ACTIVATION at an external human credential,
+OAuth, and login checkpoint.**
