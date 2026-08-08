@@ -2,13 +2,13 @@
 
 ## Status and safety posture
 
-Migration 034 and the reviewed Gate E application are deployed to Production,
-but Gate E remains open, disabled, and unactivated. This document also describes
-the local Migration 035/OAuth/OpenAI activation-prerequisite remediation,
-which is pending independent review and has not been committed, pushed,
-migrated, or deployed. No mailbox has been connected, OAuth consent completed,
-document-intelligence provider activated, email sent, scheduler activated, or
-Production automation mode advanced.
+Migrations 034 and 035 plus the reviewed Gate E Automation v2 application are
+deployed to Production, but Gate E remains open, disabled, and unactivated. This
+document also describes local Migration 036 and its scheduler/worker
+compatibility change, which are pending independent review and have not been
+committed, pushed, migrated, or deployed. No mailbox has been connected, OAuth
+consent completed, document-intelligence provider activated, email sent,
+scheduler installed, or Production automation mode advanced.
 
 Every company starts with no `automation_settings` row, which the API interprets
 as `disabled` with every kill switch off. Inserted settings also default to
@@ -184,17 +184,68 @@ Migration 035 installs no settings, mailbox, provider credential, cron job, or
 financial/business DML. `035b` is rollback-only local smoke coverage.
 
 The Edge Function exposes a bounded `POST /worker/run` integration point for a
-scheduler. It is protected by a dedicated constant-time-checked worker
-secret, does not accept tenant authority in the request, and derives each
-company and acting Finance Manager/AR Supervisor from `automation_settings`.
-The cycle bounds companies, mailboxes, provider pages, attachments, reminders,
-and retries. With no worker secret or no non-disabled tenant settings it fails
-closed or performs no work. The selected infrastructure is the project's
-established Supabase `pg_cron` + `pg_net` pattern, with the dedicated
-`AUTOMATION_WORKER_SECRET` stored in Vault and injected only as the
-`X-Automation-Worker-Secret` header. The secret and job must be provisioned
-together in the later activation phase. Neither Migration 035 nor this local
-remediation installs the job or secret.
+scheduler. It is protected by a dedicated constant-time-checked worker secret,
+does not accept tenant authority in the request, and derives each company and
+acting Finance Manager/AR Supervisor from `automation_settings`. The cycle
+bounds companies to 100, enabled ingestion mailboxes to 100, attachment work to
+200, reminder delivery work to 200, provider pages/messages, and retries. With
+no worker secret or no non-disabled tenant settings it fails closed or performs
+no work.
+
+Forward-only Migration `database/036_gate_e_secure_scheduler.sql` implements
+the repository-owned scheduler infrastructure with Supabase `pg_cron`,
+`pg_net`, and Vault. It does **not** provision a secret, install a recurring
+job, invoke the worker, or mutate financial/business data when applied. A
+postgres-only installer creates or replaces one stable
+`gate-e-automation-worker` job on `*/10 * * * *`; a postgres-only remover
+unschedules only that name. The job command contains only
+`SELECT public.automation_scheduler_invoke();`, never a credential.
+
+The invocation function has no arguments and fixes the trusted HTTPS target to
+the deployed `POST /functions/v1/automation/worker/run` route, the JSON body to
+`{}`, the timeout to 120 seconds, and the header name to
+`X-Automation-Worker-Secret`. It resolves exactly one bounded base64url-style
+secret named `AUTOMATION_WORKER_SECRET` with description
+`Gate E Automation worker scheduler secret`. A missing, duplicate, blank,
+malformed, or incorrectly described secret fails closed before `pg_net` is
+called. The same random value must later be provisioned into the Automation
+Edge environment and this Vault record; two independent secrets are invalid.
+
+`pg_net` necessarily places request headers briefly in its unlogged internal
+request queue. Supabase owns that extension surface and its default SQL ACLs
+cannot be safely rewritten by the normal migration role. Migration 036
+therefore never queues the reusable worker secret. It derives a three-minute
+HMAC-SHA-256 authorization token containing an issuance time and random UUID
+nonce, places only that token in `X-Automation-Worker-Secret`, clears local
+plaintext variables, and leaves the root value in Vault. The Edge boundary
+validates the signature/time window with its copy of the same root secret and
+claims the nonce once through a service-role-only RPC before any work. Replay,
+expiry, future timestamps, malformed tokens, and signature changes fail closed.
+
+The existing controlled server-side operator path may still present the exact
+dedicated Edge secret directly; the database scheduler never does so. A user
+JWT cannot substitute for either authentication form.
+
+The reviewed Data API exposes only `public` and `graphql_public`, never `net`,
+`cron`, or the API-inaccessible `gate_e_internal` schema. No public RPC returns
+pg_net/cron metadata, the response table contains no request header, and no raw
+worker response is copied into a public/application table. Production preflight
+must verify the exposed-schema list remains exact before scheduler installation.
+
+The worker also acquires a service-role-only database lease before processing.
+The lease lives in an API-inaccessible internal schema, expires after eight
+minutes, and is released with only a bounded completed/failed outcome. A
+concurrent call returns the existing zero-work response shape. The ten-minute
+cadence is longer than the lease and hosted Edge maximum request duration,
+while remaining sufficient for academic/demo mailbox polling, due reminders,
+and retries. Item-level idempotency and database-authoritative financial
+commands remain the final duplicate-effect boundary.
+
+`036b_gate_e_secure_scheduler_smoke_tests.sql` is rollback-only and must never
+run in Production. It proves catalog/grant contracts, fail-closed missing-secret
+behavior, lease exclusion, idempotent installation, scoped removal, and the
+exact queued pg_net request. Because the entire smoke transaction rolls back,
+the synthetic cron and HTTP-queue rows cannot be executed or leave residue.
 
 ## Provider setup
 
@@ -454,13 +505,23 @@ personal data. Evaluation and delivery have independent kill switches.
    adapter, then provision `OPENAI_API_KEY` through Supabase Edge secrets only.
 4. Provision mailbox provider client IDs/secrets and the exact provider-specific
    callback URIs, then perform human consent with least-privilege scopes.
-5. Provision a dedicated `AUTOMATION_WORKER_SECRET` and its Vault-backed
-   `pg_cron`/`pg_net` job together.
-6. Keep mode disabled; validate read APIs and authenticated Production UI.
-7. Configure one synthetic mailbox and observe-only mode in a separately
+5. Independently review Migration 036 and its rollback-only 036b smoke, then
+   apply only 036. Generate one 48-byte random base64url secret in an approved
+   secret manager without terminal output; place that same value in the
+   Automation Edge secret `AUTOMATION_WORKER_SECRET` and the Vault record named
+   `AUTOMATION_WORKER_SECRET` with description
+   `Gate E Automation worker scheduler secret`.
+6. As postgres, call `public.automation_scheduler_install()` only after both
+   secure stores hold the same value; verify exactly one active named job and
+   confirm the Production Data API still excludes `net`, `cron`, and
+   `gate_e_internal`. Use
+   `public.automation_scheduler_remove()` to disable scheduling without deleting
+   the Vault secret or any business/audit data.
+7. Keep mode disabled; validate read APIs and authenticated Production UI.
+8. Configure one synthetic mailbox and observe-only mode in a separately
    authorized environment.
-8. Validate cursor recovery, deduplication, exceptions, and zero financial DML.
-9. Separately authorize draft-only, reminder evaluation, delivery, and
+9. Validate cursor recovery, deduplication, exceptions, and zero financial DML.
+10. Separately authorize draft-only, reminder evaluation, delivery, and
    straight-through activation. No activation is part of this implementation.
 
 ## Local validation
@@ -471,13 +532,14 @@ From `backend/supabase/functions`:
 deno test --node-modules-dir=auto --allow-read --allow-env gate_e_automation_contract_test.ts
 deno test --node-modules-dir=auto --allow-read --allow-env gate_e_activation_prerequisites_test.ts
 deno test --node-modules-dir=auto --allow-read --allow-env gate_e_openai_document_test.ts
-deno check automation/index.ts gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts
-deno lint automation gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts
-deno fmt --check automation gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts
+deno test --node-modules-dir=auto --allow-read --allow-env gate_e_scheduler_contract_test.ts
+deno check automation/index.ts gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts gate_e_scheduler_contract_test.ts
+deno lint automation gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts gate_e_scheduler_contract_test.ts
+deno fmt --check automation gate_e_automation_contract_test.ts gate_e_activation_prerequisites_test.ts gate_e_openai_document_test.ts gate_e_scheduler_contract_test.ts
 ```
 
 The same checks should be followed by every backend test file and strict checks
 for all deployable Edge Function entry points. Local database verification
-installs through Migration 035 in repository order, executes both rollback-only
-smokes with `ON_ERROR_STOP=1`, and proves zero fixture residue after their final
-`ROLLBACK`.
+installs through Migration 036 in repository order, executes the 034b, 035b,
+and 036b rollback-only smokes with `ON_ERROR_STOP=1`, and proves zero fixture
+residue after their final `ROLLBACK`.

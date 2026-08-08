@@ -297,9 +297,9 @@ smoke are not yet available. `observe_only`, `draft_only`, and
    exposing the value, then run synthetic invoice and receipt smoke tests.
 2. Provision provider-specific Google and Microsoft client configuration and
    complete human consent with only the documented least-privilege scopes.
-3. Add and independently review the persistent Vault-backed `pg_cron`/`pg_net`
-   scheduler installation before provisioning `AUTOMATION_WORKER_SECRET` and the
-   job together.
+3. Independently review the new local Vault-backed `pg_cron`/`pg_net` scheduler
+   Migration 036 and rollback-only 036b smoke before applying the migration,
+   provisioning `AUTOMATION_WORKER_SECRET`, or installing the job.
 4. Re-authenticate the authorized demo Finance session locally through the
    normal login flow and run the authenticated read-only Production UI/API
    smoke without exposing auth-state content.
@@ -314,3 +314,53 @@ backend 394/394, Deno format/lint PASS, and deployable Edge entrypoints 17/17.
 **Gate E remains OPEN and PENDING ACTIVATION.** Production remains deployed and
 fail-closed in `disabled` mode. No Production financial/business DML occurred
 during this continuation.
+
+## Local secure-scheduler remediation — pending independent review
+
+On 2026-08-08 the missing repository-owned scheduler contract was implemented
+locally. The current unstaged/uncommitted scope adds:
+
+- `database/036_gate_e_secure_scheduler.sql`;
+- rollback-only `database/036b_gate_e_secure_scheduler_smoke_tests.sql`;
+- `backend/supabase/functions/gate_e_scheduler_contract_test.ts`;
+- the minimum Automation service integration for an eight-minute
+  service-role-only worker lease; and
+- corresponding architecture/API/evidence documentation.
+
+Migration 036 requires Supabase `pg_cron`, `pg_net`, and Vault, but applying it
+does not provision a secret, install a job, invoke the worker, or mutate
+financial/business data. Later postgres-only installation creates one stable
+`gate-e-automation-worker` job every ten minutes. Its command contains only a
+call to a no-argument invocation function. That function resolves the fixed
+Vault identity `AUTOMATION_WORKER_SECRET` with the fixed description
+`Gate E Automation worker scheduler secret`, then queues the fixed HTTPS
+Automation worker request with exact `{}` and the reviewed
+`X-Automation-Worker-Secret` header.
+
+The same single random value must later be placed in the Automation Edge secret
+and Vault; no value has been generated or provisioned in this local phase.
+Disposable Supabase validation confirmed that pg_net's extension-owned SQL
+ACLs cannot be safely revoked by the normal migration role. The implementation
+therefore queues only a three-minute HMAC authorization token with a one-time
+UUID nonce—not the reusable worker secret. Edge validates the signature/time
+window and claims the nonce through a service-role-only RPC before work. The
+reviewed Data API schema list excludes `net`, `cron`, and `gate_e_internal`; no
+public RPC exposes their metadata. The worker lease prevents overlapping cycles
+while existing database idempotency remains authoritative.
+
+This remediation is **pending one Claude Code independent read-only review**.
+Migration 036 is not remotely applied; 036b has not run in Production; the cron
+job is not installed; `AUTOMATION_WORKER_SECRET`, OpenAI, Gmail, and Microsoft
+credentials remain missing; the operating mode remains `disabled`; and Gate E
+remains OPEN/PENDING ACTIVATION. No new Production mutation, deployment,
+provider call, OAuth consent, mailbox connection, email, scheduler execution,
+or financial/business DML occurred during this local work.
+
+Local scheduler-remediation validation is complete: scheduler-focused tests
+26/26, activation-prerequisite tests 21/21, OpenAI document-provider tests
+41/41, existing Gate E tests 81/81, combined focused tests 169/169, and the
+complete backend suite 420/420 passed. All 17 deployable Edge entrypoints
+type-checked. The exact changed Gate E scope passes Deno format and lint checks;
+the disposable PostgreSQL 17.6/Supabase chain applied forward migrations
+001-036, and rollback-only 034b, 035b, and 036b all passed with no scheduler,
+Vault-secret, queue, lease, nonce, or financial/business fixture residue.

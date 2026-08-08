@@ -274,7 +274,7 @@ function match(pathname: string): { name: string; params: Params } {
 
 export interface AutomationHandlerDependencies {
   authenticate(req: Request, companyId: string): Promise<AuthContext>;
-  authenticateWorker?(req: Request): void;
+  authenticateWorker?(req: Request): void | Promise<void>;
   createService(): AutomationService;
 }
 
@@ -311,7 +311,7 @@ export async function handleAutomationRequest(
           },
         }, 405);
       }
-      (dependencies.authenticateWorker ??
+      await (dependencies.authenticateWorker ??
         (() => {
           throw new Error("Automation worker authentication is unavailable.");
         }))(req);

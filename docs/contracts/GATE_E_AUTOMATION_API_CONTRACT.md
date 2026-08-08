@@ -84,11 +84,62 @@ descending). Empty collections return `data: []`, `total: 0`.
 | `/reminders` | GET | AR Supervisor, Finance Manager, Auditor | pagination; exact `status`; optional exact `invoice_id` | tenant- and Invoice-bound reminders |
 | `/reminder-attempts` | GET | AR Supervisor, Finance Manager, Auditor | pagination; exact `status`/`provider_type`; optional exact `reminder_id` | bounded attempts for one authorized reminder or the tenant list |
 | `/audit` | GET | AR Supervisor, Finance Manager, Auditor | pagination; optional bounded `event_type`, `entity_type`, UUID `entity_id`, and `actor_type=user|system|provider` | immutable, entity-scoped, allowlisted audit timeline |
-| `/worker/run` | POST | dedicated `X-Automation-Worker-Secret` only | no tenant/body authority | one bounded scheduled cycle governed by each tenant's actor and kill switches |
+| `/worker/run` | POST | dedicated `X-Automation-Worker-Secret` only | scheduler sends exact `{}`; no tenant/body authority is consumed | one bounded scheduled cycle governed by each tenant's actor, lease, and kill switches |
 
 No route accepts raw OAuth tokens, access/refresh tokens, provider authorization
 headers, client-computed financial totals, SQL, tenant inference, or AI-selected
 customer IDs.
+
+## Worker scheduler contract
+
+The repository-owned scheduler boundary is installed by unapplied local
+Migration 036 and does not change `gate-e.1` user DTOs. Migration application
+alone does not create a cron job or Vault credential. Later activation requires
+one operator-generated 48-byte random base64url value to be stored under the
+same `AUTOMATION_WORKER_SECRET` identity in both secure locations:
+
+- Automation Edge secret name: `AUTOMATION_WORKER_SECRET`;
+- Vault name: `AUTOMATION_WORKER_SECRET`;
+- Vault description: `Gate E Automation worker scheduler secret`.
+
+The postgres-only `automation_scheduler_install()` operation fails unless the
+single Vault value exists and is 43–128 base64url characters. It serializes
+installation, removes only prior jobs named `gate-e-automation-worker`, and
+creates exactly one active `*/10 * * * *` job whose command contains no secret.
+`automation_scheduler_remove()` unschedules only that stable job name and does
+not delete the Vault record or business data. Neither operation is executable
+by `PUBLIC`, `anon`, `authenticated`, or `service_role`.
+
+Each tick calls the no-argument postgres-only
+`automation_scheduler_invoke()`. Its target, method, headers, body, and timeout
+are fixed server-side: HTTPS Automation worker URL, `POST`, JSON content type,
+`X-Automation-Worker-Secret`, `{}`, and 120 seconds. It accepts no caller URL,
+header, secret name, tenant, company, or payload. Missing/ambiguous/blank/
+malformed Vault material fails before a network request.
+
+The pg_net request queue never contains the reusable Vault/Edge root secret.
+The header carries `v1.<issued_epoch>.<uuid_v4_nonce>.<hmac_sha256_hex>`, where
+the HMAC message is the fixed Gate E worker context plus issuance time and
+nonce. Tokens older than three minutes, more than 30 seconds in the future,
+malformed/tampered signatures, and reused nonces are rejected before work. The
+nonce is claimed through a service-role-only RPC in an API-inaccessible schema.
+The reviewed Supabase Data API exposes only `public` and `graphql_public`, not
+`net`, `cron`, or `gate_e_internal`; no public function returns scheduler,
+request-queue, root-secret, or raw-response data.
+
+For compatibility with the already-reviewed worker boundary, a controlled
+server-side operator invocation may authenticate with the exact dedicated Edge
+secret. The database scheduler never uses that form: it always sends the
+short-lived signed token above. Neither form is a user JWT or browser contract.
+
+The Edge worker uses service-role-only `automation_worker_nonce_claim(uuid,
+timestamptz)`, `automation_worker_lease_acquire(uuid)`, and
+`automation_worker_lease_release(uuid,boolean)` RPCs. One eight-minute lease
+exists in an API-inaccessible internal schema. An overlapping call performs no
+work and returns the normal bounded zero-count worker data; stale leases expire.
+The request still derives all eligible tenants and actors from stored settings.
+It accepts no company parameter and the worker secret is never returned in a
+success/error envelope, DTO, audit event, or log.
 
 System Admin is configuration-only. It may read/update settings within the
 limits above, read/create/update mailbox configuration, start/disconnect OAuth,

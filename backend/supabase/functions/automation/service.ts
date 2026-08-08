@@ -271,6 +271,20 @@ function minorUnitsDecimal(value: bigint): string {
   }`;
 }
 
+function emptyScheduledCycleResult(): Row {
+  return {
+    companies_considered: 0,
+    mailboxes_synced: 0,
+    attachments_processed: 0,
+    commands_processed: 0,
+    allocations_completed: 0,
+    reminders_evaluated: 0,
+    reminders_delivered: 0,
+    attachment_content_purged: 0,
+    failures: 0,
+  };
+}
+
 export function exactAutomationDecimalNumber(
   value: string,
   scale: number,
@@ -749,6 +763,38 @@ export class AutomationService {
   }
 
   async runScheduledCycle(): Promise<Row> {
+    const leaseToken = crypto.randomUUID();
+    const acquired = await callRpc<boolean>(
+      this.client,
+      "automation_worker_lease_acquire",
+      { p_lease_token: leaseToken },
+    );
+    if (!acquired) return emptyScheduledCycleResult();
+
+    let cycleResult: Row | undefined;
+    let cycleFailed = false;
+    let cycleFailure: unknown;
+    try {
+      cycleResult = await this.runScheduledCycleWithLease();
+    } catch (error) {
+      cycleFailed = true;
+      cycleFailure = error;
+    }
+
+    try {
+      await callRpc<void>(this.client, "automation_worker_lease_release", {
+        p_lease_token: leaseToken,
+        p_succeeded: !cycleFailed,
+      });
+    } catch (releaseError) {
+      if (!cycleFailed) throw releaseError;
+    }
+
+    if (cycleFailed) throw cycleFailure;
+    return cycleResult as Row;
+  }
+
+  private async runScheduledCycleWithLease(): Promise<Row> {
     const retention = await this.purgeExpiredAttachmentContent();
     const { data: settingRows, error: settingsError } = await this.client
       .from("automation_settings").select("*")
