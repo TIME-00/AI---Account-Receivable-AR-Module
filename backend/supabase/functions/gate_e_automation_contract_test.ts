@@ -1645,6 +1645,68 @@ Deno.test("Automation handler rejects unauthenticated requests with sanitized co
   assert(!JSON.stringify(result).includes("token"));
 });
 
+Deno.test("Automation mailbox PATCH preflight advertises only the shared supported methods", async () => {
+  let authCalls = 0;
+  let serviceCalls = 0;
+  const dependencies = {
+    authenticate: () => {
+      authCalls += 1;
+      return Promise.resolve(auth);
+    },
+    createService: () => {
+      serviceCalls += 1;
+      return {} as AutomationService;
+    },
+  };
+  const url = `https://example.test/automation/mailboxes/${mailboxId}`;
+  const preflight = await handleAutomationRequest(
+    new Request(url, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://account-receivable-module.vercel.app",
+        "Access-Control-Request-Method": "PATCH",
+        "Access-Control-Request-Headers":
+          "authorization, apikey, content-type, x-company-id",
+      },
+    }),
+    dependencies,
+  );
+  assertEquals(preflight.status, 204);
+  assertEquals(
+    preflight.headers.get("Access-Control-Allow-Methods")?.split(",").map(
+      (method) => method.trim(),
+    ),
+    ["POST", "GET", "OPTIONS", "PUT", "PATCH", "DELETE"],
+  );
+  assertEquals(preflight.headers.get("Access-Control-Allow-Origin"), "*");
+  assertEquals(
+    preflight.headers.get("Access-Control-Allow-Headers"),
+    "authorization, x-client-info, apikey, content-type, x-company-id",
+  );
+  assertEquals(authCalls, 0);
+  assertEquals(serviceCalls, 0);
+
+  const unsupported = await handleAutomationRequest(
+    new Request(url, {
+      method: "HEAD",
+      headers: { "X-Company-Id": auth.companyId },
+    }),
+    dependencies,
+  );
+  assertEquals(unsupported.status, 405);
+  const payload = await unsupported.json();
+  assertEquals(payload, {
+    success: false,
+    contract_version: "gate-e.1",
+    error: {
+      code: "METHOD_NOT_ALLOWED",
+      message: "HTTP method is not supported for this automation route.",
+    },
+  });
+  assertEquals(authCalls, 1);
+  assertEquals(serviceCalls, 1);
+});
+
 Deno.test("Automation handler exposes frozen overview envelope", async () => {
   const response = await handleAutomationRequest(
     new Request("https://example.test/automation/overview", {

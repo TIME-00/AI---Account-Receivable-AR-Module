@@ -1893,8 +1893,7 @@ export class AutomationService {
       (next.is_enabled === true || next.ingestion_enabled === true) &&
       (next.connection_status !== "connected" ||
         next.reconnect_required === true ||
-        !next.ingestion_secret_ref ||
-        !tokenExpiryIsCurrent(next.ingestion_token_expires_at, this.now()))
+        !next.ingestion_secret_ref)
     ) {
       throw new BusinessError(
         "MAILBOX_NOT_READY",
@@ -1906,8 +1905,7 @@ export class AutomationService {
       next.delivery_enabled === true &&
       (next.connection_status !== "connected" ||
         next.reconnect_required === true ||
-        !next.delivery_secret_ref ||
-        !tokenExpiryIsCurrent(next.delivery_token_expires_at, this.now()))
+        !next.delivery_secret_ref)
     ) {
       throw new BusinessError(
         "MAILBOX_NOT_READY",
@@ -1921,19 +1919,7 @@ export class AutomationService {
         : next.delivery_enabled === true;
       if (!enabled) continue;
       try {
-        const token = await this.oauthSecretStore.resolveTokenSet(
-          this.oauthSecretContext(next, capability),
-        );
-        if (
-          !this.oauthTokenSupportsCapability(
-            token,
-            next.provider_type as MailboxProviderType,
-            capability,
-            this.now(),
-          )
-        ) {
-          throw new Error("expired");
-        }
+        await this.resolveOAuthAccessTokenForRuntime(next, capability);
       } catch {
         throw new BusinessError(
           "MAILBOX_NOT_READY",

@@ -1,8 +1,10 @@
 import { BusinessError } from "./_shared/errors.ts";
+import type { AuthContext } from "./_shared/auth.ts";
 import {
   completeOAuthCallback,
   FixtureOAuthSecretWriter,
   type OAuthSecretContext,
+  type OAuthSecretStore,
   type OAuthTokenSet,
   parseStoredOAuthTokenSet,
   refreshOAuthTokens,
@@ -183,6 +185,100 @@ class RuntimeMailboxDatabase {
     };
     return query;
   }
+}
+
+class MailboxActivationDatabase {
+  readonly updates: Record<string, unknown>[] = [];
+  readonly mailbox: Record<string, unknown>;
+
+  constructor(mailbox: Record<string, unknown>) {
+    this.mailbox = structuredClone(mailbox);
+  }
+
+  from(table: string) {
+    assertEquals(table, "automation_mailboxes");
+    let operation: "select" | "update" = "select";
+    let patch: Record<string, unknown> = {};
+    const query = {
+      select: (_columns?: string) => query,
+      update: (value: Record<string, unknown>) => {
+        operation = "update";
+        patch = structuredClone(value);
+        return query;
+      },
+      eq: (field: string, value: unknown) => {
+        if (field === "id") assertEquals(value, this.mailbox.id);
+        if (field === "company_id") {
+          assertEquals(value, this.mailbox.company_id);
+        }
+        return query;
+      },
+      maybeSingle: () => Promise.resolve(execute()),
+      then: (resolve: (value: unknown) => unknown) =>
+        Promise.resolve(execute()).then(resolve),
+    };
+    const execute = () => {
+      if (operation === "update") {
+        this.updates.push(structuredClone(patch));
+        Object.assign(this.mailbox, patch);
+      }
+      return {
+        data: structuredClone(this.mailbox),
+        error: null,
+      };
+    };
+    return query;
+  }
+}
+
+const activationAuth: AuthContext = {
+  userId: "10000000-0000-4000-8000-000000000006",
+  companyId: context.company_id,
+  roles: ["Finance Manager"],
+  highestRole: "Finance Manager",
+  email: "finance@example.test",
+};
+
+function activationMailbox(overrides: Record<string, unknown> = {}) {
+  return {
+    id: context.mailbox_id,
+    company_id: context.company_id,
+    provider_type: "gmail",
+    mailbox_address: "controlled-mailbox@example.test",
+    default_bank_account_id: null,
+    connection_status: "connected",
+    ingestion_secret_ref: context.secret_reference,
+    delivery_secret_ref: null,
+    ingestion_token_expires_at: "2026-08-08T01:00:00.000Z",
+    delivery_token_expires_at: null,
+    incremental_cursor: null,
+    cursor_kind: null,
+    last_successful_sync_at: null,
+    last_failed_sync_at: null,
+    reconnect_required: false,
+    is_enabled: false,
+    ingestion_enabled: false,
+    delivery_enabled: false,
+    redacted_error_code: null,
+    created_at: "2026-08-07T00:00:00.000Z",
+    updated_at: "2026-08-07T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function failingOAuthStore(code: string): OAuthSecretStore {
+  return {
+    writeTokenSet: () => Promise.resolve(),
+    deleteTokenSet: () => Promise.resolve(),
+    resolveTokenSet: () =>
+      Promise.reject(
+        new BusinessError(
+          code,
+          "OAuth authorization must be reconnected.",
+          409,
+        ),
+      ),
+  };
 }
 
 function oauthCallbackFixture(overrides: Record<string, unknown> = {}) {
@@ -559,6 +655,232 @@ Deno.test("Gate E runtime refresh persists the rotated Vault bundle and only saf
     assert(!publicMetadata.includes("fixture-runtime-access"));
     assert(!publicMetadata.includes("fixture-runtime-refresh"));
   });
+});
+
+Deno.test("Gate E mailbox atomic ingestion enable accepts a current renewable Vault token without refresh", async () => {
+  const store = new FixtureOAuthSecretWriter();
+  await store.writeTokenSet(context, tokens);
+  const database = new MailboxActivationDatabase(activationMailbox());
+  let refreshCalls = 0;
+  const service = new AutomationService({
+    client: database as never,
+    oauthSecretStore: store,
+    oauthFetcher: () => {
+      refreshCalls += 1;
+      return Promise.reject(new Error("unexpected provider refresh"));
+    },
+    now: () => new Date("2026-08-08T00:00:00.000Z"),
+  });
+
+  const result = await service.updateMailbox(
+    activationAuth,
+    context.mailbox_id,
+    { is_enabled: true, ingestion_enabled: true },
+  );
+
+  assertEquals(result.is_enabled, true);
+  assertEquals(result.ingestion_enabled, true);
+  assertEquals(result.delivery_enabled, false);
+  assertEquals(refreshCalls, 0);
+  assertEquals(store.writes.length, 1);
+  assertEquals(database.updates.length, 1);
+  assertEquals(database.updates[0].is_enabled, true);
+  assertEquals(database.updates[0].ingestion_enabled, true);
+  assertEquals("delivery_enabled" in database.updates[0], false);
+  const publicState = JSON.stringify({ result, updates: database.updates });
+  assert(!publicState.includes(tokens.access_token));
+  assert(!publicState.includes(String(tokens.refresh_token)));
+});
+
+Deno.test("Gate E mailbox atomic ingestion enable refreshes an expired Vault token before enabling", async () => {
+  await withOAuthEnvironment(async () => {
+    const store = new FixtureOAuthSecretWriter();
+    await store.writeTokenSet(context, {
+      ...tokens,
+      expires_at: "2026-08-08T00:01:00.000Z",
+    });
+    const database = new MailboxActivationDatabase(activationMailbox({
+      ingestion_token_expires_at: "2026-08-08T00:01:00.000Z",
+    }));
+    let refreshCalls = 0;
+    const service = new AutomationService({
+      client: database as never,
+      oauthSecretStore: store,
+      secretResolver: new FixtureSecretResolver({
+        GMAIL_OAUTH_CLIENT_SECRET: "fixture-client-secret",
+      }),
+      oauthFetcher: () => {
+        refreshCalls += 1;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: "fixture-rotated-access",
+              expires_in: 3600,
+              token_type: "Bearer",
+              scope: "https://www.googleapis.com/auth/gmail.readonly",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      },
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+    });
+
+    const result = await service.updateMailbox(
+      activationAuth,
+      context.mailbox_id,
+      { is_enabled: true, ingestion_enabled: true },
+    );
+
+    assertEquals(result.is_enabled, true);
+    assertEquals(result.ingestion_enabled, true);
+    assertEquals(result.delivery_enabled, false);
+    assertEquals(result.ingestion_token_expires_at, "2026-08-08T01:00:00.000Z");
+    assertEquals(refreshCalls, 1);
+    assertEquals(store.writes.length, 2);
+    assertEquals(database.updates.length, 2);
+    assertEquals(
+      database.updates[0].ingestion_token_expires_at,
+      "2026-08-08T01:00:00.000Z",
+    );
+    assertEquals(database.updates[1].is_enabled, true);
+    assertEquals(database.updates[1].ingestion_enabled, true);
+    const stored = await store.resolveTokenSet(context);
+    const publicState = JSON.stringify({ result, updates: database.updates });
+    assert(!publicState.includes(stored.access_token));
+    assert(!publicState.includes(String(stored.refresh_token)));
+  });
+});
+
+Deno.test("Gate E mailbox enable rejects a failed provider refresh before activation and requires reconnect", async () => {
+  await withOAuthEnvironment(async () => {
+    const store = new FixtureOAuthSecretWriter();
+    await store.writeTokenSet(context, {
+      ...tokens,
+      expires_at: "2026-08-08T00:01:00.000Z",
+    });
+    const database = new MailboxActivationDatabase(activationMailbox({
+      ingestion_token_expires_at: "2026-08-08T00:01:00.000Z",
+    }));
+    const service = new AutomationService({
+      client: database as never,
+      oauthSecretStore: store,
+      secretResolver: new FixtureSecretResolver({
+        GMAIL_OAUTH_CLIENT_SECRET: "fixture-client-secret",
+      }),
+      oauthFetcher: () => Promise.resolve(new Response("{}", { status: 401 })),
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+    });
+
+    await rejects(
+      () =>
+        service.updateMailbox(activationAuth, context.mailbox_id, {
+          is_enabled: true,
+          ingestion_enabled: true,
+        }),
+      "MAILBOX_NOT_READY",
+    );
+    assertEquals(database.mailbox.is_enabled, false);
+    assertEquals(database.mailbox.ingestion_enabled, false);
+    assertEquals(database.mailbox.reconnect_required, true);
+    assertEquals(database.mailbox.connection_status, "reconnect_required");
+    assertEquals(
+      database.mailbox.redacted_error_code,
+      "OAUTH_TOKEN_REFRESH_REJECTED",
+    );
+    assertEquals(database.updates.length, 1);
+  });
+});
+
+Deno.test("Gate E mailbox enable fails closed for missing refresh, insufficient scope, and Vault resolution failure", async () => {
+  const cases: Array<{
+    name: string;
+    store: OAuthSecretStore;
+    expectedCode: string;
+  }> = [];
+  const missingRefresh = new FixtureOAuthSecretWriter();
+  await missingRefresh.writeTokenSet(context, {
+    ...tokens,
+    refresh_token: null,
+  });
+  cases.push({
+    name: "missing refresh",
+    store: missingRefresh,
+    expectedCode: "OAUTH_REFRESH_TOKEN_REQUIRED",
+  });
+  const insufficientScope = new FixtureOAuthSecretWriter();
+  await insufficientScope.writeTokenSet(context, {
+    ...tokens,
+    scope: ["https://www.googleapis.com/auth/gmail.send"],
+  });
+  cases.push({
+    name: "insufficient scope",
+    store: insufficientScope,
+    expectedCode: "OAUTH_SCOPE_INSUFFICIENT",
+  });
+  cases.push({
+    name: "Vault resolution failure",
+    store: failingOAuthStore("OAUTH_SECRET_UNAVAILABLE"),
+    expectedCode: "OAUTH_CREDENTIAL_INVALID",
+  });
+
+  for (const testCase of cases) {
+    const database = new MailboxActivationDatabase(activationMailbox());
+    const service = new AutomationService({
+      client: database as never,
+      oauthSecretStore: testCase.store,
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+    });
+    await rejects(
+      () =>
+        service.updateMailbox(activationAuth, context.mailbox_id, {
+          is_enabled: true,
+          ingestion_enabled: true,
+        }),
+      "MAILBOX_NOT_READY",
+    );
+    assert(database.mailbox.is_enabled === false, testCase.name);
+    assert(database.mailbox.ingestion_enabled === false, testCase.name);
+    assert(database.mailbox.reconnect_required === true, testCase.name);
+    assert(
+      database.mailbox.redacted_error_code === testCase.expectedCode,
+      testCase.name,
+    );
+    assert(database.updates.length === 1, testCase.name);
+  }
+});
+
+Deno.test("Gate E mailbox atomic ingestion disable never resolves or refreshes OAuth credentials", async () => {
+  const database = new MailboxActivationDatabase(activationMailbox({
+    is_enabled: true,
+    ingestion_enabled: true,
+    ingestion_token_expires_at: "2026-08-07T00:00:00.000Z",
+  }));
+  let resolveCalls = 0;
+  const service = new AutomationService({
+    client: database as never,
+    oauthSecretStore: {
+      writeTokenSet: () => Promise.resolve(),
+      deleteTokenSet: () => Promise.resolve(),
+      resolveTokenSet: () => {
+        resolveCalls += 1;
+        return Promise.reject(new Error("unexpected Vault resolution"));
+      },
+    },
+    now: () => new Date("2026-08-08T00:00:00.000Z"),
+  });
+
+  const result = await service.updateMailbox(
+    activationAuth,
+    context.mailbox_id,
+    { is_enabled: false, ingestion_enabled: false },
+  );
+
+  assertEquals(result.is_enabled, false);
+  assertEquals(result.ingestion_enabled, false);
+  assertEquals(result.delivery_enabled, false);
+  assertEquals(resolveCalls, 0);
+  assertEquals(database.updates.length, 1);
 });
 
 Deno.test("Gate E runtime refresh marks revoked authorization reconnect-required", async () => {
