@@ -402,7 +402,9 @@ material.
 
 ### Automation and scheduler activation
 
-- Automation Edge version: 3;
+- current Automation Edge platform version: 7 (rechecked at
+  `2026-08-08T03:56:57Z`; the reviewed bundle and source commit below are
+  unchanged);
 - status: ACTIVE;
 - platform JWT verification: disabled, with reviewed in-function user and
   dedicated worker authentication active;
