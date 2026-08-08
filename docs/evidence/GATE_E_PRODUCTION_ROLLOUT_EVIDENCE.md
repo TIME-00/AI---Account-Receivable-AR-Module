@@ -466,14 +466,27 @@ duplicate was created:
 - status: success, Production; and
 - canonical frontend health: HTTP 200.
 
-Current secret-name inventory remains:
+Secret-name metadata was rechecked at `2026-08-08T03:56:57Z` without retrieving
+or displaying any value:
 
-- `OPENAI_API_KEY`: missing;
+- `OPENAI_API_KEY`: present in Supabase Edge secret management;
 - `OPENAI_DOCUMENT_MODEL`: missing, so the reviewed default remains
-  `gpt-5.6-luna` once configured;
+  `gpt-5.6-luna`;
 - Gmail client ID/secret/redirect: missing;
 - Microsoft client ID/secret/redirect and optional tenant: missing; and
 - `AUTOMATION_WORKER_SECRET`: present in Edge and Vault.
+
+No OpenAI provider request was made during this checkpoint. The reviewed
+Production API exposes document processing only through authenticated
+`POST /documents/{attachment_id}/process`. That path requires an eligible stored
+attachment, `document_intelligence_enabled`, and an operating mode other than
+`disabled`. Production has no settings, mailbox, or attachment rows and remains
+`disabled`; the reviewed contract has no standalone side-effect-free provider
+smoke route. The key is also not present in the authorized local operator
+environment, and its Supabase value was not retrieved. Advancing a tenant to
+`observe_only`, introducing unreviewed Production code, or extracting the Edge
+secret solely to force this smoke was rejected as unsafe and outside this
+checkpoint.
 
 Production still has zero settings, mailboxes, sync runs, source messages,
 attachments, classifications, extractions, commands, allocation decisions,
@@ -482,17 +495,21 @@ only one released lease row and one current claimed nonce. Therefore no Invoice,
 Receipt, allocation, FX, journal, customer, reminder-email, or other
 financial/business DML occurred.
 
-Actual readiness remains:
+Capability status after the name-only configuration check is:
 
 - `ingestion_ready`: false;
 - `delivery_ready`: false; and
-- `document_intelligence_ready`: false.
+- `document_intelligence_ready`: not independently observed after key
+  provisioning because an authenticated Overview session is unavailable. The
+  value was not forced or inferred from secret presence alone; the last verified
+  pre-key value was false.
 
 The operating mode remains `disabled`. Scheduler infrastructure is PASS, but
-Phase 0 remains incomplete pending `OPENAI_API_KEY`, Google/Microsoft provider
-configuration and human consent, controlled provider smokes, and a fresh normal
-demo Finance login for authenticated Production UI/API smoke. `observe_only`,
-`draft_only`, and `straight_through` were not started.
+Phase 0 remains incomplete pending a controlled OpenAI provider smoke through an
+authorized reviewed path, Google/Microsoft provider configuration and human
+consent, and a fresh normal demo Finance login for authenticated Production
+UI/API smoke. `observe_only`, `draft_only`, and `straight_through` were not
+started.
 
-**Gate E remains OPEN and PENDING ACTIVATION at an external human credential,
-OAuth, and login checkpoint.**
+**Gate E remains OPEN and PENDING ACTIVATION at the controlled provider-smoke,
+external OAuth, and authenticated-login checkpoints.**
