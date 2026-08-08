@@ -522,3 +522,48 @@ already authenticated human browser. `observe_only`, `draft_only`, and
 
 **Gate E remains OPEN and PENDING ACTIVATION at the controlled provider-smoke,
 Gmail consent, Microsoft OAuth, and authenticated-smoke checkpoints.**
+
+## Controlled Gmail mailbox conflict remediation
+
+At `2026-08-08T05:26:03.296894Z`, the authenticated Finance Manager workflow
+created one controlled Gmail mailbox for company
+`00000000-0000-0000-0000-000000000001`. A subsequent duplicate submission of
+the same opaque ingestion-secret reference reached Migration 035's intentional
+global collision guard and raised `OAUTH_SECRET_REFERENCE_CONFLICT`; the Edge
+boundary incorrectly reduced that safe business conflict to the generic HTTP
+500 envelope.
+
+Read-only ownership and state inspection established that the existing row is
+the current demo tenant's controlled Gate E mailbox, not another tenant's
+mailbox and not disposable stale residue. It is disabled, with ingestion and
+delivery disabled, connection status `disabled`, `reconnect_required=false`, no
+OAuth state, no sync run, no source message or attachment, and no downstream
+classification, extraction, command, allocation, reminder, or delivery-attempt
+row. It must be retained and reused; no cleanup or second mailbox is required.
+The earlier zero-mailbox evidence predates this successful controlled insert
+and remains historically accurate.
+
+The bounded remediation commit is
+`a4d4a9f93f911fbf24b2240d96deee26a8413dd2`
+(`fix(gate-e): map OAuth reference conflicts`). It changes only the
+Automation service, its Gate E contract test, and the Gate E API contract. The
+database global-uniqueness trigger and Migrations 035/036 are unchanged. The
+live request path now maps the exact database error prefix to HTTP 409 with code
+`OAUTH_SECRET_REFERENCE_CONFLICT` and the tenant-safe message `This secret
+reference is already in use. Choose another reference.` Unknown persistence
+errors remain sanitized HTTP 500 responses.
+
+Validation after the change was Gate E 82/82, activation prerequisites 21/21,
+OpenAI 41/41, scheduler 26/26, full recursive backend 421/421, Deno format and
+lint PASS, all 17 deployable Edge entrypoints type-checked, `git diff --check`
+PASS, and the added-line credential scan PASS. Automation alone was deployed
+from the canonical backend source and is ACTIVE as Production version 11. No
+migration, scheduler, worker secret, OpenAI configuration, frontend source, or
+financial/business data was changed.
+
+The duplicate submission was not repeated in Production after deployment, in
+accordance with the instruction not to retry or create another mailbox with the
+occupied reference. The executable live-route regression proves the exact 409
+envelope, and the deployed source is the validated commit. The next controlled
+Production action is to refresh the existing mailbox list and start ingestion
+OAuth on that retained row; operating mode remains `disabled`.
