@@ -17,9 +17,16 @@ import { z } from "zod";
 
 // ─── Strict primitives (mirror dto.ts) ────────────────────────────────────────
 
-/** RFC 4122 UUID (versions 1-5). */
+/**
+ * Canonical PostgreSQL UUID text: 8-4-4-4-12 lowercase/uppercase hexadecimal,
+ * case-insensitive. Mirrors the backend Gate E database UUID contract, which
+ * intentionally does NOT impose application-level RFC version/variant bits so
+ * that any well-formed PostgreSQL `uuid` value (including the all-zeros-prefixed
+ * Production company identifier) is accepted. Scheduler nonce authorization
+ * validation remains separately UUIDv4-specific and is defined elsewhere.
+ */
 export const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** ISO-8601 UTC timestamp with optional fractional seconds and offset. */
 export const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;

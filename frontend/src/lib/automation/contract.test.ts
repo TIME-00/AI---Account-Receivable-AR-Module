@@ -25,6 +25,7 @@ import {
   settingsSchema,
   successEnvelopeSchema,
   syncRunSchema,
+  UUID_PATTERN,
 } from "./contract";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
@@ -586,6 +587,106 @@ describe("overview contract — split readiness", () => {
         validOverview({ settings: { ...baseSettings, sneaky: true } }),
       ).success,
     ).toBe(false);
+  });
+});
+
+describe("canonical PostgreSQL UUID identifier contract (mirrors backend)", () => {
+  // The backend Gate E database UUID contract is canonical 8-4-4-4-12
+  // hexadecimal, case-insensitive, and intentionally imposes no RFC
+  // version/variant bits. The Production company identifier below is a valid
+  // PostgreSQL uuid whose version nibble is 0 and variant nibble is 0, so it
+  // was wrongly rejected by the previous RFC-version-specific mirror.
+  const PROD_UUID = "00000000-0000-0000-0000-000000000001";
+  const UUID_V4 = "11111111-1111-4111-8111-111111111111";
+
+  const mailboxFixture = (id: string, companyId: string) => ({
+    id,
+    company_id: companyId,
+    provider_type: "gmail",
+    mailbox_address: "ar@example.com",
+    default_bank_account_id: null,
+    connection_status: "disabled",
+    ingestion_secret_configured: true,
+    delivery_secret_configured: false,
+    ingestion_token_expires_at: null,
+    delivery_token_expires_at: null,
+    cursor_kind: null,
+    cursor_present: false,
+    last_successful_sync_at: null,
+    last_failed_sync_at: null,
+    reconnect_required: false,
+    is_enabled: false,
+    ingestion_enabled: false,
+    delivery_enabled: false,
+    redacted_error_code: null,
+    created_at: TS,
+    updated_at: TS,
+  });
+
+  const acceptedIds = [
+    ["Production company UUID (v/variant nibble 0)", PROD_UUID],
+    ["canonical UUIDv4", UUID_V4],
+    ["uppercase hexadecimal", PROD_UUID.toUpperCase()],
+  ] as const;
+
+  const rejectedIds = [
+    ["wrong separators (underscores)", "00000000_0000_0000_0000_000000000001"],
+    ["wrong separators (no dashes)", "00000000000000000000000000000001"],
+    ["truncated final group", "00000000-0000-0000-0000-00000000000"],
+    ["truncated whole value", "00000000-0000-0000-0000"],
+    ["overlong final group", "00000000-0000-0000-0000-0000000000012"],
+    ["overlong extra group", "00000000-0000-0000-0000-000000000001-0000"],
+    ["non-hex characters", "zzzzzzzz-0000-0000-0000-000000000001"],
+    ["arbitrary string", "not-a-uuid"],
+    ["empty string", ""],
+  ] as const;
+
+  it("accepts canonical PostgreSQL UUID text on the primitive", () => {
+    for (const [, id] of acceptedIds) expect(UUID_PATTERN.test(id)).toBe(true);
+  });
+
+  it("rejects malformed identifiers on the primitive (fails closed)", () => {
+    for (const [, id] of rejectedIds) expect(UUID_PATTERN.test(id)).toBe(false);
+  });
+
+  describe.each(acceptedIds)("accepts %s through page schemas", (_label, id) => {
+    it("settings schema accepts the company identifier", () => {
+      const parsed = parseGateEData(settingsSchema, { ...baseSettings, company_id: id });
+      expect(parsed.company_id).toBe(id);
+    });
+
+    it("mailbox schema accepts tenant + mailbox identifiers", () => {
+      const parsed = parseGateEData(mailboxSchema, mailboxFixture(id, id));
+      expect(parsed.id).toBe(id);
+      expect(parsed.company_id).toBe(id);
+    });
+
+    it("overview schema accepts the nested settings company identifier", () => {
+      const parsed = parseGateEData(
+        overviewSchema,
+        validOverview({ settings: { ...baseSettings, company_id: id } }),
+      );
+      expect(parsed.settings.company_id).toBe(id);
+    });
+  });
+
+  describe.each(rejectedIds)("rejects %s through page schemas", (_label, id) => {
+    it("settings schema fails closed", () => {
+      expect(settingsSchema.safeParse({ ...baseSettings, company_id: id }).success).toBe(false);
+    });
+
+    it("mailbox schema fails closed", () => {
+      expect(mailboxSchema.safeParse(mailboxFixture(id, UUID)).success).toBe(false);
+      expect(mailboxSchema.safeParse(mailboxFixture(UUID, id)).success).toBe(false);
+    });
+
+    it("overview schema fails closed on nested settings", () => {
+      expect(
+        overviewSchema.safeParse(
+          validOverview({ settings: { ...baseSettings, company_id: id } }),
+        ).success,
+      ).toBe(false);
+    });
   });
 });
 

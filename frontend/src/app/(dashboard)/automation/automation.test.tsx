@@ -288,6 +288,76 @@ describe("Mailboxes", () => {
   });
 });
 
+describe("Production PostgreSQL UUID identifiers render through page + hook paths", () => {
+  // The real Production company identifier is a canonical PostgreSQL uuid whose
+  // version/variant nibbles are 0. It is a valid uuid but was rejected by the
+  // previous RFC-version-specific mirror, which blanked the Overview, Settings,
+  // and Mailboxes pages with the fail-closed parse-error alert. These tests
+  // drive the actual pages + hooks so a regression re-blanks them immediately.
+  const PROD_CO = "00000000-0000-0000-0000-000000000001";
+  const PROD_MB = "00000000-0000-0000-0000-000000000006";
+  const prodSettings = { ...SETTINGS, company_id: PROD_CO };
+
+  beforeEach(() => {
+    useCompanyStore.getState().setCompany(PROD_CO, "Production Company", "MYR");
+  });
+
+  it("Overview page parses and renders a Production-UUID-scoped overview", async () => {
+    fakeApi = createFakeApi([
+      route("/automation/overview", () => ({
+        data: { ...OVERVIEW, settings: prodSettings },
+      })),
+    ]);
+    renderWithProviders(<AutomationOverviewPage />);
+    expect((await screen.findAllByText("Disabled")).length).toBeGreaterThan(0);
+    // Fail-closed proof: the parse-error alert must NOT appear for a valid uuid.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("Settings page parses and renders Production-UUID-scoped settings", async () => {
+    fakeApi = createFakeApi([route("/automation/settings", () => ({ data: prodSettings }))]);
+    renderWithProviders(<AutomationSettingsPage />);
+    expect(await screen.findByRole("heading", { name: "Operating Mode" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("Mailboxes page parses and renders a Production-UUID-scoped mailbox", async () => {
+    fakeApi = createFakeApi([
+      route("/automation/mailboxes", () => ({
+        data: [
+          {
+            id: PROD_MB,
+            company_id: PROD_CO,
+            provider_type: "gmail",
+            mailbox_address: "ar@example.com",
+            default_bank_account_id: null,
+            connection_status: "disabled",
+            ingestion_secret_configured: true,
+            delivery_secret_configured: false,
+            ingestion_token_expires_at: null,
+            delivery_token_expires_at: null,
+            cursor_kind: null,
+            cursor_present: false,
+            last_successful_sync_at: null,
+            last_failed_sync_at: null,
+            reconnect_required: false,
+            is_enabled: false,
+            ingestion_enabled: false,
+            delivery_enabled: false,
+            redacted_error_code: null,
+            created_at: "2026-07-31T00:00:00Z",
+            updated_at: "2026-07-31T00:00:00Z",
+          },
+        ],
+        meta: { page: 1, page_size: 50, total: 1, has_more: false },
+      })),
+    ]);
+    renderWithProviders(<MailboxesPage />);
+    expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("Exception Queue", () => {
   it("requires a note before resolving", async () => {
     fakeApi = createFakeApi([
