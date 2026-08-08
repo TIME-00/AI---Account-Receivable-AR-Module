@@ -204,7 +204,7 @@ Deno.test("Gate E common contract rejects overflow and unknown request fields", 
 });
 
 Deno.test("Gate E settings DTO has identical JSON types for defaults and PostgreSQL rows", () => {
-  const defaults = automationSettingsDto(null, companyId);
+  const defaults = automationSettingsDto(null, auth.companyId);
   const persisted = automationSettingsDto({
     ...defaults,
     minimum_overall_confidence: "0.9500",
@@ -351,7 +351,7 @@ Deno.test("Gate E current assignment and history include normalized representati
 Deno.test("Gate E mailbox DTO exposes readiness metadata but never secret refs or raw cursor", () => {
   const dto = mailboxDto({
     id: mailboxId,
-    company_id: companyId,
+    company_id: auth.companyId,
     provider_type: "microsoft",
     mailbox_address: "automation@example.test",
     default_bank_account_id: null,
@@ -376,6 +376,58 @@ Deno.test("Gate E mailbox DTO exposes readiness metadata but never secret refs o
   assertEquals(dto.cursor_present, true);
   assertEquals("ingestion_secret_ref" in dto, false);
   assertEquals(JSON.stringify(dto).includes("private-delta-link"), false);
+});
+
+Deno.test("Gate E mailbox collection serializes PostgreSQL UUID identifiers", async () => {
+  const mailbox = {
+    id: mailboxId,
+    company_id: auth.companyId,
+    provider_type: "gmail",
+    mailbox_address: "controlled-mailbox@example.test",
+    default_bank_account_id: null,
+    connection_status: "disabled",
+    ingestion_secret_ref: "AR_MAILBOX_INGESTION_1",
+    delivery_secret_ref: null,
+    ingestion_token_expires_at: null,
+    delivery_token_expires_at: null,
+    cursor_kind: null,
+    incremental_cursor: null,
+    last_successful_sync_at: null,
+    last_failed_sync_at: null,
+    reconnect_required: false,
+    is_enabled: false,
+    ingestion_enabled: false,
+    delivery_enabled: false,
+    redacted_error_code: null,
+    created_at: now,
+    updated_at: now,
+  };
+  const client = {
+    from(table: string) {
+      assertEquals(table, "automation_mailboxes");
+      const query = {
+        select() {
+          return query;
+        },
+        eq(field: string, value: unknown) {
+          assertEquals(field, "company_id");
+          assertEquals(value, auth.companyId);
+          return query;
+        },
+        order() {
+          return query;
+        },
+        range() {
+          return Promise.resolve({ data: [mailbox], count: 1, error: null });
+        },
+      };
+      return query;
+    },
+  };
+  const result = await new AutomationService({ client: client as never })
+    .listTable(auth, "automation_mailboxes", { page: 1, page_size: 50 });
+  assertEquals(result.meta.total, 1);
+  assertEquals(result.rows[0].company_id, auth.companyId);
 });
 
 Deno.test("Gate E audit metadata allowlist suppresses credentials and provider bodies", () => {
@@ -463,9 +515,35 @@ Deno.test("Gate E safe metadata validates each public key and drops credential-s
   );
 });
 
-Deno.test("Gate E primitive formats are frozen and reject arbitrary strings", () => {
-  assert(new RegExp(automationPrimitivePatterns.uuid, "i").test(companyId));
-  assert(!new RegExp(automationPrimitivePatterns.uuid, "i").test("customer-1"));
+Deno.test("Gate E primitive formats are frozen and reject arbitrary strings", async () => {
+  const uuid = new RegExp(automationPrimitivePatterns.uuid, "i");
+  assert(uuid.test(auth.companyId));
+  assert(uuid.test(companyId));
+  const malformed = [
+    "00000000_0000-0000-0000-000000000001",
+    auth.companyId.slice(0, -1),
+    `${auth.companyId}0`,
+    "00000000-0000-0000-0000-00000000000g",
+    "customer-1",
+  ];
+  for (const value of malformed) {
+    assert(!uuid.test(value), `Unexpected UUID acceptance: ${value}`);
+    await rejects(
+      () => automationSettingsDto(null, value),
+      "AUTOMATION_RESPONSE_INVALID",
+    );
+  }
+  assertEquals(
+    automationSettingsDto(null, auth.companyId).company_id,
+    auth.companyId,
+  );
+  await new FixtureOAuthSecretWriter().deleteTokenSet({
+    company_id: auth.companyId,
+    mailbox_id: mailboxId,
+    provider: "gmail",
+    capability: "ingestion",
+    secret_reference: "GATE_E_PRODUCTION_UUID_TEST",
+  });
   assert(new RegExp(automationPrimitivePatterns.iso_date).test("2026-08-06"));
   assert(
     !new RegExp(automationPrimitivePatterns.decimal_string).test("MYR 1.00"),
@@ -1577,7 +1655,7 @@ Deno.test("Automation handler exposes frozen overview envelope", async () => {
       createService: () => ({
         overview: () =>
           Promise.resolve({
-            settings: automationSettingsDto(null, companyId),
+            settings: automationSettingsDto(null, auth.companyId),
             ingestion_ready: false,
             delivery_ready: false,
             document_intelligence_ready: false,
@@ -1603,6 +1681,7 @@ Deno.test("Automation handler exposes frozen overview envelope", async () => {
   assertEquals(response.status, 200);
   const result = await response.json();
   assertEquals(result.contract_version, "gate-e.1");
+  assertEquals(result.data.settings.company_id, auth.companyId);
   assertEquals(result.data.open_exceptions, 0);
   assertEquals(result.data.settings.minimum_overall_confidence, 0.95);
   assertEquals(Object.keys(result.data).sort(), [
@@ -1626,6 +1705,42 @@ Deno.test("Automation handler exposes frozen overview envelope", async () => {
     "retryable_exceptions",
     "settings",
   ]);
+});
+
+Deno.test("Automation settings route serializes the Production PostgreSQL UUID", async () => {
+  const client = {
+    from(table: string) {
+      assertEquals(table, "automation_settings");
+      const query = {
+        select() {
+          return query;
+        },
+        eq(field: string, value: unknown) {
+          assertEquals(field, "company_id");
+          assertEquals(value, auth.companyId);
+          return query;
+        },
+        maybeSingle() {
+          return Promise.resolve({ data: null, error: null });
+        },
+      };
+      return query;
+    },
+  };
+  const response = await handleAutomationRequest(
+    new Request("https://example.test/automation/settings", {
+      headers: { "X-Company-Id": auth.companyId },
+    }),
+    {
+      authenticate: () => Promise.resolve(auth),
+      createService: () => new AutomationService({ client: client as never }),
+    },
+  );
+  assertEquals(response.status, 200);
+  const result = await response.json();
+  assertEquals(result.contract_version, "gate-e.1");
+  assertEquals(result.data.company_id, auth.companyId);
+  assertEquals(result.data.operating_mode, "disabled");
 });
 
 Deno.test("Automation service overview derives every tenant count and readiness field", async () => {

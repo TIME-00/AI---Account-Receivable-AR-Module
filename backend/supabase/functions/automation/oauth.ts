@@ -1,5 +1,6 @@
 import { BusinessError, ValidationError } from "../_shared/errors.ts";
 import {
+  AUTOMATION_POSTGRES_UUID_PATTERN,
   isSemanticIsoTimestamp,
   type MailboxProviderType,
 } from "./contract.ts";
@@ -139,15 +140,13 @@ export class FixtureOAuthSecretWriter implements OAuthSecretStore {
   }
 }
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SECRET_REFERENCE_PATTERN = /^[A-Z][A-Z0-9_]{2,127}$/;
 const STORED_OAUTH_SCHEMA_VERSION = "gate-e-oauth.1";
 
 function assertOAuthSecretContext(context: OAuthSecretContext): void {
   if (
-    !UUID_PATTERN.test(context.company_id) ||
-    !UUID_PATTERN.test(context.mailbox_id) ||
+    !AUTOMATION_POSTGRES_UUID_PATTERN.test(context.company_id) ||
+    !AUTOMATION_POSTGRES_UUID_PATTERN.test(context.mailbox_id) ||
     !["gmail", "microsoft"].includes(context.provider) ||
     !["ingestion", "delivery"].includes(context.capability) ||
     !SECRET_REFERENCE_PATTERN.test(context.secret_reference)

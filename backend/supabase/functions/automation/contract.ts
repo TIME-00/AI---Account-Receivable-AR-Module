@@ -3,6 +3,11 @@ import { ValidationError } from "../_shared/errors.ts";
 export const AUTOMATION_CONTRACT_VERSION = "gate-e.1" as const;
 export const AUTOMATION_PAGE_MAX = 100;
 export const AUTOMATION_PAGE_DEFAULT = 25;
+// PostgreSQL's uuid type accepts canonical 8-4-4-4-12 hexadecimal text
+// without requiring an RFC version or variant nibble. Gate E database
+// identifiers use that exact wire representation.
+export const AUTOMATION_POSTGRES_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const PROVIDERS = ["gmail", "microsoft"] as const;
 export const OPERATING_MODES = [
   "disabled",

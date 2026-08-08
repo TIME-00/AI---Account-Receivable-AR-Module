@@ -305,8 +305,11 @@ authoritative allocation transaction.
 
 ## Frozen response records
 
-All identifiers are RFC 4122 UUID strings. Timestamp inputs use an exact
-ISO-8601 date/time with `Z` or an offset no greater than `+/-14:00`; the DTO
+All database identifiers are canonical PostgreSQL UUID strings: exactly
+8-4-4-4-12 hexadecimal characters with hyphen separators, without imposing an
+application-level RFC version or variant nibble. The scheduler authorization
+nonce remains a separately defined UUIDv4 security token. Timestamp inputs use
+an exact ISO-8601 date/time with `Z` or an offset no greater than `+/-14:00`; the DTO
 validates Gregorian date components, 00-23 hours, 00-59 minutes/seconds, and
 offset bounds before returning canonical UTC. Dates are real `YYYY-MM-DD`
 Gregorian calendar dates, including leap-year validation. Impossible values

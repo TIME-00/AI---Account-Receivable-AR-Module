@@ -1,10 +1,12 @@
 import { BusinessError } from "../_shared/errors.ts";
-import { isSemanticIsoDate, isSemanticIsoTimestamp } from "./contract.ts";
+import {
+  AUTOMATION_POSTGRES_UUID_PATTERN,
+  isSemanticIsoDate,
+  isSemanticIsoTimestamp,
+} from "./contract.ts";
 
 export type AutomationRow = Record<string, unknown>;
 
-const UUID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -41,7 +43,7 @@ function nullableString(
 
 function uuid(value: unknown, field: string): string {
   const text = requiredString(value, field, 36);
-  return UUID.test(text) ? text : invalid(field);
+  return AUTOMATION_POSTGRES_UUID_PATTERN.test(text) ? text : invalid(field);
 }
 
 function nullableUuid(value: unknown, field: string): string | null {
@@ -301,7 +303,7 @@ function exactString(values: ReadonlySet<string>): MetadataValidator {
 
 function metadataUuid(value: unknown): unknown | undefined {
   return typeof value === "string" && !credentialShaped(value) &&
-      UUID.test(value)
+      AUTOMATION_POSTGRES_UUID_PATTERN.test(value)
     ? value
     : undefined;
 }
@@ -1155,7 +1157,7 @@ export function mapAutomationCollectionRow(
 }
 
 export const automationPrimitivePatterns = Object.freeze({
-  uuid: UUID.source,
+  uuid: AUTOMATION_POSTGRES_UUID_PATTERN.source,
   iso_date: ISO_DATE.source,
   iso_timestamp: ISO_TIMESTAMP.source,
   decimal_string: DECIMAL.source,
