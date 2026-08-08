@@ -468,13 +468,15 @@ duplicate was created:
 - status: success, Production; and
 - canonical frontend health: HTTP 200.
 
-Secret-name metadata was rechecked at `2026-08-08T03:56:57Z` without retrieving
+Secret-name metadata was most recently rechecked at `2026-08-08T05:06:52Z`
+without retrieving
 or displaying any value:
 
 - `OPENAI_API_KEY`: present in Supabase Edge secret management;
 - `OPENAI_DOCUMENT_MODEL`: missing, so the reviewed default remains
   `gpt-5.6-luna`;
-- Gmail client ID/secret/redirect: missing;
+- Gmail client ID/secret/redirect: all present by name; provider-console
+  callback registration and consent remain human checkpoints;
 - Microsoft client ID/secret/redirect and optional tenant: missing; and
 - `AUTOMATION_WORKER_SECRET`: present in Edge and Vault.
 
@@ -484,11 +486,10 @@ Production API exposes document processing only through authenticated
 attachment, `document_intelligence_enabled`, and an operating mode other than
 `disabled`. Production has no settings, mailbox, or attachment rows and remains
 `disabled`; the reviewed contract has no standalone side-effect-free provider
-smoke route. The key is also not present in the authorized local operator
-environment, and its Supabase value was not retrieved. Advancing a tenant to
-`observe_only`, introducing unreviewed Production code, or extracting the Edge
-secret solely to force this smoke was rejected as unsafe and outside this
-checkpoint.
+smoke route. The Production key was not retrieved or copied into the local
+operator environment. Advancing a tenant to `observe_only`, introducing
+unreviewed Production code, or extracting the Edge secret solely to force this
+smoke was rejected as unsafe and outside this checkpoint.
 
 Production still has zero settings, mailboxes, sync runs, source messages,
 attachments, classifications, extractions, commands, allocation decisions,
@@ -508,10 +509,11 @@ Capability status after the name-only configuration check is:
 
 The operating mode remains `disabled`. Scheduler infrastructure is PASS, but
 Phase 0 remains incomplete pending a controlled OpenAI provider smoke through an
-authorized reviewed path, Google/Microsoft provider configuration and human
+authorized reviewed path, Google consent, Microsoft provider configuration and
 consent, and a fresh normal demo Finance login for authenticated Production
-UI/API smoke. `observe_only`, `draft_only`, and `straight_through` were not
-started.
+UI/API smoke. OAuth initiation itself requires that normal authenticated session
+and a controlled tenant mailbox. `observe_only`, `draft_only`, and
+`straight_through` were not started.
 
 **Gate E remains OPEN and PENDING ACTIVATION at the controlled provider-smoke,
 external OAuth, and authenticated-login checkpoints.**
