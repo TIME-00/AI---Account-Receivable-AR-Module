@@ -567,3 +567,49 @@ occupied reference. The executable live-route regression proves the exact 409
 envelope, and the deployed source is the validated commit. The next controlled
 Production action is to refresh the existing mailbox list and start ingestion
 OAuth on that retained row; operating mode remains `disabled`.
+
+## PostgreSQL UUID response-contract remediation
+
+Authenticated Production use subsequently exposed a cross-stack identifier
+contract defect. The sole Production company legitimately uses PostgreSQL UUID
+`00000000-0000-0000-0000-000000000001`, while the Gate E response DTO and OAuth
+secret-context validator incorrectly required RFC version/variant nibbles.
+Read-only Production metadata confirmed that company identity and the retained
+disabled Gmail mailbox's matching `company_id`. Edge invocation logs confirmed
+HTTP 500 for authenticated `GET /automation/settings`, `GET
+/automation/mailboxes?page=1&page_size=50`, and `GET /automation/overview`
+between `2026-08-08T06:02:55Z` and `2026-08-08T06:12:26Z`.
+
+Commit `e3c755b18507c6d72591d166461e3adf96a9343b`
+(`fix(gate-e): accept PostgreSQL UUID identifiers`) defines one
+Gate E canonical PostgreSQL UUID primitive: exact 8-4-4-4-12 hexadecimal text,
+case-insensitive, without application-level version or variant constraints.
+DTO, safe-metadata, primitive-contract, and OAuth secret-context validation now
+share it. Malformed, wrong-separator, truncated, overlong, and non-hex values
+remain rejected. The scheduler's separately defined UUIDv4 nonce validation is
+unchanged, as are every database UUID type, RLS/tenant filter, Vault boundary,
+scheduler object, and financial-authority control.
+
+Production-style executable regressions cover synthesized default settings, the
+retained mailbox DTO and collection, the Overview envelope, OAuth secret
+context, a normal UUIDv4 identifier, and malformed lookalikes. Validation was:
+Gate E 84/84, activation prerequisites 21/21, OpenAI 41/41, scheduler 26/26,
+combined focused 172/172, full recursive backend 423/423, 17/17 deployable Edge
+entrypoints type-checked, and format/lint/diff/added-line secret scans PASS.
+
+Only Automation was redeployed from the canonical backend source. Production
+Automation version 12 is ACTIVE. No post-deploy authenticated invocation was
+available to the operator tooling without extracting or bypassing the human
+browser session, so the three endpoint status codes were not fabricated; the
+deployed bundle is proven by the Production-style executable paths and awaits
+the frontend mirror plus authenticated UI reread. The frontend still has the
+old RFC-constrained pattern and remains pending a separate narrow frontend
+repair.
+
+The post-deploy read-only state remains one disabled mailbox, zero settings,
+zero enabled mailboxes, and zero OAuth states, sync runs, source messages,
+attachments, classifications, extractions, commands, allocations, reminders,
+or reminder attempts. Operating mode therefore remains `disabled`; no OAuth or
+business/financial DML occurred. Gate E remains OPEN and Gmail OAuth must not
+resume until the frontend contract mirror is repaired and the authenticated
+Overview/settings/mailbox paths are reread successfully.
