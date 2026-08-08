@@ -417,13 +417,18 @@ material.
 - unauthenticated Overview with a syntactically valid synthetic company header:
   sanitized HTTP 401 `AUTHENTICATION_ERROR`.
 
-One 48-byte/384-bit random base64url root was generated without printing it.
-The same value was provisioned as the Edge `AUTOMATION_WORKER_SECRET` and as
-exactly one Vault record named `AUTOMATION_WORKER_SECRET` with description
-`Gate E Automation worker scheduler secret`. Presence and identity were
+The first compatible 48-byte/384-bit generation attempt reached Edge only after
+PowerShell treated a normal Supabase CLI status line as a terminating error
+before the Vault operation. Presence checks proved Edge count one and Vault
+count zero; that orphaned Edge secret was immediately removed and its value was
+erased. A new 48-byte/384-bit random base64url root was then generated without
+printing it and the same new value was provisioned as the Edge
+`AUTOMATION_WORKER_SECRET` and as exactly one Vault record named
+`AUTOMATION_WORKER_SECRET` with description
+`Gate E Automation worker scheduler secret`. Final presence and identity were
 verified by name/count only. Locked temporary secret files were zeroed and
-removed; no value entered Git, documentation, application tables, cron
-metadata, pg_net metadata, logs, or user-facing responses.
+removed after each attempt; no value entered Git, documentation, application
+tables, cron metadata, pg_net metadata, logs, or user-facing responses.
 
 The Edge/Vault same-secret challenge returned HTTP 200 with `gate-e.1` and a
 successful object response. Direct controlled security smokes returned:
