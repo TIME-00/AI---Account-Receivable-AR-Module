@@ -275,6 +275,13 @@ Provisioning dependencies:
 The Production Gmail value must be exactly
 `https://kusseuycqgdilychphpq.supabase.co/functions/v1/automation/oauth/gmail/callback`.
 
+The Gmail callback accepts Google's exact RFC 9207 authorization-response
+issuer `https://accounts.google.com`. A returned Google Workspace `hd` value is
+validated only as a bounded DNS domain hint and is never used for tenant,
+company, mailbox, customer, or authorization decisions. Arbitrary issuers,
+malformed hosted domains, duplicate parameters, and all other unknown callback
+parameters remain fail-closed.
+
 ### Microsoft Outlook / Microsoft 365
 
 Ingestion uses Microsoft Graph v1.0 with `offline_access Mail.Read`. It starts or

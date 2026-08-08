@@ -868,11 +868,19 @@ Deno.test("Gate E callback consumes state but exposes no token when exchange or 
 
 Deno.test("Gate E provider callback is state-authorized and does not require a browser JWT", async () => {
   let authenticated = false;
+  let completed = false;
+  const query = new URLSearchParams({
+    code: "fixture-code",
+    state: "a".repeat(64),
+    scope: "https://www.googleapis.com/auth/gmail.readonly",
+    authuser: "0",
+    prompt: "consent",
+    iss: "https://accounts.google.com",
+    hd: "workspace.example",
+  });
   const response = await handleAutomationRequest(
     new Request(
-      `https://example.test/automation/oauth/gmail/callback?code=fixture-code&state=${
-        "a".repeat(64)
-      }`,
+      `https://example.test/automation/oauth/gmail/callback?${query}`,
     ),
     {
       authenticate: () => {
@@ -880,8 +888,9 @@ Deno.test("Gate E provider callback is state-authorized and does not require a b
         return Promise.reject(new Error("must not authenticate callback"));
       },
       createService: () => ({
-        completeOAuth: () =>
-          Promise.resolve({
+        completeOAuth: () => {
+          completed = true;
+          return Promise.resolve({
             mailbox_id: context.mailbox_id,
             provider: "gmail",
             capability: "ingestion",
@@ -890,25 +899,140 @@ Deno.test("Gate E provider callback is state-authorized and does not require a b
             granted_scopes: [
               "https://www.googleapis.com/auth/gmail.readonly",
             ],
-          }),
+          });
+        },
       } as unknown as AutomationService),
     },
   );
   assertEquals(response.status, 200);
   assertEquals(authenticated, false);
+  assertEquals(completed, true);
   const body = await response.json();
   assertEquals(body.contract_version, "gate-e.1");
   assert(!JSON.stringify(body).includes("access_token"));
   assert(!JSON.stringify(body).includes("refresh_token"));
 });
 
+Deno.test("Gate E Gmail callback validates issuer and hosted-domain metadata before exchange", async () => {
+  const state = "j".repeat(64);
+  const cases = [
+    new URLSearchParams({
+      code: "fixture-code",
+      state,
+      iss: "https://attacker.example",
+    }),
+    new URLSearchParams({
+      code: "fixture-code",
+      state,
+      iss: "accounts.google.com",
+    }),
+    new URLSearchParams({
+      code: "fixture-code",
+      state,
+      hd: "invalid..example",
+    }),
+    new URLSearchParams({
+      code: "fixture-code",
+      state,
+      unexpected: "value",
+    }),
+  ];
+  let exchanged = false;
+  for (const query of cases) {
+    const response = await handleAutomationRequest(
+      new Request(
+        `https://example.test/automation/oauth/gmail/callback?${query}`,
+      ),
+      {
+        authenticate: () => Promise.reject(new Error("not used")),
+        createService: () => ({
+          completeOAuth: () => {
+            exchanged = true;
+            return Promise.resolve({});
+          },
+        } as unknown as AutomationService),
+      },
+    );
+    assertEquals(response.status, 400);
+    const body = await response.json();
+    assertEquals(body.error.code, "VALIDATION_ERROR");
+    assert(!JSON.stringify(body).includes("attacker.example"));
+  }
+  assertEquals(exchanged, false);
+});
+
+Deno.test("Gate E callback keeps existing Microsoft parameters but rejects Google-only metadata", async () => {
+  const state = "k".repeat(64);
+  let completed = 0;
+  const accepted = new URLSearchParams({
+    code: "fixture-code",
+    state,
+    scope: "offline_access Mail.Read",
+    session_state: "fixture-session",
+  });
+  const dependencies = {
+    authenticate: () => Promise.reject(new Error("not used")),
+    createService: () => ({
+      completeOAuth: () => {
+        completed++;
+        return Promise.resolve({
+          mailbox_id: context.mailbox_id,
+          provider: "microsoft",
+          capability: "ingestion",
+          connection_status: "connected",
+          token_expires_at: "2026-08-08T01:00:00.000Z",
+          granted_scopes: ["offline_access", "Mail.Read"],
+        });
+      },
+    } as unknown as AutomationService),
+  };
+  const acceptedResponse = await handleAutomationRequest(
+    new Request(
+      `https://example.test/automation/oauth/microsoft/callback?${accepted}`,
+    ),
+    dependencies,
+  );
+  assertEquals(acceptedResponse.status, 200);
+  assertEquals(completed, 1);
+
+  for (
+    const [key, value] of [
+      ["iss", "https://accounts.google.com"],
+      ["hd", "workspace.example"],
+    ] as const
+  ) {
+    const rejected = new URLSearchParams({
+      code: "fixture-code",
+      state,
+      [key]: value,
+    });
+    const response = await handleAutomationRequest(
+      new Request(
+        `https://example.test/automation/oauth/microsoft/callback?${rejected}`,
+      ),
+      dependencies,
+    );
+    assertEquals(response.status, 400);
+  }
+  assertEquals(completed, 1);
+});
+
 Deno.test("Gate E provider denial consumes the state through the bounded rejection path", async () => {
   let rejected = false;
+  const query = new URLSearchParams({
+    error: "access_denied",
+    error_description: "private",
+    error_uri: "https://accounts.google.com/o/oauth2/error",
+    state: "b".repeat(64),
+    scope: "https://www.googleapis.com/auth/gmail.readonly",
+    authuser: "0",
+    prompt: "consent",
+    iss: "https://accounts.google.com",
+    hd: "workspace.example",
+  });
   const response = await handleAutomationRequest(
     new Request(
-      `https://example.test/automation/oauth/microsoft/callback?error=access_denied&error_description=private&state=${
-        "b".repeat(64)
-      }`,
+      `https://example.test/automation/oauth/gmail/callback?${query}`,
     ),
     {
       authenticate: () => Promise.reject(new Error("not used")),

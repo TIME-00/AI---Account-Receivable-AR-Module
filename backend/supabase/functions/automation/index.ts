@@ -40,6 +40,48 @@ const COLLECTIONS: Record<string, string> = {
   commands: "automation_commands",
 };
 
+const GOOGLE_OAUTH_CALLBACK_ISSUER = "https://accounts.google.com";
+const GOOGLE_HOSTED_DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+
+function isGoogleHostedDomain(value: string): boolean {
+  if (value.length === 0 || value.length > 253) return false;
+  const labels = value.split(".");
+  return labels.length >= 2 &&
+    labels.every((label) => GOOGLE_HOSTED_DOMAIN_LABEL.test(label));
+}
+
+function assertOAuthCallbackProviderParameters(
+  url: URL,
+  provider: string,
+): void {
+  const issuer = url.searchParams.get("iss");
+  const hostedDomain = url.searchParams.get("hd");
+  if (provider !== "gmail") {
+    if (issuer !== null || hostedDomain !== null) {
+      throw new ValidationError(
+        "OAuth callback provider metadata is invalid.",
+        {
+          field: issuer !== null ? "iss" : "hd",
+          reason: "unsupported",
+        },
+      );
+    }
+    return;
+  }
+  if (issuer !== null && issuer !== GOOGLE_OAUTH_CALLBACK_ISSUER) {
+    throw new ValidationError("OAuth callback provider metadata is invalid.", {
+      field: "iss",
+      reason: "invalid",
+    });
+  }
+  if (hostedDomain !== null && !isGoogleHostedDomain(hostedDomain)) {
+    throw new ValidationError("OAuth callback provider metadata is invalid.", {
+      field: "hd",
+      reason: "invalid",
+    });
+  }
+}
+
 const COLLECTION_FILTERS: Record<string, readonly string[]> = {
   mailboxes: ["provider_type", "connection_status"],
   runs: ["provider_type", "status"],
@@ -331,15 +373,20 @@ export async function handleAutomationRequest(
         "authuser",
         "prompt",
         "session_state",
+        "iss",
+        "hd",
       ]);
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
       const providerError = url.searchParams.get("error");
       const provider = route.params.id;
+      if (provider !== "gmail" && provider !== "microsoft") {
+        throw new ValidationError("OAuth callback is invalid.");
+      }
+      assertOAuthCallbackProviderParameters(url, provider);
       if (
         req.url.length > 8_192 ||
         !state || !/^[A-Za-z0-9_-]{32,256}$/.test(state) ||
-        (provider !== "gmail" && provider !== "microsoft") ||
         (code !== null &&
           (code.length === 0 || code.length > 4_096 ||
             Array.from(code).some((character) => {
