@@ -909,6 +909,9 @@ count and `has_more` is derived from that count and the returned page.
   `OAUTH_STATE_EXPIRED` / `OAUTH_STATE_ALREADY_USED` /
   `OAUTH_STATE_MISMATCH` / `OAUTH_PROVIDER_DENIED` /
   `OAUTH_DISCONNECT_REQUIRED` — sanitized 409
+- `OAUTH_SECRET_REFERENCE_CONFLICT` — sanitized 409; the response states only
+  that the opaque reference is already in use and never identifies its tenant,
+  mailbox, or capability owner
 - `MAILBOX_SYNC_DISABLED` / `DOCUMENT_INTELLIGENCE_DISABLED` /
   `REMINDER_DELIVERY_DISABLED` — 409
 - `MAILBOX_RECONNECT_REQUIRED` — 409

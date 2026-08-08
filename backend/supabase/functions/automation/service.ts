@@ -92,6 +92,23 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 type Row = Record<string, unknown>;
 
+const OAUTH_SECRET_REFERENCE_CONFLICT = "OAUTH_SECRET_REFERENCE_CONFLICT";
+
+function throwMailboxPersistenceError(error: unknown): never {
+  const message = error && typeof error === "object" &&
+      typeof (error as Record<string, unknown>).message === "string"
+    ? String((error as Record<string, unknown>).message)
+    : "";
+  if (message.startsWith(`${OAUTH_SECRET_REFERENCE_CONFLICT}:`)) {
+    throw new BusinessError(
+      OAUTH_SECRET_REFERENCE_CONFLICT,
+      "This secret reference is already in use. Choose another reference.",
+      409,
+    );
+  }
+  throw error;
+}
+
 export function assertProviderMessageBounded(
   message: ProviderMessage,
 ): void {
@@ -1788,7 +1805,7 @@ export class AutomationService {
     };
     const { data, error } = await this.client.from("automation_mailboxes")
       .insert(record).select("*").single();
-    if (error) throw error;
+    if (error) throwMailboxPersistenceError(error);
     return mailboxDto(data as Row);
   }
 
@@ -1928,7 +1945,7 @@ export class AutomationService {
     const { data, error } = await this.client.from("automation_mailboxes")
       .update(patch).eq("id", mailboxId).eq("company_id", auth.companyId)
       .select("*").maybeSingle();
-    if (error) throw error;
+    if (error) throwMailboxPersistenceError(error);
     return mailboxDto(requiredId(data as Row | null, "Mailbox", mailboxId));
   }
 

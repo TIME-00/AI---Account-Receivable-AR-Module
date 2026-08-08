@@ -1918,6 +1918,66 @@ Deno.test("Automation document decisions use the enriched bounded service contra
   });
 });
 
+Deno.test("Duplicate mailbox OAuth reference returns a tenant-safe 409", async () => {
+  const client = {
+    from(table: string) {
+      assertEquals(table, "automation_mailboxes");
+      const query = {
+        insert() {
+          return query;
+        },
+        select() {
+          return query;
+        },
+        single() {
+          return Promise.resolve({
+            data: null,
+            error: {
+              code: "P0001",
+              message:
+                "OAUTH_SECRET_REFERENCE_CONFLICT: reference is already assigned",
+              details: "private cross-tenant database detail",
+            },
+          });
+        },
+      };
+      return query;
+    },
+  };
+  const response = await handleAutomationRequest(
+    new Request("https://example.test/automation/mailboxes", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Company-Id": auth.companyId,
+      },
+      body: JSON.stringify({
+        provider_type: "gmail",
+        mailbox_address: "controlled-mailbox@example.test",
+        ingestion_secret_ref: "AR_MAILBOX_INGESTION_1",
+        delivery_secret_ref: null,
+      }),
+    }),
+    {
+      authenticate: () => Promise.resolve(auth),
+      createService: () => new AutomationService({ client: client as never }),
+    },
+  );
+  assertEquals(response.status, 409);
+  const payload = await response.json();
+  assertEquals(payload.contract_version, "gate-e.1");
+  assertEquals(payload.error.code, "OAUTH_SECRET_REFERENCE_CONFLICT");
+  assertEquals(
+    payload.error.message,
+    "This secret reference is already in use. Choose another reference.",
+  );
+  const serialized = JSON.stringify(payload);
+  assert(!serialized.includes("reference is already assigned"));
+  assert(!serialized.includes("cross-tenant"));
+  assert(!serialized.includes("company_id"));
+  assert(!serialized.includes("mailbox_id"));
+});
+
 Deno.test("Rejected extraction cannot reach an Invoice or Receipt financial service", async () => {
   const queried: string[] = [];
   const client = {
