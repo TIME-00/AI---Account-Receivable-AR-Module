@@ -728,3 +728,51 @@ actions with one `Enable ingestion` PATCH containing `is_enabled=true` and
 `ingestion_enabled=true`; the matching disable action sets both false. Delivery
 must remain a separate capability. No real mailbox enable or synchronization was
 performed at this checkpoint.
+
+## Atomic ingestion-control frontend deployment
+
+Claude Code implemented the bounded frontend follow-up in three files: the
+Mailboxes page, its real page/hook regression suite, and the deterministic Gate
+E Playwright scenario. The standalone generic Enable/Disable mailbox control is
+removed. A connected disabled mailbox now exposes one `Enable ingestion` action
+that sends exactly one PATCH containing only `is_enabled=true` and
+`ingestion_enabled=true`; the corresponding disable action sends both fields as
+false. Delivery remains an independent one-field mutation. OAuth connect actions,
+manual synchronization, company kill switches, document intelligence, financial
+automation switches, reminders, and operating mode are unchanged.
+
+Codex independently reviewed the exact three-file diff read-only and returned
+PASS with no blocking defects. Independent validation reproduced the focused
+Automation page suite at 22/22, the full frontend suite at 65 files and 949/949
+tests, TypeScript PASS, ESLint PASS, and the Next.js Production build PASS. The
+modified deterministic Mailboxes browser assertions passed for both desktop and
+mobile Chromium with empty in-memory storage. The first local runner subsequently
+timed out while tearing down its owned loopback development server; the two test
+assertions had already passed, no Production auth state was read, and the loopback
+listener was confirmed stopped. This was a local process-teardown issue, not an
+application assertion failure.
+
+Commit `7ac02ad2ffd6b9956108c44e46eeffd7f6d506ae`
+(`feat(gate-e): simplify ingestion activation`) was pushed to `main`. Vercel's
+Git integration created Production deployment record `5812422908` for that exact
+commit. The deployment completed successfully at
+`https://account-receivable-module-wrqcjbpzu-time-00s-projects.vercel.app`, and
+the canonical alias `https://account-receivable-module.vercel.app/` returned
+HTTP 200. No duplicate manual Vercel deployment was created.
+
+The read-only Production snapshot at `2026-08-08T20:31:02Z` remains unchanged:
+one Gmail mailbox is connected, zero Gmail mailboxes require reconnect, and zero
+Gmail mailboxes are enabled, ingestion-enabled, or delivery-enabled. One safe
+ingestion-expiry metadata value remains present but is no longer future; this is
+the exact condition Automation v14 resolves through secure refresh-on-enable and
+does not require repeat consent by itself. Settings remain absent and operating
+mode remains `disabled`. Sync runs, source messages, attachments,
+classifications, extractions, commands, exceptions, allocation decisions,
+reminders, and reminder attempts remain zero. The frontend deployment performed
+no OAuth, provider, mailbox, financial, or business mutation.
+
+Gate E remains OPEN. The deployed frontend and Automation v14 are ready for the
+single authenticated human checkpoint: Production -> Automation -> Mailboxes ->
+existing connected Gmail mailbox -> click `Enable ingestion` once. The operator
+must not reconnect Gmail, connect delivery, run Sync now, change operating mode,
+or enable another kill switch at this checkpoint.
