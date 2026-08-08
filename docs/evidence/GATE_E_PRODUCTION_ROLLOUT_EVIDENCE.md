@@ -613,3 +613,61 @@ or reminder attempts. Operating mode therefore remains `disabled`; no OAuth or
 business/financial DML occurred. Gate E remains OPEN and Gmail OAuth must not
 resume until the frontend contract mirror is repaired and the authenticated
 Overview/settings/mailbox paths are reread successfully.
+
+## Gmail OAuth callback metadata compatibility remediation
+
+The first controlled Gmail ingestion-consent attempt reached the reviewed
+provider callback but failed before token exchange. Google returned the RFC 9207
+issuer parameter `iss=https://accounts.google.com`; the strict callback query
+allowlist did not yet include `iss`, so Production returned sanitized HTTP 400
+`VALIDATION_ERROR` with field `iss` and reason `unsupported`. OAuth start had
+succeeded, but the mailbox remained disconnected and no OAuth token metadata was
+created.
+
+Commit `34720116859d349272b1f842fd29c582976550b0`
+(`fix(gate-e): accept Google OAuth callback metadata`) contains the bounded
+four-file remediation. Gmail `iss` is optional but, when present, must equal
+exactly `https://accounts.google.com`; arbitrary and bare issuers remain
+rejected. Optional Gmail `hd` is DNS-syntax bounded and ignored after validation:
+it carries no tenant, company, mailbox, or authorization authority. Microsoft
+continues to reject Gmail-only `iss` and `hd`; duplicate and unknown parameters,
+state/capability/redirect binding, one-time consumption, Vault persistence, scope
+checks, and token redaction remain fail-closed and unchanged.
+
+Claude Code independently reviewed the exact four-file diff read-only and
+returned PASS with no blocking defects. Independently reproduced validation was:
+activation prerequisites 23/23, Gate E Automation 84/84, OpenAI 41/41,
+scheduler 26/26, combined focused 174/174, full recursive backend 425/425,
+Automation entrypoint type-check PASS, and Deno format/lint PASS.
+
+Only Automation was redeployed from the canonical backend source. Production
+Automation version 13 is ACTIVE with platform JWT verification disabled as
+reviewed; bundle SHA-256 is
+`5c59ddfeb7c8e343cb5f7214766003180654ce87a4f7cb9b5ddd5456383b6060`, and the
+deployment source was the clean tree at commit
+`34720116859d349272b1f842fd29c582976550b0`.
+
+Safe synthetic negative verification used no real authorization code or valid
+OAuth state:
+
+- the exact Google issuer was no longer classified as unsupported and proceeded
+  to the deliberately invalid-state guard (HTTP 400 `VALIDATION_ERROR` with no
+  provider-metadata field/reason);
+- an arbitrary issuer returned HTTP 400 `VALIDATION_ERROR`, field `iss`, reason
+  `invalid`; and
+- an unrelated query parameter returned HTTP 400 `VALIDATION_ERROR`, its field
+  name, and reason `unsupported`.
+
+The read-only Production snapshot at `2026-08-08T08:48:47Z` remained
+fail-closed: settings 0; non-disabled settings 0; Gmail mailboxes 1; connected,
+enabled, ingestion-enabled, and delivery-enabled Gmail mailboxes all 0; Gmail
+ingestion/delivery token-expiry metadata rows both 0; OAuth states 2, both
+expired and unconsumed, with no live unconsumed state. Sync runs, source
+messages, attachments, classifications, extractions, commands, allocations,
+reminders, and reminder attempts all remain 0. No migration, scheduler, worker
+secret, OpenAI configuration, provider credential, mailbox setting, or
+financial/business data was changed.
+
+Gate E remains OPEN, operating mode remains `disabled`, and the exact next human
+action is: Production -> Automation -> Mailboxes -> existing Gmail mailbox ->
+`Connect ingestion`.
