@@ -826,3 +826,40 @@ enable only `Mailbox Synchronization` and `Document Intelligence`, then select
 Auto-Allocation, Reminder Evaluation, and Reminder Delivery must remain off;
 the user must not connect delivery, run `Sync now`, or select Draft Only or
 Straight-Through at this checkpoint.
+
+## Observe-only activation and controlled input package
+
+The authorized Finance Manager completed the reviewed Settings-page sequence.
+Read-only Production verification on 2026-08-09 confirmed one settings row with
+`operating_mode=observe_only`, `mailbox_sync_enabled=true`, and
+`document_intelligence_enabled=true`. Invoice Automation, Receipt Automation,
+Auto-Allocation, Reminder Evaluation, and Reminder Delivery remain false. The
+one Gmail mailbox remains connected, enabled for ingestion, current by safe
+expiry metadata, and not reconnect-required; delivery remains disabled.
+Capability-specific readiness remains `ingestion_ready=true`,
+`document_intelligence_ready=true`, and `delivery_ready=false`.
+
+At this checkpoint no scheduler mailbox cycle had yet run: the Gmail cursor was
+absent, and sync runs, messages, attachments, classifications, extractions,
+commands, exceptions, allocation decisions, reminders, and delivery attempts
+all remained zero. The controlled financial comparison baseline remained 16
+invoices, 11 receipts, 13 allocation details, 26 journal entries, and 11
+customers. Observe-only activation itself performed no authoritative
+financial/business DML.
+
+Three disposable, credential-free PNG inputs were generated under ignored local
+Playwright output and visually verified before use: a MYR 100.00 invoice with
+reconciling line/subtotal/tax/total arithmetic, a matching MYR 100.00 TT receipt,
+and a non-financial warehouse memo expected to classify as unsupported. The two
+financial documents identify the existing explicitly labelled demo customer
+`CUST-00007` (`Batch 4 Smoke Test Sdn Bhd`) and use unique Observe-only
+references. Each file is a valid PNG well below the reviewed 8 MiB image bound.
+They are validation artifacts only and are not staged or committed.
+
+Gate E remains OPEN at the single external Gmail-input checkpoint. The user must
+send three separate controlled messages, one generated PNG attachment per
+message, to the already connected controlled mailbox using the prescribed
+Gate-E Observe subjects. No delivery consent, manual Sync action, financial
+switch, reminder switch, or operating-mode change is authorized at this
+checkpoint. The reviewed ten-minute scheduler will perform the subsequent sync
+and document-processing cycle.
