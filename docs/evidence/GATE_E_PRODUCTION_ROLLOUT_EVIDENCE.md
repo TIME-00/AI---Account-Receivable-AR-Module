@@ -776,3 +776,53 @@ single authenticated human checkpoint: Production -> Automation -> Mailboxes ->
 existing connected Gmail mailbox -> click `Enable ingestion` once. The operator
 must not reconnect Gmail, connect delivery, run Sync now, change operating mode,
 or enable another kill switch at this checkpoint.
+
+## Atomic Gmail ingestion activation checkpoint
+
+The authorized Finance Manager used the deployed single `Enable ingestion`
+control once. Read-only Production verification on 2026-08-09 confirmed the
+atomic backend result: the one Gmail mailbox remains `connected`, does not
+require reconnect, and now has both `is_enabled=true` and
+`ingestion_enabled=true`; `delivery_enabled` remains false. The safe ingestion
+expiry metadata moved from the previously stale value to
+`2026-08-09T07:31:58.403Z`, with the mailbox updated at
+`2026-08-09T06:31:59.751468Z`. This proves Automation v14 completed the reviewed
+refresh-on-enable lifecycle before making the enable flags authoritative; no
+repeat Google consent was required.
+
+Vault was inspected by identity/count only. Exactly one tenant/mailbox/provider/
+capability-bound Gmail ingestion secret record exists, the successful OAuth
+state is consumed, and no live pending OAuth state remains. No token, secret,
+mailbox address, browser authentication state, or credential value was read or
+recorded.
+
+The Production readiness inputs now prove the capability-specific result:
+
+- `ingestion_ready=true`: the mailbox is connected, enabled for ingestion, not
+  reconnect-required, has current safe expiry metadata, passed the exact
+  `gmail.readonly` scope check during enablement, and its opaque Vault token
+  resolves through the reviewed server-side lifecycle;
+- `document_intelligence_ready=true`: `OPENAI_API_KEY` is present by secret-name
+  metadata, `OPENAI_DOCUMENT_MODEL` is intentionally absent, and Automation v14
+  therefore selects the configured OpenAI adapter with reviewed default model
+  `gpt-5.6-luna`; and
+- `delivery_ready=false`: delivery remains disabled and has no separately
+  consented Gmail delivery credential. No generic `provider_ready` was used.
+
+Automation version 14 remains ACTIVE. `automation_settings` still has no row, so
+the effective operating mode is `disabled` and Mailbox Synchronization, Document
+Intelligence, Invoice Automation, Receipt Automation, Auto-Allocation, Reminder
+Evaluation, and Reminder Delivery all remain disabled. Sync runs, source
+messages, attachments, classifications, extractions, commands, exceptions,
+allocation decisions, reminders, and delivery attempts all remain zero. The
+current controlled financial baseline is 16 invoices, 11 receipts, 13 allocation
+details, 26 journal entries, and 11 customers; the mailbox activation created no
+Gate E command or other authoritative financial/business effect.
+
+Gate E remains OPEN. The next irreducible authenticated browser checkpoint is a
+single controlled Settings-page sequence by the authorized Finance Manager:
+enable only `Mailbox Synchronization` and `Document Intelligence`, then select
+`Observe Only` and confirm. Invoice Automation, Receipt Automation,
+Auto-Allocation, Reminder Evaluation, and Reminder Delivery must remain off;
+the user must not connect delivery, run `Sync now`, or select Draft Only or
+Straight-Through at this checkpoint.
