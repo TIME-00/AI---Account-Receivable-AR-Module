@@ -936,3 +936,63 @@ therefore required after the backend remediation review. Gate E remains OPEN;
 Draft Only and all financial automation phases remain blocked until this
 remediation is reviewed, deployed, and the retained extractions are safely
 recovered.
+
+## Observe-only recovery deployment and frontend activation blocker
+
+Claude Code independently reviewed the exact six-file Observe-only remediation
+read-only and returned PASS with no blocking defects. Commit
+`dcea90fca87f1c25f88e54e3f605c459e97fbfa2`
+(`fix(gate-e): recover observe-only document processing`) was pushed to
+`main`. Only the canonical Automation Edge Function was redeployed. Production
+Automation version 15 is ACTIVE with bundle SHA-256
+`6f503f02b0a23cd8dd39c58459cab7148083c95cf761fe0f7ba0df77e0247695` and was
+deployed from that exact clean commit. No migration, scheduler, secret, OAuth,
+mailbox setting, provider setting, or operating-mode mutation accompanied the
+deployment.
+
+The immediate post-deployment snapshot remained fail-closed and financially
+unchanged. Operating mode is `observe_only`; Mailbox Synchronization and
+Document Intelligence remain enabled; Invoice Automation, Receipt Automation,
+Auto-Allocation, Reminder Evaluation, Reminder Delivery, and Gmail delivery
+remain disabled. The one Gmail mailbox remains connected and ingestion-enabled,
+does not require reconnect, and has current safe expiry metadata. Counts remain
+16 invoices, 11 receipts, 13 allocation details, 26 journal entries, 11
+customers, three source messages, three source attachments, and zero Automation
+commands.
+
+The first natural version-15 scheduler cycle completed successfully after Gmail
+returned the three already-persisted provider messages. It treated all three
+messages and all three attachments as idempotent duplicates, created exactly
+three resolved `message_duplicate` and three resolved `attachment_duplicate`
+records, advanced without the prior partial-index `ON CONFLICT` failure, and
+created no duplicate source row, OpenAI processing, command, or financial
+effect. The next natural ten-minute cycle completed with zero messages. The
+resolved duplicate-exception counts and all source/financial counts remained
+stable, proving that the exact partial-index `23505` collision is a harmless
+no-op while unrelated failures remain fail-closed.
+
+The retained Invoice and Receipt extractions remain invalid with their original
+sanitized `internal_processing_failure` codes and exactly two retryable
+exceptions. They have not been resent or sent to OpenAI again. Recovery is
+intentionally available only through the reviewed authenticated Exception retry
+boundary; the scheduler does not silently override an operator-review state.
+
+Production now exposes the reviewed bounded nullable `exception.document`
+projection, but the current frontend `exceptionSchema` is strict and does not
+yet accept that field. Consequently the Exceptions surface cannot safely render
+the two retained retry controls or the required file/type/status/manual-review
+context. This is a material frontend contract/monitoring blocker, not a backend
+or OAuth defect. A second Draft Receipt prerequisite was also confirmed: the
+tenant has exactly one active bank account, but the controlled Gmail mailbox has
+no `default_bank_account_id`; the backend already validates and supports this
+company-bound mapping, while the current Mailboxes UI does not expose it.
+
+Gate E remains OPEN. The next single implementation checkpoint is one
+consolidated Claude Code frontend scope: mirror and render the bounded Exception
+document projection with usable retry controls, and expose a company-scoped
+default receiving-bank-account selector for the mailbox without changing OAuth,
+delivery, automation switches, operating mode, or financial authority. After
+that frontend passes independent review and Production deployment, the Finance
+Manager can select the controlled bank mapping and retry the two retained
+financial-document exceptions in one browser visit before Draft Only
+progression.
