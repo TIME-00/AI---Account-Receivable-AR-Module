@@ -847,6 +847,13 @@ invoices, 11 receipts, 13 allocation details, 26 journal entries, and 11
 customers. Observe-only activation itself performed no authoritative
 financial/business DML.
 
+The normal scheduler subsequently completed two zero-message Gmail cycles by
+`2026-08-09T07:10:03.644Z`. Both runs completed without failure, established the
+reviewed `history_id` incremental cursor, and persisted no message, attachment,
+classification, extraction, or exception. This validates the connected Gmail
+provider path and cursor bootstrap without a manual Sync action or uncontrolled
+mailbox content.
+
 Three disposable, credential-free PNG inputs were generated under ignored local
 Playwright output and visually verified before use: a MYR 100.00 invoice with
 reconciling line/subtotal/tax/total arithmetic, a matching MYR 100.00 TT receipt,
