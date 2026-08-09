@@ -946,6 +946,34 @@ export function commandDto(row: AutomationRow): AutomationRow {
 }
 
 export function exceptionDto(row: AutomationRow): AutomationRow {
+  const context = row.document_context as AutomationRow | null | undefined;
+  const document = context == null ? null : {
+    file_name: requiredString(
+      context.file_name,
+      "exception.document.file_name",
+      255,
+    ),
+    document_type: context.document_type == null ? null : enumValue(
+      context.document_type,
+      "exception.document.document_type",
+      ["invoice", "receipt", "payment_advice", "unsupported", "ambiguous"],
+    ),
+    processing_status: requiredString(
+      context.processing_status,
+      "exception.document.processing_status",
+      40,
+    ),
+    classification_status: context.classification_status == null
+      ? null
+      : enumValue(
+        context.classification_status,
+        "exception.document.classification_status",
+        ["proposed", "accepted", "rejected"],
+      ),
+    manual_review_required: ["open", "retryable"].includes(
+      String(row.lifecycle_status),
+    ),
+  };
   return {
     id: uuid(row.id, "exception.id"),
     company_id: uuid(row.company_id, "exception.company_id"),
@@ -977,6 +1005,7 @@ export function exceptionDto(row: AutomationRow): AutomationRow {
       "exception.resolution_note",
       1000,
     ),
+    document,
     opened_at: nullableTimestamp(row.opened_at, "exception.opened_at"),
     resolved_at: nullableTimestamp(row.resolved_at, "exception.resolved_at"),
     dismissed_at: nullableTimestamp(row.dismissed_at, "exception.dismissed_at"),

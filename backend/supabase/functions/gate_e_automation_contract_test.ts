@@ -44,10 +44,14 @@ import {
   assertAutomaticAllocationCommandEligible,
   assertProviderMessageBounded,
   attachmentExceptionReason,
+  AUTOMATION_CUSTOMER_CODE_DATABASE_COLUMN,
+  AUTOMATION_CUSTOMER_RESOLUTION_SELECT,
   AutomationService,
   boundedOAuthAuthorizationUrl,
   buildAutomaticAllocationPlan,
+  customerResolutionFailureMayRecover,
   exactAutomationDecimalNumber,
+  isAutomationExceptionIdempotencyConflict,
   mailboxCapabilityIsReady,
   tokenExpiryIsCurrent,
 } from "./automation/service.ts";
@@ -58,6 +62,7 @@ import {
   automationSettingsDto,
   currentAssignmentDto,
   documentDecisionDto,
+  exceptionDto,
   mailboxDto,
   reminderDto,
   safeAutomationMetadata,
@@ -303,6 +308,74 @@ Deno.test("Gate E document-decision DTO normalizes provider, attachment, and ext
     "invoice",
   );
   assertEquals("provider_name" in dto, false);
+});
+
+Deno.test("Gate E exception DTO exposes bounded monitoring context without document contents", () => {
+  const dto = exceptionDto({
+    id: classificationId,
+    company_id: companyId,
+    mailbox_id: mailboxId,
+    sync_run_id: null,
+    message_id: null,
+    attachment_id: attachmentId,
+    command_id: null,
+    invoice_id: null,
+    receipt_id: null,
+    reason_code: "unsupported_document",
+    idempotency_key: null,
+    lifecycle_status: "open",
+    safe_details: { document_type: "unsupported" },
+    retry_count: 0,
+    max_retries: 3,
+    actor_user_id: null,
+    resolution_note: null,
+    opened_at: now,
+    resolved_at: null,
+    dismissed_at: null,
+    updated_at: now,
+    document_context: {
+      file_name: "gate-e-observe-unsupported-20260809.png",
+      document_type: "unsupported",
+      processing_status: "processed",
+      classification_status: "rejected",
+    },
+  });
+  assertEquals(dto.document, {
+    file_name: "gate-e-observe-unsupported-20260809.png",
+    document_type: "unsupported",
+    processing_status: "processed",
+    classification_status: "rejected",
+    manual_review_required: true,
+  });
+  assertEquals(JSON.stringify(dto).includes("document_context"), false);
+  assertEquals(
+    exceptionDto({
+      ...dto,
+      lifecycle_status: "resolved",
+      resolved_at: now,
+      resolution_note: "Reviewed safely.",
+      document_context: {
+        file_name: "gate-e-observe-unsupported-20260809.png",
+        document_type: "unsupported",
+        processing_status: "processed",
+        classification_status: "rejected",
+      },
+    }).document,
+    {
+      file_name: "gate-e-observe-unsupported-20260809.png",
+      document_type: "unsupported",
+      processing_status: "processed",
+      classification_status: "rejected",
+      manual_review_required: false,
+    },
+  );
+  assertEquals(
+    exceptionDto({
+      ...dto,
+      document_context: null,
+    }).document,
+    null,
+  );
 });
 
 Deno.test("Gate E current assignment and history include normalized representative identity", () => {
@@ -884,6 +957,72 @@ Deno.test("Gate E ambiguous exact customer match fails closed", async () => {
         customer_name: `Customer ${id}`,
       })),
     ), "CUSTOMER_AMBIGUOUS");
+});
+
+Deno.test("Gate E runtime customer resolver uses the PostgreSQL business-code column", () => {
+  assertEquals(AUTOMATION_CUSTOMER_CODE_DATABASE_COLUMN, "customer_id");
+  assertEquals(
+    AUTOMATION_CUSTOMER_RESOLUTION_SELECT,
+    "id,customer_id,registration_no,tax_id,contact_email,customer_name",
+  );
+  assert(
+    !AUTOMATION_CUSTOMER_RESOLUTION_SELECT.split(",").includes(
+      "customer_code",
+    ),
+    "The runtime customer query must not select the nonexistent customer_code column",
+  );
+});
+
+Deno.test("Gate E persisted customer-resolution failures remain safely retryable", () => {
+  assert(customerResolutionFailureMayRecover(["customer_unresolved"]));
+  assert(customerResolutionFailureMayRecover(["customer_ambiguous"]));
+  assert(customerResolutionFailureMayRecover(["internal_processing_failure"]));
+  assert(
+    !customerResolutionFailureMayRecover(["arithmetic_mismatch"]),
+    "Non-customer validation failures must not be reclassified as resolved",
+  );
+  assert(
+    !customerResolutionFailureMayRecover(["invoice_conflict"]),
+    "Financial identifier conflicts must remain fail-closed",
+  );
+});
+
+Deno.test("Gate E persisted extraction recovery revalidates financial identifiers before acceptance", async () => {
+  const service = await Deno.readTextFile(
+    new URL("./automation/service.ts", import.meta.url),
+  );
+  const recoveryStart = service.indexOf(
+    "if (!customerResolutionFailureMayRecover(validationCodes))",
+  );
+  const recoveryEnd = service.indexOf(
+    "const { data: recovered, error: recoveryError }",
+    recoveryStart,
+  );
+  const recovery = service.slice(recoveryStart, recoveryEnd);
+  assert(recoveryStart >= 0 && recoveryEnd > recoveryStart);
+  assert(recovery.includes("await this.resolveCustomer("));
+  assert(recovery.includes("await this.assertNoFinancialIdentifierConflict("));
+});
+
+Deno.test("Gate E exception idempotency ignores only its exact partial-index collision", () => {
+  assert(isAutomationExceptionIdempotencyConflict({
+    code: "23505",
+    message:
+      'duplicate key value violates unique constraint "uq_automation_exception_idempotency"',
+  }));
+  assert(
+    !isAutomationExceptionIdempotencyConflict({
+      code: "23505",
+      message: 'duplicate key value violates unique constraint "other_unique"',
+    }),
+  );
+  assert(
+    !isAutomationExceptionIdempotencyConflict({
+      code: "42501",
+      message: "permission denied",
+    }),
+  );
+  assert(!isAutomationExceptionIdempotencyConflict(null));
 });
 
 Deno.test("Gmail history adapter maps messages and cursor without real network", async () => {
@@ -2819,16 +2958,28 @@ Deno.test("Gate E source retains default-off providers, bounded worker, and no s
 });
 
 Deno.test("Mailbox retries record exact duplicate no-ops and still advance persisted message lifecycle", async () => {
-  const service = await Deno.readTextFile(
-    new URL("./automation/service.ts", import.meta.url),
-  );
+  const [service, migration] = await Promise.all([
+    Deno.readTextFile(new URL("./automation/service.ts", import.meta.url)),
+    Deno.readTextFile(
+      new URL(
+        "../../../database/034_gate_e_autonomous_ar_operations.sql",
+        import.meta.url,
+      ),
+    ),
+  ]);
   assert(service.includes('reason_code: "message_duplicate"'));
   assert(service.includes('reason_code: "attachment_duplicate"'));
   assert(service.includes("duplicate_no_op: true"));
   assert(service.includes(
     'processing_status: "attachments_persisted"',
   ));
-  assert(service.includes('onConflict: "company_id,idempotency_key"'));
+  assert(migration.includes("uq_automation_exception_idempotency"));
+  assert(migration.includes("WHERE idempotency_key IS NOT NULL"));
+  assert(service.includes("isAutomationExceptionIdempotencyConflict(error)"));
+  assert(
+    !service.includes('from("automation_exceptions").upsert'),
+    "PostgREST cannot infer the partial exception idempotency index",
+  );
   assert(service.includes("ignoreDuplicates: true"));
   assert(service.includes('select("safe_storage_path")'));
   assert(service.includes(
@@ -2879,6 +3030,22 @@ Deno.test("Mailbox document processing resumes a durable bounded attachment back
       '.eq("company_id", auth.companyId).eq("sync_run_id", run.id)',
     ),
   );
+});
+
+Deno.test("Exception collection derives tenant-scoped document monitoring context", async () => {
+  const service = await Deno.readTextFile(
+    new URL("./automation/service.ts", import.meta.url),
+  );
+  assert(service.includes('table === "automation_exceptions"'));
+  assert(service.includes(
+    '.select("id,original_file_name,processing_status")',
+  ));
+  assert(service.includes(
+    '.select("id,attachment_id,document_type,status,created_at")',
+  ));
+  assert(service.includes('.eq("company_id", auth.companyId)'));
+  assert(service.includes("document_context: attachment"));
+  assert(service.includes("classification_status: classification?.status"));
 });
 
 Deno.test("Reminder delivery never retries an unconfirmed provider outcome", async () => {

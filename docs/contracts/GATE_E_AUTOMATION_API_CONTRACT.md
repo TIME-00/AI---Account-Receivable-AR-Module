@@ -364,7 +364,12 @@ by the Edge Function.
   this command-result transition commit together inside the database.
 - Exception: source lineage IDs, bounded `reason_code`, optional SHA-256
   idempotency key, lifecycle, safe redacted details, retry counters, actor,
-  resolution note, and lifecycle timestamps.
+  resolution note, lifecycle timestamps, and nullable bounded document
+  monitoring context. When an attachment is linked, that context contains only
+  file name, document type, attachment processing status, classification
+  status, and `manual_review_required` derived from the open/retryable lifecycle;
+  document bytes and extracted financial candidates are never returned through
+  the exception DTO.
 - Reminder: invoice/customer/sales-representative IDs, stage and scheduled
   date, lifecycle, recipient/customer/invoice/due/outstanding/currency
   snapshots, and timestamps. Attempts add mailbox/provider, attempt number,
@@ -870,7 +875,16 @@ internal_processing_failure
 
 `message_duplicate` and `attachment_duplicate` are stored once per deterministic
 idempotency key as resolved no-op evidence. They never re-enter a financial
-command.
+command. The partial PostgreSQL uniqueness predicate is enforced by inserting
+normally and treating only SQLSTATE `23505` from
+`uq_automation_exception_idempotency` as the already-recorded no-op; unrelated
+constraint or database failures are never swallowed.
+
+The extraction candidate field is `customer.customer_code`. Deterministic
+resolution compares it with the existing PostgreSQL business identifier
+`customers.customer_id`, then returns the matching row's UUID as authoritative
+`customer_id`. No provider-supplied customer value becomes tenant or financial
+authority by itself.
 
 ## Frozen enums and filters
 

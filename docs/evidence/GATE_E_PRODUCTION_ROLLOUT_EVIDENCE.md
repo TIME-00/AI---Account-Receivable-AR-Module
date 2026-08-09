@@ -870,3 +870,69 @@ Gate-E Observe subjects. No delivery consent, manual Sync action, financial
 switch, reminder switch, or operating-mode change is authorized at this
 checkpoint. The reviewed ten-minute scheduler will perform the subsequent sync
 and document-processing cycle.
+
+## Observe-only Gmail and document-intelligence Production result
+
+The three controlled messages reached the connected Gmail mailbox and were
+ingested by one natural scheduled cycle without using `Sync now`. That run
+completed, advanced the `history_id` cursor, and persisted exactly three source
+messages and three accepted attachments, one attachment per controlled message.
+Each target attachment exists exactly once. Three immediately subsequent
+completed cycles observed zero new messages, confirming the incremental cursor
+and target-row idempotency before a later duplicate-history defect described
+below.
+
+Production invoked the configured OpenAI Responses adapter with the reviewed
+default model `gpt-5.6-luna` for all three attachments. The synthetic invoice
+was classified as Invoice with accepted classification and internally
+reconciling MYR 100.00 extraction candidates. The synthetic receipt was
+classified as Receipt with accepted classification and extracted the exact MYR
+100.00 payment and Invoice references. The warehouse memo was classified as
+unsupported, produced no extraction or command, and remains visible as an open
+`unsupported_document` exception requiring review. No API key, provider body,
+OAuth token, mailbox address, or unrelated mailbox content was read or recorded.
+
+Both financial extractions were safely retained as invalid with sanitized
+`internal_processing_failure` exceptions before any command. Production log
+correlation proved that the deterministic customer resolver queried a
+nonexistent physical column named `customers.customer_code`; this schema's
+existing business-code column is `customers.customer_id`. A second bounded
+defect appeared when later Gmail history returned an already-persisted message:
+the exception helper attempted PostgREST upsert inference against the partial
+exception-idempotency index, and PostgreSQL rejected it because no matching
+unconditional constraint exists. Ten-minute sync runs therefore failed safely
+with redacted `INTERNAL_PROCESSING_FAILURE`; the root secret, OAuth credential,
+cursor, and provider message identity remained private.
+
+The local remediation is pending one independent read-only review. It maps the
+provider candidate `customer_code` to physical `customers.customer_id`, allows
+the already-persisted customer-resolution result to retry through the same
+deterministic resolver and financial-identifier conflict check, and replaces
+the invalid partial-index upsert with a normal insert that suppresses only
+SQLSTATE `23505` naming the exact
+`uq_automation_exception_idempotency` constraint. All other validation and
+database failures remain fail-closed. No migration is required.
+
+Local validation after the bounded repair is PASS: Gate E Automation 91/91,
+activation prerequisites 28/28, OpenAI 41/41, scheduler 26/26, combined focused
+186/186, and full recursive backend 437/437. All 17 deployable Edge entrypoints
+and the focused Automation sources type-check; Deno format and lint, Git diff
+check, and the added-line secret/auth-state scan pass.
+
+Observe-only financial safety passed. The controlled targets created three
+classifications, two extraction rows, three exceptions, and zero commands. The
+comparison baseline remains unchanged at 16 invoices, 11 receipts, 13
+allocation details, 26 journal entries, and 11 customers. Invoice/Receipt
+automation, allocation, reminders, and delivery remain disabled; operating mode
+remains `observe_only`.
+
+The Documents view exposes file name, classification type, processing and
+classification status, validation status/codes, confidence, provider/model,
+and linked-exception count. The local backend remediation now also enriches each
+linked Exception DTO with a bounded file/type/processing/classification/manual-
+review projection, but the current frontend contract and Exceptions table do
+not yet render it. One consolidated frontend contract/UI/test follow-up is
+therefore required after the backend remediation review. Gate E remains OPEN;
+Draft Only and all financial automation phases remain blocked until this
+remediation is reviewed, deployed, and the retained extractions are safely
+recovered.

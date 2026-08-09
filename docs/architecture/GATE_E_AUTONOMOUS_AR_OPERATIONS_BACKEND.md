@@ -447,6 +447,14 @@ Customer resolution is deterministic in this order:
 Ambiguous and unresolved candidates fail closed. Customers are never
 auto-created and fuzzy matching never provides final authority. Resolution uses
 bounded targeted database queries rather than a truncated customer roster.
+The provider-facing candidate remains named `customer_code`, while the legacy
+PostgreSQL business-code column is `customers.customer_id`; the runtime query
+maps between those two names explicitly and returns the immutable customer UUID
+as financial authority. Persisted customer-resolution failures may re-enter
+this deterministic resolver without another provider request, including a
+sanitized internal failure caused before customer authority was established.
+Recovery also re-runs the deterministic financial-identifier conflict check
+before the persisted extraction can become valid.
 
 ## Financial command modes
 
@@ -470,6 +478,19 @@ compensating draft deletion is used. A worker crash before that RPC leaves no
 financial record and the stale claim becomes reclaimable after fifteen
 minutes. Commands are SHA-256 idempotent across company, mailbox, provider
 message, attachment hash, command type, and schema version.
+
+Duplicate provider messages and attachments create resolved no-op exception
+evidence through the partial unique index on `(company_id, idempotency_key)`.
+Because PostgREST cannot infer that partial index through a bare `on_conflict`
+column list, the runtime performs a normal insert and suppresses only SQLSTATE
+`23505` naming `uq_automation_exception_idempotency`. Every other database
+error remains fail-closed.
+
+Exception collection reads enrich each tenant-scoped row with a bounded
+monitoring projection from its linked attachment and latest classification:
+file name, document type, processing status, classification status, and an
+explicit manual-review flag. It does not expose document bytes, raw extracted
+fields, provider bodies, or credentials.
 
 The scheduled worker can synchronize ready mailboxes, process a bounded set of
 accepted attachments, persist decisions, execute the same mode-governed command

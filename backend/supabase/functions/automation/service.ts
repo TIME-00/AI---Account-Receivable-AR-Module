@@ -94,6 +94,30 @@ type Row = Record<string, unknown>;
 
 const OAUTH_SECRET_REFERENCE_CONFLICT = "OAUTH_SECRET_REFERENCE_CONFLICT";
 
+export const AUTOMATION_CUSTOMER_RESOLUTION_SELECT =
+  "id,customer_id,registration_no,tax_id,contact_email,customer_name";
+export const AUTOMATION_CUSTOMER_CODE_DATABASE_COLUMN = "customer_id";
+
+export function customerResolutionFailureMayRecover(
+  validationCodes: readonly string[],
+): boolean {
+  return validationCodes.some((code) =>
+    code === "customer_unresolved" ||
+    code === "customer_ambiguous" ||
+    code === "internal_processing_failure"
+  );
+}
+
+export function isAutomationExceptionIdempotencyConflict(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  return record.code === "23505" &&
+    typeof record.message === "string" &&
+    record.message.includes("uq_automation_exception_idempotency");
+}
+
 function throwMailboxPersistenceError(error: unknown): never {
   const message = error && typeof error === "object" &&
       typeof (error as Record<string, unknown>).message === "string"
@@ -1747,8 +1771,74 @@ export class AutomationService {
       })
       .order("id", { ascending: false }).range(from, to);
     if (error) throw error;
+    let sourceRows = (data ?? []) as Row[];
+    if (table === "automation_exceptions") {
+      const attachmentIds = [
+        ...new Set(
+          sourceRows.flatMap((row) =>
+            typeof row.attachment_id === "string" ? [row.attachment_id] : []
+          ),
+        ),
+      ];
+      if (attachmentIds.length > 0) {
+        const [attachmentsResult, classificationsResult] = await Promise.all([
+          this.client.from("automation_source_attachments")
+            .select("id,original_file_name,processing_status")
+            .eq("company_id", auth.companyId).in("id", attachmentIds)
+            .limit(attachmentIds.length),
+          this.client.from("automation_document_classifications")
+            .select("id,attachment_id,document_type,status,created_at")
+            .eq("company_id", auth.companyId).in("attachment_id", attachmentIds)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(Math.min(attachmentIds.length * 10, 1000)),
+        ]);
+        if (attachmentsResult.error) throw attachmentsResult.error;
+        if (classificationsResult.error) throw classificationsResult.error;
+        const attachmentById = new Map(
+          ((attachmentsResult.data ?? []) as Row[]).map((row) => [
+            String(row.id),
+            row,
+          ]),
+        );
+        const classificationByAttachment = new Map<string, Row>();
+        for (const row of (classificationsResult.data ?? []) as Row[]) {
+          const attachmentId = String(row.attachment_id);
+          if (!classificationByAttachment.has(attachmentId)) {
+            classificationByAttachment.set(attachmentId, row);
+          }
+        }
+        sourceRows = sourceRows.map((row) => {
+          const attachmentId = typeof row.attachment_id === "string"
+            ? row.attachment_id
+            : null;
+          const attachment = attachmentId
+            ? attachmentById.get(attachmentId)
+            : undefined;
+          const classification = attachmentId
+            ? classificationByAttachment.get(attachmentId)
+            : undefined;
+          return {
+            ...row,
+            document_context: attachment
+              ? {
+                file_name: attachment.original_file_name,
+                processing_status: attachment.processing_status,
+                document_type: classification?.document_type ?? null,
+                classification_status: classification?.status ?? null,
+              }
+              : null,
+          };
+        });
+      } else {
+        sourceRows = sourceRows.map((row) => ({
+          ...row,
+          document_context: null,
+        }));
+      }
+    }
     const total = count ?? 0;
-    const rows = ((data ?? []) as Row[]).map((row) =>
+    const rows = sourceRows.map((row) =>
       mapAutomationCollectionRow(table, row)
     );
     return {
@@ -2634,14 +2724,16 @@ export class AutomationService {
       lifecycle_status: "open",
       ...input,
     };
-    const query = input.idempotency_key
-      ? this.client.from("automation_exceptions").upsert(row, {
-        onConflict: "company_id,idempotency_key",
-        ignoreDuplicates: true,
-      })
-      : this.client.from("automation_exceptions").insert(row);
-    const { error } = await query;
-    if (error) throw error;
+    const { error } = await this.client.from("automation_exceptions").insert(
+      row,
+    );
+    if (
+      error &&
+      !(input.idempotency_key &&
+        isAutomationExceptionIdempotencyConflict(error))
+    ) {
+      throw error;
+    }
   }
 
   async processAttachment(
@@ -2754,11 +2846,7 @@ export class AutomationService {
           )
           ? existingExtraction.validation_codes.map(String)
           : [];
-        if (
-          !validationCodes.some((code: string) =>
-            code === "customer_unresolved" || code === "customer_ambiguous"
-          )
-        ) {
+        if (!customerResolutionFailureMayRecover(validationCodes)) {
           return {
             classification: existingClassification,
             extraction: existingExtraction,
@@ -2770,6 +2858,11 @@ export class AutomationService {
           auth,
           fields.customer,
           fields.document_type === "receipt" ? fields.invoice_references : [],
+        );
+        await this.assertNoFinancialIdentifierConflict(
+          auth,
+          fields,
+          resolved.customer_id,
         );
         const { data: recovered, error: recoveryError } = await this.client
           .from("automation_extraction_results").update({
@@ -3046,8 +3139,7 @@ export class AutomationService {
     },
     invoiceReferences: readonly string[],
   ): Promise<{ customer_id: string; method: string }> {
-    const columns =
-      "id,customer_code,registration_no,tax_id,contact_email,customer_name";
+    const columns = AUTOMATION_CUSTOMER_RESOLUTION_SELECT;
     const resolve = (
       rows: readonly Row[],
       method: string,
@@ -3072,7 +3164,7 @@ export class AutomationService {
 
     if (extracted.customer_code?.trim()) {
       const { data, error } = await base().eq(
-        "customer_code",
+        AUTOMATION_CUSTOMER_CODE_DATABASE_COLUMN,
         extracted.customer_code.trim(),
       ).limit(2);
       if (error) throw error;
