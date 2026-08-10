@@ -1257,3 +1257,19 @@ Draft financial-safety behavior remains PASS, but Draft-only quality acceptance
 and Straight-Through progression remain blocked until critical financial
 identifiers receive an independently verified, fail-closed boundary. Gate E
 remains OPEN.
+
+The stale Overview warning was a bounded frontend state/copy defect. Commit
+`2f21fa0d7252c7133459a68b8081a7820913c27e`
+(`fix(gate-e): report live automation status`) now renders the authoritative
+operating-mode label and the three independent readiness values already
+returned by Automation: mailbox ingestion, document intelligence, and
+reminder-email delivery. It states Straight-Through status separately and no
+longer asserts that providers, mailboxes, or the scheduler are universally
+inactive. No backend authority or readiness calculation moved to the frontend.
+
+Frontend validation passed: focused Automation/contract 123/123, full Vitest
+65 files and 975/975 tests, TypeScript, application-source ESLint, Production
+build, diff check, and added-line secret/auth-state scan. The Git-integrated
+Production bundle at the canonical `/automation` route returns HTTP 200,
+contains the new authoritative status copy, and no longer contains the stale
+inactive-provider warning. No manual duplicate Vercel deployment was created.
