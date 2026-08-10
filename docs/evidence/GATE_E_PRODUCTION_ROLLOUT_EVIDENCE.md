@@ -996,3 +996,64 @@ that frontend passes independent review and Production deployment, the Finance
 Manager can select the controlled bank mapping and retry the two retained
 financial-document exceptions in one browser visit before Draft Only
 progression.
+
+## Exception monitoring and receiving-bank activation deployment
+
+Claude Code completed the six-file frontend implementation and its validation
+PASS. Codex's first independent frontend review correctly stopped deployment
+because the Mailboxes selector allowed the existing System Admin configuration
+role while the reused `GET /bank-accounts` endpoint omitted that role from its
+read allowlist. Codex implemented an endpoint-local remediation that adds
+System Admin only to the authenticated, active, company-scoped bank-account
+read boundary. The shared operational-read helper, write authority, RLS,
+migrations, tenant filtering, and every unrelated endpoint remain unchanged.
+Claude Code then independently reviewed the backend remediation read-only and
+returned PASS with no blocking defects.
+
+The exact combined eight-file implementation was committed as
+`4f041dfd51683b62722d7a8a7910c87cc4b6312d`
+(`feat(gate-e): complete exception monitoring activation`) and pushed to
+`main`. The canonical `bank-accounts` Edge Function alone was redeployed as
+version 14. It is ACTIVE with platform JWT verification still enabled and
+bundle SHA-256
+`465d46ceac02017094176a2d85bbe7d3eb24f640a7e1961e5b3ebc1f348d46de`.
+Automation remains unchanged at version 15 and ACTIVE.
+
+The Git-integrated Vercel Production deployment
+`dpl_BNFshZVBEccNpmn3EsiV97kX8yjC` is READY from the exact implementation
+commit. The canonical alias
+`https://account-receivable-module.vercel.app/` returns HTTP 200. This deploys
+the strict Automation-v15 Exception document contract and monitoring context,
+the existing one-request Retry control, and the active company receiving-bank
+selector with masked account display and an exact one-field mailbox PATCH.
+No manual duplicate Vercel deployment was created.
+
+The read-only post-deployment Production snapshot is unchanged. Operating mode
+is `observe_only`; Mailbox Synchronization and Document Intelligence remain
+enabled; Invoice Automation, Receipt Automation, Auto-Allocation, Reminder
+Evaluation, Reminder Delivery, and Gmail delivery remain disabled. The single
+Gmail mailbox is connected, enabled, ingestion-enabled, not reconnect-required,
+and still has `default_bank_account_id = null`. The sole eligible active account
+is Maybank, `TSH Synergy Sdn Bhd - Operating Account`, MYR, masked as
+`****5678`.
+
+The retained controlled Invoice and Receipt exceptions remain independently
+identifiable as
+`gate-e-observe-invoice-20260809.png` and
+`gate-e-observe-receipt-20260809.png`. Both retain accepted classification,
+`internal_processing_failure`, retryable lifecycle, manual-review-required
+status, and retry count zero. No automatic Retry occurred. The unsupported
+warehouse memo remains outside this recovery action.
+
+Financial and business state remains exactly 16 invoices, 11 receipts, 13
+allocation details, 26 journal entries, 11 customers, and zero Automation
+commands. Deployment created no Invoice, Receipt, allocation, journal posting,
+payment application, reminder delivery, or other authoritative financial
+effect.
+
+Gate E remains OPEN. The next irreducible checkpoint is one authenticated
+Finance Manager browser visit: first select and save the masked Maybank MYR
+receiving account on the existing Gmail mailbox, then Retry each retained
+Invoice and Receipt exception exactly once. The user must not reconnect Gmail,
+connect delivery, run Sync now, alter operating mode or kill switches, retry the
+unsupported memo, or Resolve/Dismiss the retained financial exceptions.
