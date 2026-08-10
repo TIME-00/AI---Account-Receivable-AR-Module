@@ -1453,3 +1453,34 @@ reference resolution, then enable and prove Auto-Allocation under the new
 service/PostgreSQL authority boundary, retaining a negative ambiguous or
 non-matching case before progressing to Reminder Evaluation and the separate
 Gmail delivery-consent checkpoint.
+
+## Final functional activation macro-gate — local backend checkpoint
+
+Production was frozen at evidence commit
+`7708083edf2c8b19c7094d87baa812a87e70dbfe`, Automation v18, Draft Only,
+17 Invoices, 12 Receipts, 13 allocations, 26 journals, 11 customers, two
+Automation commands, and zero allocation decisions/reminders/delivery attempts.
+The historical Draft pair and unsupported exception were not mutated. Latest
+scheduler cycles contained no new work; retained provider-unavailable
+exceptions were not linked to pending attachments or unfinished commands, so
+there was no financially actionable mailbox backlog.
+
+The GitHub dependency banner was reproducible against the committed frontend
+lockfile (four High and two Moderate transitive findings). Bounded compatible
+overrides for brace-expansion, js-yaml, nanoid, undici, PostCSS, and Next's
+Sharp were regenerated without changing Product behavior. Lockfile,
+installed-tree, and runtime-only audits now each report zero vulnerabilities.
+
+Local prospective Migration 039 makes Operating Mode and Reminder Automation
+the only backend-authoritative business profiles. Exact derived capability
+booleans are persisted atomically and protected by a trigger plus CHECK
+constraints; raw booleans are no longer accepted by PATCH. Automatic Delivery
+requires live delivery readiness before any settings write. Migration 040 adds
+an immutable, tenant-bound Finance Manager recovery record, governed external
+Invoice-reference correction, governed human match confirmation, restricted
+source/recovery context, and deterministic idempotent Retry Matching. Original
+provider extraction is never rewritten; PostgreSQL continues to derive and
+execute the allocation amount. These migrations and Edge changes are local
+only: they have not been committed, pushed, applied, deployed, or activated.
+They require the planned single Claude backend/database read-only review plus
+substantial frontend implementation before any Production write.

@@ -2,24 +2,23 @@
 
 ## Status and safety posture
 
-Migrations 034 and 035 plus the reviewed Gate E Automation v2 application are
-deployed to Production, but Gate E remains open, disabled, and unactivated. This
-document also describes local Migration 036 and its scheduler/worker
-compatibility change, which are pending independent review and have not been
-committed, pushed, migrated, or deployed. No mailbox has been connected, OAuth
-consent completed, document-intelligence provider activated, email sent,
-scheduler installed, or Production automation mode advanced.
+Migrations 034 through 038 and Automation v18 are deployed to Production. Gate
+E remains open in Draft Only: Gmail ingestion, the scheduler, document
+intelligence, and governed Draft Invoice/Receipt creation are proven; delivery,
+reminders, Auto-Allocation, and Straight-Through remain off. This document also
+describes local prospective Migrations 039 and 040, which have not been
+committed, pushed, applied, deployed, or activated.
 
 Every company starts with no `automation_settings` row, which the API interprets
-as `disabled` with every kill switch off. Inserted settings also default to
+as `disabled` with every derived capability off. Inserted settings also default to
 `disabled`. Mailboxes default disabled and disconnected. Straight-through mode
 requires a Finance Manager, the exact activation confirmation, an existing
-tenant-bound automation actor, and compatible kill switches. No activation is
+tenant-bound automation actor, and an atomically derived capability profile. No activation is
 performed by this implementation.
 
-Changing that setting does not certify provider readiness. Ingestion, reminder
+Changing a mode does not invent provider readiness. Ingestion, reminder
 delivery, and document intelligence are independent runtime capabilities; each
-remains fail-closed until its own switch and prerequisites are satisfied.
+remains fail-closed until its profile and prerequisites are satisfied.
 
 ## Trust boundaries
 
@@ -466,6 +465,15 @@ before the persisted extraction can become valid.
   validated candidates may use governed creation/posting and evidence-backed
   auto-allocation.
 
+Migration 039 makes these modes backend-authoritative profiles. It derives all
+five persisted document capability booleans in one row trigger and backs them
+with exact CHECK constraints; clients cannot PATCH the raw booleans. Reminder
+Automation is a separate `off | evaluate_only | automatic_delivery` profile.
+Evaluation is independent from document mode, while Automatic Delivery is
+atomically refused unless the delivery mailbox/credential is ready. Finance
+Manager authority remains required to arm either active profile; System Admin
+can configure policy or turn profiles off but cannot arm financial execution.
+
 Provider-declared confidence is not independent evidence that a financial
 identifier was transcribed exactly. Identifier authority is therefore applied
 at the decision it can authorize rather than treating every optional reference
@@ -526,6 +534,20 @@ file name, document type, processing status, classification status, and an
 explicit manual-review flag. It does not expose document bytes, raw extracted
 fields, provider bodies, or credentials.
 
+Migration 040 adds an immutable, service-role-only recovery authority for
+`critical_identifier_unverified`. A Finance Manager can either correct only a
+posted Invoice external `reference_no` through the existing governed/audited
+correction RPC, or confirm one eligible Invoice as the intended Receipt match.
+Neither action changes the immutable extraction. The restricted recovery read
+uses current same-company/customer/currency/status/outstanding records and
+authenticated no-store source-document streams; the generic exception DTO
+stays redacted. Retry Matching acquires deterministic locks, revalidates the
+selected financial records and Straight-Through profile, derives the amount as
+the lesser of current Receipt unallocated and Invoice outstanding, invokes the
+existing allocator, and resolves the Exception idempotently. Human review may
+supply relationship authority, but never tenant, amount, FX, posting, journal,
+or SQL authority.
+
 The scheduled worker can synchronize ready mailboxes, process a bounded set of
 accepted attachments, persist decisions, execute the same mode-governed command
 path, evaluate reminders in each configured timezone, and deliver only through
@@ -557,7 +579,8 @@ Reminder content is text-only:
 - instruction to contact the customer
 
 It contains no attachment, bank credentials, statement, secret, or unnecessary
-personal data. Evaluation and delivery have independent kill switches.
+personal data. Evaluation and delivery are derived from the single high-level
+Reminder Automation mode, not independently editable kill switches.
 
 ## Rollout prerequisites
 

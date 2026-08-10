@@ -18,13 +18,13 @@ import {
 } from "@/components/features/automation/states";
 import { useAutomationOverview } from "@/hooks/use-automation";
 import {
-  KILL_SWITCH_LABEL,
+  CAPABILITY_LABEL,
   OPERATING_MODE_DESCRIPTION,
   OPERATING_MODE_LABEL,
   OPERATING_MODE_TONE,
   switchStatusLabel,
 } from "@/lib/automation/labels";
-import { KILL_SWITCH_KEYS } from "@/lib/automation/contract";
+import { CAPABILITY_KEYS } from "@/lib/automation/contract";
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
@@ -154,14 +154,15 @@ export default function AutomationOverviewPage() {
         </div>
       </section>
 
-      {/* Kill switches */}
+      {/* Capabilities — read-only, backend-derived from the automation modes. */}
       <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="text-sm font-semibold text-slate-800">Kill Switches</h2>
+        <h2 className="text-sm font-semibold text-slate-800">Capabilities</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Each capability is independently controlled. All default to disabled.
+          Capabilities are managed automatically based on the selected automation
+          modes. All default to disabled.
         </p>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {KILL_SWITCH_KEYS.map((key) => {
+          {CAPABILITY_KEYS.map((key) => {
             const status = switchStatusLabel(settings[key]);
             return (
               <li
@@ -169,7 +170,7 @@ export default function AutomationOverviewPage() {
                 className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2"
               >
                 <span className="text-xs font-medium text-slate-700">
-                  {KILL_SWITCH_LABEL[key]}
+                  {CAPABILITY_LABEL[key]}
                 </span>
                 <AutomationBadge label={status.label} tone={status.tone} />
               </li>

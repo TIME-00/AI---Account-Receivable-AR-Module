@@ -8,11 +8,13 @@ import {
   assertExactKeys,
   assertQueryParameters,
   automationSuccess,
+  documentCapabilityProfile,
   isSemanticIsoDate,
   isSemanticIsoTimestamp,
   normalizeEmail,
   normalizePhone,
   parsePage,
+  reminderCapabilityProfile,
   requireIsoDate,
 } from "./automation/contract.ts";
 import {
@@ -64,6 +66,7 @@ import {
   currentAssignmentDto,
   documentDecisionDto,
   exceptionDto,
+  exceptionRecoveryContextDto,
   mailboxDto,
   reminderDto,
   safeAutomationMetadata,
@@ -4095,4 +4098,320 @@ Deno.test("Migration 034b is rollback-only and verifies service-role-only RPCs",
   assert(sql.includes("has_table_privilege("));
   assert(sql.includes("idx_automation_source_attachment_retention"));
   assert(sql.includes("ingestion_token_expires_at IS NOT NULL"));
+});
+
+Deno.test("Operating Mode and Reminder Mode derive exact canonical capability profiles", () => {
+  assertEquals(documentCapabilityProfile("disabled"), {
+    mailbox_sync_enabled: false,
+    document_intelligence_enabled: false,
+    invoice_automation_enabled: false,
+    receipt_automation_enabled: false,
+    auto_allocation_enabled: false,
+  });
+  assertEquals(documentCapabilityProfile("observe_only"), {
+    mailbox_sync_enabled: true,
+    document_intelligence_enabled: true,
+    invoice_automation_enabled: false,
+    receipt_automation_enabled: false,
+    auto_allocation_enabled: false,
+  });
+  assertEquals(documentCapabilityProfile("draft_only"), {
+    mailbox_sync_enabled: true,
+    document_intelligence_enabled: true,
+    invoice_automation_enabled: true,
+    receipt_automation_enabled: true,
+    auto_allocation_enabled: false,
+  });
+  assertEquals(documentCapabilityProfile("straight_through"), {
+    mailbox_sync_enabled: true,
+    document_intelligence_enabled: true,
+    invoice_automation_enabled: true,
+    receipt_automation_enabled: true,
+    auto_allocation_enabled: true,
+  });
+  assertEquals(reminderCapabilityProfile("off"), {
+    reminder_evaluation_enabled: false,
+    reminder_delivery_enabled: false,
+  });
+  assertEquals(reminderCapabilityProfile("evaluate_only"), {
+    reminder_evaluation_enabled: true,
+    reminder_delivery_enabled: false,
+  });
+  assertEquals(reminderCapabilityProfile("automatic_delivery"), {
+    reminder_evaluation_enabled: true,
+    reminder_delivery_enabled: true,
+  });
+});
+
+Deno.test("Settings API refuses raw capability mutation and preserves Finance Manager arming", async () => {
+  const service = new AutomationService({ client: {} as never });
+  for (
+    const field of [
+      "mailbox_sync_enabled",
+      "document_intelligence_enabled",
+      "invoice_automation_enabled",
+      "receipt_automation_enabled",
+      "auto_allocation_enabled",
+      "reminder_evaluation_enabled",
+      "reminder_delivery_enabled",
+    ]
+  ) {
+    await rejects(
+      () => service.updateSettings(auth, { [field]: true }),
+      "unexpected_fields",
+    );
+  }
+  const systemAdmin: AuthContext = {
+    ...auth,
+    roles: ["System Admin"],
+    highestRole: "System Admin",
+  };
+  await rejects(
+    () => service.updateSettings(systemAdmin, { operating_mode: "draft_only" }),
+    "Authorization",
+  );
+  await rejects(
+    () =>
+      service.updateSettings(systemAdmin, { reminder_mode: "evaluate_only" }),
+    "Authorization",
+  );
+});
+
+Deno.test("Automatic Reminder Delivery readiness failure leaves settings unmodified", async () => {
+  let upserts = 0;
+  const settings = {
+    company_id: auth.companyId,
+    automation_actor_user_id: auth.userId,
+    operating_mode: "draft_only",
+    mailbox_sync_enabled: true,
+    document_intelligence_enabled: true,
+    invoice_automation_enabled: true,
+    receipt_automation_enabled: true,
+    auto_allocation_enabled: false,
+    reminder_mode: "off",
+    reminder_evaluation_enabled: false,
+    reminder_delivery_enabled: false,
+    reminder_stage_offsets: [-3, 0],
+    reminder_timezone: "Asia/Kuala_Lumpur",
+    extraction_schema_version: 1,
+    minimum_overall_confidence: "0.9500",
+    minimum_critical_confidence: "0.9900",
+  };
+  const client = {
+    from(table: string) {
+      if (table === "automation_settings") {
+        const query = {
+          select() {
+            return query;
+          },
+          eq() {
+            return query;
+          },
+          maybeSingle() {
+            return Promise.resolve({ data: settings, error: null });
+          },
+          upsert() {
+            upserts++;
+            return query;
+          },
+          single() {
+            return Promise.resolve({ data: settings, error: null });
+          },
+        };
+        return query;
+      }
+      assertEquals(table, "automation_mailboxes");
+      const query = {
+        select() {
+          return query;
+        },
+        eq() {
+          return query;
+        },
+        order() {
+          return query;
+        },
+        limit() {
+          return Promise.resolve({ data: [], error: null });
+        },
+      };
+      return query;
+    },
+  };
+  const service = new AutomationService({ client: client as never });
+  await rejects(
+    () => service.updateSettings(auth, { reminder_mode: "automatic_delivery" }),
+    "REMINDER_DELIVERY_NOT_READY",
+  );
+  assertEquals(upserts, 0);
+});
+
+Deno.test("Critical-reference recovery DTO is strict, bounded, and separately privileged", () => {
+  const context = exceptionRecoveryContextDto({
+    exception_id: "10000000-0000-4000-8000-000000000040",
+    lifecycle_status: "open",
+    reason_code: "critical_identifier_unverified",
+    receipt: {
+      id: "10000000-0000-4000-8000-000000000041",
+      receipt_no: "RCT-202608-00002",
+      status: "Posted",
+      currency: "MYR",
+      unallocated_amount: "137.42",
+      attachment_id: "10000000-0000-4000-8000-000000000042",
+    },
+    original_invoice_references: ["SUPPLIER-INV-123"],
+    eligible_invoices: [{
+      invoice_id: "10000000-0000-4000-8000-000000000043",
+      invoice_no: "INV-202608-00002",
+      reference_no: "SUPPLIER-INV-123",
+      status: "Open",
+      currency: "MYR",
+      outstanding: "137.42",
+    }],
+    latest_recovery: null,
+  });
+  assertEquals(context.original_invoice_references, ["SUPPLIER-INV-123"]);
+  assertEquals((context.eligible_invoices as Record<string, unknown>[])[0], {
+    invoice_id: "10000000-0000-4000-8000-000000000043",
+    invoice_no: "INV-202608-00002",
+    reference_no: "SUPPLIER-INV-123",
+    status: "Open",
+    currency: "MYR",
+    outstanding: "137.42",
+  });
+  assertEquals(context.latest_recovery, null);
+  assert(
+    !("provider_payload" in context) && !("raw_document" in context),
+    "restricted recovery DTO must not expose provider internals",
+  );
+});
+
+Deno.test("Recovery routes preserve one governed mutation and no OpenAI payload", async () => {
+  const id = "10000000-0000-4000-8000-000000000040";
+  const invoiceId = "10000000-0000-4000-8000-000000000043";
+  const captured: Array<Record<string, unknown>> = [];
+  const service = {
+    getExceptionRecoveryContext: () => Promise.resolve({ exception_id: id }),
+    recordExceptionRecovery: (
+      _auth: AuthContext,
+      exceptionId: string,
+      input: Record<string, unknown>,
+    ) => {
+      captured.push({ exceptionId, ...input });
+      return Promise.resolve({ exception_id: id });
+    },
+    retryExceptionMatching: () => Promise.resolve({ command_id: invoiceId }),
+  } as unknown as AutomationService;
+  const dependencies = {
+    authenticate: () => Promise.resolve(auth),
+    createService: () => service,
+  };
+  const confirm = await handleAutomationRequest(
+    new Request(
+      `https://example.test/automation/exceptions/${id}/confirm-match`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Company-Id": auth.companyId,
+        },
+        body: JSON.stringify({
+          invoice_id: invoiceId,
+          resolution_note: "Reviewed source documents.",
+        }),
+      },
+    ),
+    dependencies,
+  );
+  assertEquals(confirm.status, 200);
+  assertEquals(captured, [{
+    exceptionId: id,
+    action_type: "confirm_receipt_invoice_match",
+    invoice_id: invoiceId,
+    resolution_note: "Reviewed source documents.",
+  }]);
+  const retry = await handleAutomationRequest(
+    new Request(
+      `https://example.test/automation/exceptions/${id}/retry-matching`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Company-Id": auth.companyId,
+        },
+        body: "{}",
+      },
+    ),
+    dependencies,
+  );
+  assertEquals(retry.status, 200);
+});
+
+Deno.test("Migration 039 derives atomic profiles without activating Production", async () => {
+  const sql = await Deno.readTextFile(
+    new URL(
+      "../../../database/039_gate_e_authoritative_capability_profiles.sql",
+      import.meta.url,
+    ),
+  );
+  const smoke = await Deno.readTextFile(
+    new URL(
+      "../../../database/039b_gate_e_authoritative_capability_profiles_smoke_tests.sql",
+      import.meta.url,
+    ),
+  );
+  assert(sql.includes("automation_apply_settings_profile"));
+  assert(
+    sql.includes(
+      "NEW.auto_allocation_enabled := NEW.operating_mode = 'straight_through'",
+    ),
+  );
+  assert(sql.includes("NEW.reminder_delivery_enabled :="));
+  assert(sql.includes("BR-AUTO-DELIVERY-NOT-READY"));
+  assert(sql.includes("SECURITY INVOKER"));
+  assert(
+    sql.includes(
+      "REVOKE ALL ON FUNCTION public.automation_apply_settings_profile()",
+    ),
+  );
+  assert(!sql.includes("SET operating_mode = 'straight_through'"));
+  assert(smoke.includes("ROLLBACK;"));
+  assert(!smoke.includes("COMMIT;"));
+});
+
+Deno.test("Migration 040 keeps recovery immutable, tenant-bound, redacted, and DB-authoritative", async () => {
+  const sql = await Deno.readTextFile(
+    new URL(
+      "../../../database/040_gate_e_exception_recovery_authority.sql",
+      import.meta.url,
+    ),
+  );
+  const smoke = await Deno.readTextFile(
+    new URL(
+      "../../../database/040b_gate_e_exception_recovery_authority_smoke_tests.sql",
+      import.meta.url,
+    ),
+  );
+  assert(sql.includes("CREATE TABLE public.automation_exception_recoveries"));
+  assert(sql.includes("AUDIT_IMMUTABLE"));
+  assert(sql.includes("ARRAY['Finance Manager']"));
+  assert(sql.includes("r.customer_id = i.customer_id"));
+  assert(sql.includes("r.currency = i.currency"));
+  assert(
+    sql.includes("LEAST(v_receipt.unallocated_amount, v_invoice.outstanding)"),
+  );
+  assert(sql.includes("'human_confirmed_invoice'"));
+  assert(sql.includes("public.allocate_receipt("));
+  assert(sql.includes("correct_posted_invoice_reference"));
+  assert(
+    sql.includes(
+      "v_exception.lifecycle_status NOT IN ('open', 'retryable')",
+    ),
+  );
+  assert(!sql.includes("levenshtein"));
+  assert(!sql.includes("provider_confidence"));
+  assert(!sql.includes("UPDATE public.automation_extraction_results"));
+  assert(smoke.includes("ROLLBACK;"));
+  assert(smoke.includes("service_role"));
+  assert(smoke.includes("authenticated"));
 });

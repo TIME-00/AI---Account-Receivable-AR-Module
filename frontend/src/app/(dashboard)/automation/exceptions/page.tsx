@@ -14,6 +14,7 @@ import {
   Pagination,
 } from "@/components/features/automation/collection";
 import { AutomationDialog } from "@/components/features/automation/dialog";
+import { RecoveryPanel } from "@/components/features/automation/recovery-panel";
 import {
   useDismissException,
   useExceptions,
@@ -68,12 +69,16 @@ function processingStatusLabel(value: string): string {
 export default function ExceptionQueuePage() {
   const { roles } = useUserRole();
   const canEdit = roles.some((r) => EDIT_ROLES.includes(r));
+  // Recording a recovery or running Retry Matching is Finance-Manager-only; the
+  // backend enforces this regardless of what the panel renders.
+  const canRecover = roles.includes("Finance Manager");
 
   const [page, setPage] = useState(1);
   const [lifecycle, setLifecycle] = useState<ExceptionLifecycle | undefined>();
   const [reason, setReason] = useState<ExceptionReasonCode | undefined>();
   const [noteFor, setNoteFor] = useState<{ id: string; action: "resolve" | "dismiss" } | null>(null);
   const [note, setNote] = useState("");
+  const [recoveryFor, setRecoveryFor] = useState<string | null>(null);
 
   const { data, isLoading, isError, isFetching, refetch } = useExceptions({
     page,
@@ -254,6 +259,18 @@ export default function ExceptionQueuePage() {
                     {canEdit && (
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
+                          {exception.reason_code ===
+                              "critical_identifier_unverified" &&
+                            (exception.lifecycle_status === "open" ||
+                              exception.lifecycle_status === "retryable") && (
+                            <button
+                              type="button"
+                              onClick={() => setRecoveryFor(exception.id)}
+                              className="rounded-lg border border-brand-300 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-700"
+                            >
+                              Recover
+                            </button>
+                          )}
                           {exception.lifecycle_status === "retryable" && (
                             <button
                               type="button"
@@ -352,6 +369,19 @@ export default function ExceptionQueuePage() {
           />
         </label>
       </AutomationDialog>
+
+      {/* Critical-reference recovery panel (Finance Manager mutates; the panel
+          fetches the restricted recovery context on demand). */}
+      {recoveryFor && (
+        <RecoveryPanel
+          exceptionId={recoveryFor}
+          open={recoveryFor !== null}
+          onOpenChange={(open) => {
+            if (!open) setRecoveryFor(null);
+          }}
+          canMutate={canRecover}
+        />
+      )}
     </div>
   );
 }

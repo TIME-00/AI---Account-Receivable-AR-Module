@@ -126,6 +126,22 @@ export const OPERATING_MODES = [
   "draft_only",
   "straight_through",
 ] as const;
+/**
+ * High-level, backend-authoritative reminder profile. The frontend only ever
+ * sends this enum; the raw `reminder_evaluation_enabled` / `reminder_delivery_
+ * enabled` booleans are DERIVED by the backend trigger and are never writable
+ * business controls from the UI.
+ */
+export const REMINDER_MODES = [
+  "off",
+  "evaluate_only",
+  "automatic_delivery",
+] as const;
+/** Governed critical-reference recovery actions (Migration 040). */
+export const RECOVERY_ACTION_TYPES = [
+  "correct_invoice_external_reference",
+  "confirm_receipt_invoice_match",
+] as const;
 export const CONNECTION_STATUSES = [
   "disabled",
   "pending_consent",
@@ -244,6 +260,8 @@ export const OAUTH_CAPABILITIES = ["ingestion", "delivery"] as const;
 
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export type OperatingMode = (typeof OPERATING_MODES)[number];
+export type ReminderMode = (typeof REMINDER_MODES)[number];
+export type RecoveryActionType = (typeof RECOVERY_ACTION_TYPES)[number];
 export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
 export type RunStatus = (typeof RUN_STATUSES)[number];
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
@@ -261,6 +279,7 @@ export type OAuthCapability = (typeof OAUTH_CAPABILITIES)[number];
 
 const providerType = z.enum(PROVIDER_TYPES);
 const operatingMode = z.enum(OPERATING_MODES);
+const reminderMode = z.enum(REMINDER_MODES);
 
 // ─── Envelope + collection meta ───────────────────────────────────────────────
 
@@ -462,6 +481,9 @@ export const settingsSchema = z.object({
   invoice_automation_enabled: z.boolean(),
   receipt_automation_enabled: z.boolean(),
   auto_allocation_enabled: z.boolean(),
+  // Backend-authoritative reminder profile. Present on every settings response;
+  // the raw booleans below are derived from it by the DB trigger.
+  reminder_mode: reminderMode,
   reminder_evaluation_enabled: z.boolean(),
   reminder_delivery_enabled: z.boolean(),
   reminder_stage_offsets: z.array(z.number().int()),
@@ -486,6 +508,16 @@ export const KILL_SWITCH_KEYS = [
   "reminder_delivery_enabled",
 ] as const;
 export type KillSwitchKey = (typeof KILL_SWITCH_KEYS)[number];
+
+/**
+ * Read-only derived capabilities surfaced on the Settings page. These are the
+ * same boolean fields, but the UI now presents them as backend-DERIVED status
+ * (managed automatically by the selected Operating Mode / Reminder Automation),
+ * never as independently togglable "kill switches". The frontend never PATCHes
+ * these — the backend trigger owns them.
+ */
+export const CAPABILITY_KEYS = KILL_SWITCH_KEYS;
+export type CapabilityKey = KillSwitchKey;
 
 export const salesRepresentativeSchema = z.object({
   id: uuid,
@@ -718,6 +750,57 @@ export const exceptionSchema = z.object({
   updated_at: isoTimestamp.nullable(),
 }).strict();
 export type AutomationException = z.infer<typeof exceptionSchema>;
+
+// ─── Critical-reference exception recovery (Migration 040) ────────────────────
+// A SEPARATE, more-privileged contract from the generic exception DTO. The
+// generic /exceptions response stays redacted (safe_details only); the extracted
+// candidate reference appears ONLY in this recovery-context surface, which the
+// backend gates to AR Supervisor / Finance Manager and binds to the resolved
+// customer. Every field is strictly bounded and fails closed on drift.
+
+export const recoveryReceiptSchema = z.object({
+  id: uuid,
+  receipt_no: boundedString(50),
+  status: z.enum(["Posted", "Fully Allocated"]),
+  currency: currency,
+  unallocated_amount: decimalString,
+  attachment_id: uuid,
+}).strict();
+export type RecoveryReceipt = z.infer<typeof recoveryReceiptSchema>;
+
+export const recoveryEligibleInvoiceSchema = z.object({
+  invoice_id: uuid,
+  invoice_no: boundedString(50),
+  reference_no: boundedString(50).nullable(),
+  status: z.enum(["Open", "Overdue", "Partially Paid"]),
+  currency: currency,
+  outstanding: decimalString,
+}).strict();
+export type RecoveryEligibleInvoice = z.infer<
+  typeof recoveryEligibleInvoiceSchema
+>;
+
+export const latestRecoverySchema = z.object({
+  id: uuid,
+  action_type: z.enum(RECOVERY_ACTION_TYPES),
+  invoice_id: uuid,
+  created_at: isoTimestamp,
+}).strict();
+export type LatestRecovery = z.infer<typeof latestRecoverySchema>;
+
+export const recoveryContextSchema = z.object({
+  exception_id: uuid,
+  // Recovery only ever applies to an actionable critical-identifier exception;
+  // a resolved one is terminal and exposes no further mutation.
+  lifecycle_status: z.enum(["open", "retryable", "resolved"]),
+  reason_code: z.literal("critical_identifier_unverified"),
+  receipt: recoveryReceiptSchema,
+  // The extracted Receipt Invoice reference candidate(s). Bounded, non-empty.
+  original_invoice_references: z.array(boundedString(100)).min(1).max(100),
+  eligible_invoices: z.array(recoveryEligibleInvoiceSchema).max(100),
+  latest_recovery: latestRecoverySchema.nullable(),
+}).strict();
+export type RecoveryContext = z.infer<typeof recoveryContextSchema>;
 
 export const reminderSchema = z.object({
   id: uuid,

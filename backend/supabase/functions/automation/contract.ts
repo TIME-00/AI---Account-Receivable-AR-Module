@@ -15,9 +15,51 @@ export const OPERATING_MODES = [
   "draft_only",
   "straight_through",
 ] as const;
+export const REMINDER_MODES = [
+  "off",
+  "evaluate_only",
+  "automatic_delivery",
+] as const;
 
 export type MailboxProviderType = typeof PROVIDERS[number];
 export type AutomationOperatingMode = typeof OPERATING_MODES[number];
+export type AutomationReminderMode = typeof REMINDER_MODES[number];
+
+export interface AutomationCapabilityProfile {
+  mailbox_sync_enabled: boolean;
+  document_intelligence_enabled: boolean;
+  invoice_automation_enabled: boolean;
+  receipt_automation_enabled: boolean;
+  auto_allocation_enabled: boolean;
+}
+
+export interface AutomationReminderProfile {
+  reminder_evaluation_enabled: boolean;
+  reminder_delivery_enabled: boolean;
+}
+
+export function documentCapabilityProfile(
+  mode: AutomationOperatingMode,
+): AutomationCapabilityProfile {
+  return {
+    mailbox_sync_enabled: mode !== "disabled",
+    document_intelligence_enabled: mode !== "disabled",
+    invoice_automation_enabled: mode === "draft_only" ||
+      mode === "straight_through",
+    receipt_automation_enabled: mode === "draft_only" ||
+      mode === "straight_through",
+    auto_allocation_enabled: mode === "straight_through",
+  };
+}
+
+export function reminderCapabilityProfile(
+  mode: AutomationReminderMode,
+): AutomationReminderProfile {
+  return {
+    reminder_evaluation_enabled: mode !== "off",
+    reminder_delivery_enabled: mode === "automatic_delivery",
+  };
+}
 export type DocumentType =
   | "invoice"
   | "receipt"
@@ -246,6 +288,16 @@ export function requireOperatingMode(value: unknown): AutomationOperatingMode {
     });
   }
   return value as AutomationOperatingMode;
+}
+
+export function requireReminderMode(value: unknown): AutomationReminderMode {
+  if (!REMINDER_MODES.includes(value as AutomationReminderMode)) {
+    throw new ValidationError("Invalid automation reminder mode.", {
+      field: "reminder_mode",
+      allowed: REMINDER_MODES,
+    });
+  }
+  return value as AutomationReminderMode;
 }
 
 export function parseBoolean(value: unknown, field: string): boolean {

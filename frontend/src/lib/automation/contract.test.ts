@@ -19,6 +19,7 @@ import {
   mailboxSchema,
   overviewSchema,
   parseGateEData,
+  recoveryContextSchema,
   reminderAttemptSchema,
   reminderSchema,
   salesRepresentativeSchema,
@@ -42,6 +43,7 @@ const baseSettings = {
   invoice_automation_enabled: false,
   receipt_automation_enabled: false,
   auto_allocation_enabled: false,
+  reminder_mode: "off",
   reminder_evaluation_enabled: false,
   reminder_delivery_enabled: false,
   reminder_stage_offsets: [-3, 0],
@@ -922,5 +924,89 @@ describe("semantic date/timestamp validation (matches backend)", () => {
     for (const ts of goodTimestamps) {
       expect(settingsSchema.safeParse({ ...baseSettings, created_at: ts }).success).toBe(true);
     }
+  });
+});
+
+describe("reminder_mode contract", () => {
+  it("parses each valid reminder_mode", () => {
+    for (const mode of ["off", "evaluate_only", "automatic_delivery"]) {
+      expect(
+        settingsSchema.safeParse({ ...baseSettings, reminder_mode: mode }).success,
+      ).toBe(true);
+    }
+  });
+  it("fails closed on an unknown reminder_mode and on a missing one", () => {
+    expect(
+      settingsSchema.safeParse({ ...baseSettings, reminder_mode: "sometimes" }).success,
+    ).toBe(false);
+    const { reminder_mode: _omit, ...withoutMode } = baseSettings;
+    expect(settingsSchema.safeParse(withoutMode).success).toBe(false);
+  });
+});
+
+describe("recovery context contract", () => {
+  const validContext = {
+    exception_id: UUID,
+    lifecycle_status: "open",
+    reason_code: "critical_identifier_unverified",
+    receipt: {
+      id: UUID2,
+      receipt_no: "RCT-202608-00001",
+      status: "Posted",
+      currency: "MYR",
+      unallocated_amount: "100.00",
+      attachment_id: UUID,
+    },
+    original_invoice_references: ["GATEE-INV-DRAFT-20260810-001"],
+    eligible_invoices: [
+      {
+        invoice_id: UUID2,
+        invoice_no: "INV-202608-00001",
+        reference_no: "SUPPLIER-INV-123",
+        status: "Open",
+        currency: "MYR",
+        outstanding: "100.00",
+      },
+    ],
+    latest_recovery: null,
+  };
+
+  it("parses a strict, bounded recovery context", () => {
+    const parsed = parseGateEData(recoveryContextSchema, validContext);
+    expect(parsed.eligible_invoices[0].invoice_no).toBe("INV-202608-00001");
+    expect(parsed.latest_recovery).toBeNull();
+  });
+
+  it("accepts a nullable external reference and a present latest_recovery", () => {
+    const parsed = parseGateEData(recoveryContextSchema, {
+      ...validContext,
+      eligible_invoices: [{ ...validContext.eligible_invoices[0], reference_no: null }],
+      latest_recovery: {
+        id: UUID,
+        action_type: "confirm_receipt_invoice_match",
+        invoice_id: UUID2,
+        created_at: TS,
+      },
+    });
+    expect(parsed.eligible_invoices[0].reference_no).toBeNull();
+    expect(parsed.latest_recovery?.action_type).toBe("confirm_receipt_invoice_match");
+  });
+
+  it("fails closed on a non-recoverable reason, unknown field, or oversized list", () => {
+    expect(
+      recoveryContextSchema.safeParse({ ...validContext, reason_code: "low_confidence" }).success,
+    ).toBe(false);
+    expect(
+      recoveryContextSchema.safeParse({ ...validContext, injected: true }).success,
+    ).toBe(false);
+    expect(
+      recoveryContextSchema.safeParse({
+        ...validContext,
+        eligible_invoices: Array.from({ length: 101 }, () => validContext.eligible_invoices[0]),
+      }).success,
+    ).toBe(false);
+    expect(
+      recoveryContextSchema.safeParse({ ...validContext, original_invoice_references: [] }).success,
+    ).toBe(false);
   });
 });

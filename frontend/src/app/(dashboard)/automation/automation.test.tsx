@@ -15,6 +15,7 @@ import {
 } from "@/test/harness";
 import { useCompanyStore } from "@/stores/company-store";
 import { useSyncMailbox } from "@/hooks/use-automation";
+import { ApiError } from "@/hooks/use-api";
 
 // ── Mocked boundaries ─────────────────────────────────────────────────────────
 let fakeApi: FakeApi;
@@ -63,6 +64,7 @@ const SETTINGS = {
   invoice_automation_enabled: false,
   receipt_automation_enabled: false,
   auto_allocation_enabled: false,
+  reminder_mode: "off",
   reminder_evaluation_enabled: false,
   reminder_delivery_enabled: false,
   reminder_stage_offsets: [-3, 0],
@@ -233,9 +235,10 @@ describe("Automation Settings", () => {
     expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
     expect(fakeApi.patch).not.toHaveBeenCalled();
     // …and the restriction is explained.
-    expect(screen.getByText(/only a Finance Manager can arm/i)).toBeInTheDocument();
-    // Kill switches remain editable for System Admin (configuration access).
-    expect(screen.getAllByRole("button", { name: /Enable|Disable/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/only a Finance Manager can arm/i).length)
+      .toBeGreaterThan(0);
+    // Capabilities are read-only for everyone now: no Enable/Disable controls.
+    expect(screen.queryByRole("button", { name: /^(Enable|Disable)$/ })).toBeNull();
   });
 });
 
@@ -891,5 +894,392 @@ describe("Automation Commands — allocation eligibility", () => {
     renderWithProviders(<AutomationCommandsPage />);
     await screen.findByText(/Allocate Receipt/i);
     expect(screen.queryByRole("button", { name: /Run allocation/i })).toBeNull();
+  });
+});
+
+// ── Reminder Automation + read-only Capabilities (macro-gate) ──────────────────
+describe("Automation Settings — reminder automation & capabilities", () => {
+  function mountSettings(
+    settings: Record<string, unknown> = SETTINGS,
+    patchResult?: unknown,
+  ) {
+    fakeApi = createFakeApi([route("/automation/settings", () => ({ data: settings }))]);
+    if (patchResult !== undefined) fakeApi.patch.mockResolvedValue(patchResult);
+    renderWithProviders(<AutomationSettingsPage />);
+  }
+
+  it("keeps the Operating Mode card, replaces Kill Switches with read-only Capabilities", async () => {
+    mountSettings();
+    await screen.findByRole("heading", { name: "Operating Mode" });
+    expect(screen.getByRole("heading", { name: "Capabilities" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Reminder Automation" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Kill Switches" })).toBeNull();
+    // No per-capability Enable/Disable controls remain anywhere.
+    expect(screen.queryByRole("button", { name: /^(Enable|Disable)$/ })).toBeNull();
+    // Capability names render as read-only status.
+    expect(screen.getByText("Auto-Allocation")).toBeInTheDocument();
+    expect(screen.getByText("Mailbox Synchronization")).toBeInTheDocument();
+  });
+
+  it("turns reminders Off immediately and sends only reminder_mode (no raw booleans)", async () => {
+    const evaluating = {
+      ...SETTINGS,
+      reminder_mode: "evaluate_only",
+      reminder_evaluation_enabled: true,
+    };
+    mountSettings(evaluating, { ...evaluating, reminder_mode: "off", reminder_evaluation_enabled: false });
+    fireEvent.click(
+      await screen.findByRole("radio", { name: /No reminder evaluation or email delivery/i }),
+    );
+    // Off requires no confirmation and applies immediately.
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalled());
+    const [path, body] = fakeApi.patch.mock.calls[0];
+    expect(path).toBe("/automation/settings");
+    expect(body).toEqual({ reminder_mode: "off" });
+  });
+
+  it("arms Evaluate Only after confirmation and posts reminder_mode=evaluate_only", async () => {
+    mountSettings(SETTINGS, { ...SETTINGS, reminder_mode: "evaluate_only" });
+    fireEvent.click(
+      await screen.findByRole("radio", {
+        name: /determines which invoices require reminders but does not send email/i,
+      }),
+    );
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalled());
+    expect(fakeApi.patch.mock.calls[0][1]).toEqual({ reminder_mode: "evaluate_only" });
+  });
+
+  it("arms Automatic Delivery after confirmation and posts reminder_mode=automatic_delivery", async () => {
+    mountSettings(SETTINGS, { ...SETTINGS, reminder_mode: "automatic_delivery" });
+    fireEvent.click(
+      await screen.findByRole("radio", { name: /sends approved automated reminder emails/i }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalled());
+    expect(fakeApi.patch.mock.calls[0][1]).toEqual({ reminder_mode: "automatic_delivery" });
+  });
+
+  it("shows a safe unavailable state when Automatic Delivery readiness is rejected", async () => {
+    mountSettings(SETTINGS);
+    fakeApi.patch.mockRejectedValue(
+      new ApiError("REMINDER_DELIVERY_NOT_READY", "Reminder delivery requires a connected delivery provider.", 409),
+    );
+    fireEvent.click(
+      await screen.findByRole("radio", { name: /sends approved automated reminder emails/i }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    // The UI never pretends activation succeeded.
+    expect(await screen.findByText(/Automatic Delivery is unavailable/i)).toBeInTheDocument();
+  });
+
+  it("changing operating mode sends ONLY the high-level mode, never raw capability fields", async () => {
+    mountSettings(SETTINGS, { ...SETTINGS, operating_mode: "draft_only" });
+    fireEvent.click(await screen.findByLabelText(/Draft Only/i, { selector: "input" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalled());
+    const [, body] = fakeApi.patch.mock.calls[0];
+    expect(body).toEqual({ operating_mode: "draft_only" });
+    for (
+      const raw of [
+        "mailbox_sync_enabled",
+        "invoice_automation_enabled",
+        "auto_allocation_enabled",
+        "reminder_evaluation_enabled",
+        "reminder_delivery_enabled",
+      ]
+    ) {
+      expect(body).not.toHaveProperty(raw);
+    }
+  });
+
+  it("prevents duplicate reminder submits while a mutation is pending", async () => {
+    mountSettings(SETTINGS);
+    fakeApi.patch.mockReturnValue(new Promise(() => {})); // never resolves
+    fireEvent.click(
+      await screen.findByRole("radio", { name: /sends approved automated reminder emails/i }),
+    );
+    const confirm = await screen.findByRole("button", { name: "Confirm" });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(confirm).toBeDisabled());
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(fakeApi.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let System Admin arm a non-off reminder mode", async () => {
+    roles = ["System Admin"];
+    mountSettings(SETTINGS);
+    await screen.findByRole("heading", { name: "Reminder Automation" });
+    expect(
+      screen.getByRole("radio", { name: /determines which invoices require reminders/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("radio", { name: /sends approved automated reminder emails/i }),
+    ).toBeDisabled();
+    // Off remains available to System Admin as a safe path.
+    expect(
+      screen.getByRole("radio", { name: /No reminder evaluation or email delivery/i }),
+    ).toBeEnabled();
+  });
+});
+
+// ── Critical-reference exception recovery ─────────────────────────────────────
+describe("Critical-reference recovery", () => {
+  const REC_EXC = "10000000-0000-4000-8000-000000000214";
+  const INV_A = "10000000-0000-4000-8000-000000000215";
+  const RCPT_ID = "10000000-0000-4000-8000-000000000216";
+  const REC_ID = "10000000-0000-4000-8000-000000000218";
+  const CANDIDATE = "GATEE-INV-DRAFT-20260810-001";
+
+  function criticalException(overrides: Record<string, unknown> = {}) {
+    return {
+      id: REC_EXC,
+      company_id: CO,
+      mailbox_id: MB,
+      sync_run_id: null,
+      message_id: null,
+      attachment_id: "10000000-0000-4000-8000-000000000217",
+      command_id: "10000000-0000-4000-8000-000000000219",
+      invoice_id: null,
+      receipt_id: RCPT_ID,
+      reason_code: "critical_identifier_unverified",
+      idempotency_key: null,
+      lifecycle_status: "open",
+      safe_details: { error_code: "INVOICE_REFERENCE_NOT_FOUND" },
+      retry_count: 0,
+      max_retries: 3,
+      actor_user_id: null,
+      resolution_note: null,
+      document: null,
+      opened_at: "2026-08-10T00:00:00Z",
+      resolved_at: null,
+      dismissed_at: null,
+      created_at: "2026-08-10T00:00:00Z",
+      updated_at: "2026-08-10T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  function recoveryContext(overrides: Record<string, unknown> = {}) {
+    return {
+      exception_id: REC_EXC,
+      lifecycle_status: "open",
+      reason_code: "critical_identifier_unverified",
+      receipt: {
+        id: RCPT_ID,
+        receipt_no: "RCT-202608-00001",
+        status: "Posted",
+        currency: "MYR",
+        unallocated_amount: "100.00",
+        attachment_id: "10000000-0000-4000-8000-000000000217",
+      },
+      original_invoice_references: [CANDIDATE],
+      eligible_invoices: [
+        {
+          invoice_id: INV_A,
+          invoice_no: "INV-202608-00001",
+          reference_no: "SUPPLIER-INV-123",
+          status: "Open",
+          currency: "MYR",
+          outstanding: "100.00",
+        },
+      ],
+      latest_recovery: null,
+      ...overrides,
+    };
+  }
+
+  const ALLOCATION_RESULT = {
+    command_id: "10000000-0000-4000-8000-000000000219",
+    receipt_id: RCPT_ID,
+    allocated_count: 1,
+    total_allocated: "100.00",
+    receipt_status: "Fully Allocated",
+  };
+
+  function mountRecovery(context = recoveryContext(), exc = criticalException()) {
+    fakeApi = createFakeApi([
+      route(`/automation/exceptions/${REC_EXC}/recovery`, () => ({ data: context })),
+      routePrefix("/automation/exceptions", () => ({
+        data: [exc],
+        meta: { page: 1, page_size: 15, total: 1, has_more: false },
+      })),
+    ]);
+    renderWithProviders(<ExceptionQueuePage />);
+  }
+
+  beforeEach(() => {
+    // jsdom lacks object-URL support; provide safe spies for the source viewer.
+    globalThis.URL.createObjectURL = vi.fn(() => "blob:mock-source");
+    globalThis.URL.revokeObjectURL = vi.fn();
+  });
+
+  async function openPanel() {
+    fireEvent.click(await screen.findByRole("button", { name: "Recover" }));
+    // The restricted candidate reference appears only inside the recovery panel.
+    await screen.findByText(CANDIDATE);
+  }
+
+  it("offers a Recover entry for a Finance Manager and keeps the candidate out of the table", async () => {
+    mountRecovery();
+    expect(await screen.findByRole("button", { name: "Recover" })).toBeInTheDocument();
+    // Generic exception row stays redacted — no candidate reference before opening.
+    expect(screen.queryByText(CANDIDATE)).toBeNull();
+  });
+
+  it("hides recovery actions from a read-only role (Auditor)", async () => {
+    roles = ["Auditor"];
+    mountRecovery();
+    await screen.findByText(/Critical Identifier Unverified/i);
+    expect(screen.queryByRole("button", { name: "Recover" })).toBeNull();
+  });
+
+  it("posts a bounded external-reference correction payload", async () => {
+    mountRecovery();
+    fakeApi.post.mockResolvedValue(
+      recoveryContext({ latest_recovery: {
+        id: REC_ID,
+        action_type: "correct_invoice_external_reference",
+        invoice_id: INV_A,
+        created_at: "2026-08-11T00:00:00Z",
+      } }),
+    );
+    await openPanel();
+    fireEvent.click(screen.getByRole("radio", { name: /Correct Invoice External Reference/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /INV-202608-00001/i }));
+    fireEvent.change(screen.getByPlaceholderText(/SUPPLIER-INV-123/i), {
+      target: { value: CANDIDATE },
+    });
+    fireEvent.change(screen.getByLabelText(/Resolution note/i), {
+      target: { value: "Supplier reference typo corrected after review." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Record recovery/i }));
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalled());
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/exceptions/${REC_EXC}/correct-invoice-reference`);
+    expect(body).toEqual({
+      invoice_id: INV_A,
+      reference_no: CANDIDATE,
+      resolution_note: "Supplier reference typo corrected after review.",
+    });
+  });
+
+  it("posts a bounded human match-confirmation payload", async () => {
+    mountRecovery();
+    fakeApi.post.mockResolvedValue(
+      recoveryContext({ latest_recovery: {
+        id: REC_ID,
+        action_type: "confirm_receipt_invoice_match",
+        invoice_id: INV_A,
+        created_at: "2026-08-11T00:00:00Z",
+      } }),
+    );
+    await openPanel();
+    // Confirm is the default action.
+    fireEvent.click(screen.getByRole("radio", { name: /INV-202608-00001/i }));
+    fireEvent.change(screen.getByLabelText(/Resolution note/i), {
+      target: { value: "Confirmed intended Invoice after reviewing both documents." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Record recovery/i }));
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalled());
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/exceptions/${REC_EXC}/confirm-match`);
+    expect(body).toEqual({
+      invoice_id: INV_A,
+      resolution_note: "Confirmed intended Invoice after reviewing both documents.",
+    });
+  });
+
+  it("Retry Matching sends an empty body (no OpenAI/financial payload) and refreshes state", async () => {
+    let lifecycle = "open";
+    const exc = criticalException();
+    fakeApi = createFakeApi([
+      route(`/automation/exceptions/${REC_EXC}/recovery`, () => ({
+        data: recoveryContext({
+          lifecycle_status: lifecycle,
+          latest_recovery: {
+            id: REC_ID,
+            action_type: "confirm_receipt_invoice_match",
+            invoice_id: INV_A,
+            created_at: "2026-08-11T00:00:00Z",
+          },
+        }),
+      })),
+      routePrefix("/automation/exceptions", () => ({
+        data: [exc],
+        meta: { page: 1, page_size: 15, total: 1, has_more: false },
+      })),
+    ]);
+    renderWithProviders(<ExceptionQueuePage />);
+    fakeApi.post.mockImplementation(async () => {
+      lifecycle = "resolved"; // the governed retry resolves the exception
+      return ALLOCATION_RESULT;
+    });
+    await openPanel();
+    const retryButton = await screen.findByRole("button", { name: /Retry Matching/i });
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalled());
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/exceptions/${REC_EXC}/retry-matching`);
+    expect(body).toEqual({});
+    // Refreshed context now shows the resolved state.
+    expect(await screen.findByText(/has been resolved/i)).toBeInTheDocument();
+  });
+
+  it("disables recovery mutation once the exception is resolved", async () => {
+    mountRecovery(
+      recoveryContext({
+        lifecycle_status: "resolved",
+        latest_recovery: {
+          id: REC_ID,
+          action_type: "confirm_receipt_invoice_match",
+          invoice_id: INV_A,
+          created_at: "2026-08-11T00:00:00Z",
+        },
+      }),
+      criticalException({ lifecycle_status: "retryable" }),
+    );
+    await openPanel();
+    expect(screen.getByText(/has been resolved/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Record recovery/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Retry Matching/i })).toBeNull();
+  });
+
+  it("renders a candidate reference as inert text and fetches source only via the authenticated hook", async () => {
+    const evil = '<img src=x onerror="alert(1)">';
+    mountRecovery(recoveryContext({ original_invoice_references: [evil] }));
+    fakeApi.rawFetch.mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(["%PDF-1.4"], { type: "application/pdf" }),
+    } as unknown as Response);
+    fireEvent.click(await screen.findByRole("button", { name: "Recover" }));
+    // The string is shown literally; no <img> is injected into the DOM.
+    expect(await screen.findByText(evil)).toBeInTheDocument();
+    expect(document.querySelector('img[src="x"]')).toBeNull();
+    // Source viewing goes through the header-injecting rawFetch, not a raw URL.
+    fireEvent.click(screen.getByRole("button", { name: /View Receipt source/i }));
+    await waitFor(() => expect(fakeApi.rawFetch).toHaveBeenCalled());
+    expect(fakeApi.rawFetch.mock.calls[0][0]).toBe(
+      `/automation/exceptions/${REC_EXC}/source`,
+    );
+    expect(globalThis.URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it("prevents duplicate recovery submits while a mutation is pending", async () => {
+    mountRecovery();
+    fakeApi.post.mockReturnValue(new Promise(() => {})); // never resolves
+    await openPanel();
+    fireEvent.click(screen.getByRole("radio", { name: /INV-202608-00001/i }));
+    fireEvent.change(screen.getByLabelText(/Resolution note/i), {
+      target: { value: "Confirmed after review." },
+    });
+    const record = screen.getByRole("button", { name: /Record recovery/i });
+    fireEvent.click(record);
+    await waitFor(() => expect(record).toBeDisabled());
+    fireEvent.click(record);
+    fireEvent.click(record);
+    expect(fakeApi.post).toHaveBeenCalledTimes(1);
   });
 });

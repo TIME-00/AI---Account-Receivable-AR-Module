@@ -36,7 +36,15 @@ export interface AutomationDialogProps {
   footer?: React.ReactNode;
   /** Render as an alert dialog affordance (still a Radix Dialog). */
   tone?: "default" | "danger";
+  /** Dialog width. Defaults to the compact `md`; recovery flows use `xl`. */
+  size?: "md" | "lg" | "xl";
 }
+
+const SIZE_CLASS: Record<NonNullable<AutomationDialogProps["size"]>, string> = {
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-2xl",
+};
 
 export function AutomationDialog({
   open,
@@ -46,6 +54,7 @@ export function AutomationDialog({
   visuallyHiddenDescription = false,
   children,
   footer,
+  size = "md",
 }: AutomationDialogProps) {
   // This is a CONTROLLED dialog (opened by a state change, not a Radix
   // `Dialog.Trigger`), so Radix has no opener to restore focus to on close.
@@ -65,7 +74,7 @@ export function AutomationDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-slate-200 bg-white p-5 shadow-xl focus:outline-none"
+          className={`fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-xl focus:outline-none`}
           onCloseAutoFocus={(event) => {
             const opener = openerRef.current;
             if (opener && document.contains(opener) && typeof opener.focus === "function") {

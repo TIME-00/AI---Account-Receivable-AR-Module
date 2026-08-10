@@ -33,13 +33,18 @@ import {
   OPERATING_MODE_TONE,
   PROCESSING_STATUS_LABEL,
   PROCESSING_STATUS_TONE,
+  RECOVERY_ACTION_LABEL,
   REMINDER_ATTEMPT_STATUS_LABEL,
+  REMINDER_MODE_DESCRIPTION,
+  REMINDER_MODE_LABEL,
+  REMINDER_MODE_TONE,
   REMINDER_STATUS_LABEL,
   REMINDER_STATUS_TONE,
   RUN_STATUS_LABEL,
   RUN_STATUS_TONE,
   switchStatusLabel,
 } from "./labels";
+import { RECOVERY_ACTION_TYPES, REMINDER_MODES } from "./contract";
 
 function coverage(members: readonly string[], ...maps: Record<string, unknown>[]) {
   for (const member of members) {
@@ -90,5 +95,29 @@ describe("truthful status wording", () => {
   it("switch status is Enabled/Disabled, never Live", () => {
     expect(switchStatusLabel(true).label).toBe("Enabled");
     expect(switchStatusLabel(false).label).toBe("Disabled");
+  });
+});
+
+describe("reminder mode + recovery labels", () => {
+  it("covers every reminder mode with label, tone, and description", () => {
+    coverage(
+      REMINDER_MODES,
+      REMINDER_MODE_LABEL,
+      REMINDER_MODE_TONE,
+      REMINDER_MODE_DESCRIPTION,
+    );
+  });
+  it("describes reminder modes truthfully", () => {
+    expect(REMINDER_MODE_LABEL.off).toBe("Off");
+    expect(REMINDER_MODE_DESCRIPTION.evaluate_only).toMatch(/does not send email/i);
+    expect(REMINDER_MODE_DESCRIPTION.automatic_delivery).toMatch(/sends approved/i);
+  });
+  it("labels both recovery actions without implying AI auto-correction", () => {
+    coverage(RECOVERY_ACTION_TYPES, RECOVERY_ACTION_LABEL);
+    expect(RECOVERY_ACTION_LABEL.confirm_receipt_invoice_match).toMatch(/Confirm/i);
+    expect(RECOVERY_ACTION_LABEL.correct_invoice_external_reference).toMatch(/External Reference/i);
+    for (const label of Object.values(RECOVERY_ACTION_LABEL)) {
+      expect(label).not.toMatch(/AI|OCR/i);
+    }
   });
 });

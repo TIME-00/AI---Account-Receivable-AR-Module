@@ -47,6 +47,8 @@ import {
   overviewSchema,
   parseGateECollection,
   parseGateEData,
+  type RecoveryContext,
+  recoveryContextSchema,
   reminderAttemptSchema,
   reminderSchema,
   salesRepresentativeSchema,
@@ -199,16 +201,16 @@ export function useAutomationSettings() {
   });
 }
 
+/**
+ * Settings PATCH body. The UI sends ONLY high-level business settings —
+ * `operating_mode` and `reminder_mode` — never raw capability booleans. The
+ * backend derives every `*_enabled` capability from these and rejects any raw
+ * capability field, so they are intentionally absent from this type.
+ */
 export interface SettingsPatch {
   operating_mode?: AutomationSettings["operating_mode"];
+  reminder_mode?: AutomationSettings["reminder_mode"];
   activation_confirmation?: string;
-  mailbox_sync_enabled?: boolean;
-  document_intelligence_enabled?: boolean;
-  invoice_automation_enabled?: boolean;
-  receipt_automation_enabled?: boolean;
-  auto_allocation_enabled?: boolean;
-  reminder_evaluation_enabled?: boolean;
-  reminder_delivery_enabled?: boolean;
   reminder_stage_offsets?: number[];
   reminder_timezone?: string;
 }
@@ -443,6 +445,139 @@ function useExceptionMutation(
 export const useRetryException = () => useExceptionMutation("retry");
 export const useResolveException = () => useExceptionMutation("resolve");
 export const useDismissException = () => useExceptionMutation("dismiss");
+
+// ─── Critical-reference exception recovery ─────────────────────────────────────
+
+function recoveryContextKey(companyId: string, exceptionId: string) {
+  return [...automationRoot(companyId), "exception-recovery", exceptionId] as const;
+}
+
+/**
+ * Restricted recovery context for one `critical_identifier_unverified`
+ * exception. Enabled only when explicitly requested (the caller opens the
+ * recovery panel) and a valid UUID is present; the backend re-enforces the
+ * AR Supervisor / Finance Manager gate and customer binding regardless.
+ */
+export function useExceptionRecoveryContext(
+  exceptionId: string | undefined,
+  options?: { enabled?: boolean },
+) {
+  const api = useApi();
+  const { companyId, ready } = useCompanyId();
+  return useQuery<RecoveryContext>({
+    queryKey: recoveryContextKey(companyId, exceptionId ?? ""),
+    queryFn: async ({ signal }) => {
+      const data = await api.get<unknown>(
+        `${AUTOMATION_BASE}/exceptions/${exceptionId}/recovery`,
+        { ...GATE_E_OPTS, signal },
+      );
+      return parseGateEData(recoveryContextSchema, data);
+    },
+    enabled:
+      ready && (options?.enabled ?? true) && !!exceptionId &&
+      UUID_PATTERN.test(exceptionId),
+    staleTime: 5_000,
+  });
+}
+
+export interface CorrectReferenceInput {
+  invoice_id: string;
+  reference_no: string;
+  resolution_note: string;
+}
+
+export interface ConfirmMatchInput {
+  invoice_id: string;
+  resolution_note: string;
+}
+
+/**
+ * Record a governed recovery action. Both actions return the refreshed recovery
+ * CONTEXT (not the generic exception), which we parse strictly. The frontend
+ * supplies no allocation amount, tenant, customer, or FX — only the reviewed
+ * Invoice selection, an optional corrected external reference, and a note.
+ */
+export function useCorrectInvoiceReference() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const { companyId } = useCompanyId();
+  return useMutation<RecoveryContext, unknown, { id: string; input: CorrectReferenceInput }>({
+    mutationFn: async ({ id, input }) => {
+      const data = await api.post<unknown>(
+        `${AUTOMATION_BASE}/exceptions/${id}/correct-invoice-reference`,
+        input,
+        GATE_E_OPTS,
+      );
+      return parseGateEData(recoveryContextSchema, data);
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: automationRoot(companyId) }),
+  });
+}
+
+export function useConfirmReceiptMatch() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const { companyId } = useCompanyId();
+  return useMutation<RecoveryContext, unknown, { id: string; input: ConfirmMatchInput }>({
+    mutationFn: async ({ id, input }) => {
+      const data = await api.post<unknown>(
+        `${AUTOMATION_BASE}/exceptions/${id}/confirm-match`,
+        input,
+        GATE_E_OPTS,
+      );
+      return parseGateEData(recoveryContextSchema, data);
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: automationRoot(companyId) }),
+  });
+}
+
+/**
+ * Deterministic Retry Matching. The request body is EXACTLY `{}` — no OpenAI
+ * payload, no allocation amount, no financial authority. The backend
+ * re-derives, re-locks, and resolves the exception idempotently.
+ */
+export function useRetryExceptionMatching() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const { companyId } = useCompanyId();
+  return useMutation<AllocationResult, unknown, string>({
+    mutationFn: async (exceptionId: string) => {
+      const data = await api.post<unknown>(
+        `${AUTOMATION_BASE}/exceptions/${exceptionId}/retry-matching`,
+        {},
+        GATE_E_OPTS,
+      );
+      return parseGateEData(allocationResultSchema, data);
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: automationRoot(companyId) }),
+  });
+}
+
+/**
+ * Fetch a source document (Receipt or eligible Invoice) as an authenticated
+ * Blob through the header-injecting `rawFetch`. The endpoint streams binary
+ * bytes with `private, no-store` + `nosniff`; the caller owns the resulting
+ * object-URL lifecycle (create on open, revoke on close/unmount). No storage
+ * path, token, or raw URL is ever placed in component state.
+ */
+export function useExceptionSource() {
+  const api = useApi();
+  return useMutation<Blob, unknown, { exceptionId: string; invoiceId?: string }>({
+    mutationFn: async ({ exceptionId, invoiceId }) => {
+      const path = invoiceId
+        ? `${AUTOMATION_BASE}/exceptions/${exceptionId}/invoices/${invoiceId}/source`
+        : `${AUTOMATION_BASE}/exceptions/${exceptionId}/source`;
+      const res = await api.rawFetch(path, { method: "GET" });
+      if (!res.ok) {
+        throw new Error("The source document could not be loaded.");
+      }
+      return await res.blob();
+    },
+  });
+}
 
 // ─── Commands: stored-command allocation (backend re-derives authority) ────────
 

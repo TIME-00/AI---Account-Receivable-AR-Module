@@ -1,4 +1,4 @@
-import { handleCORS, jsonResponse } from "../_shared/cors.ts";
+import { corsHeaders, handleCORS, jsonResponse } from "../_shared/cors.ts";
 import {
   type AuthContext,
   extractCompanyId,
@@ -271,6 +271,31 @@ const ROUTES: Route[] = [
     pattern: /^\/exceptions\/([0-9a-f-]{36})\/retry\/?$/i,
   },
   {
+    name: "exception-recovery",
+    pattern: /^\/exceptions\/([0-9a-f-]{36})\/recovery\/?$/i,
+  },
+  {
+    name: "exception-receipt-source",
+    pattern: /^\/exceptions\/([0-9a-f-]{36})\/source\/?$/i,
+  },
+  {
+    name: "exception-invoice-source",
+    pattern:
+      /^\/exceptions\/([0-9a-f-]{36})\/invoices\/([0-9a-f-]{36})\/source\/?$/i,
+  },
+  {
+    name: "exception-correct-invoice-reference",
+    pattern: /^\/exceptions\/([0-9a-f-]{36})\/correct-invoice-reference\/?$/i,
+  },
+  {
+    name: "exception-confirm-match",
+    pattern: /^\/exceptions\/([0-9a-f-]{36})\/confirm-match\/?$/i,
+  },
+  {
+    name: "exception-retry-matching",
+    pattern: /^\/exceptions\/([0-9a-f-]{36})\/retry-matching\/?$/i,
+  },
+  {
     name: "exception-resolve",
     pattern: /^\/exceptions\/([0-9a-f-]{36})\/resolve\/?$/i,
   },
@@ -304,7 +329,9 @@ function match(pathname: string): { name: string; params: Params } {
     if (found) {
       return {
         name: route.name,
-        params: found[1]
+        params: route.name === "exception-invoice-source"
+          ? { id: found[1], invoice_id: found[2] }
+          : found[1]
           ? route.name === "collection"
             ? { collection: found[1] }
             : { id: found[1] }
@@ -606,6 +633,77 @@ export async function handleAutomationRequest(
       return jsonResponse(
         automationSuccess(await service.retryException(auth, route.params.id)),
       );
+    }
+    if (route.name === "exception-recovery" && req.method === "GET") {
+      assertQueryParameters(url, []);
+      return jsonResponse(automationSuccess(
+        await service.getExceptionRecoveryContext(auth, route.params.id),
+      ));
+    }
+    if (
+      (route.name === "exception-receipt-source" ||
+        route.name === "exception-invoice-source") && req.method === "GET"
+    ) {
+      assertQueryParameters(url, []);
+      const source = await service.getExceptionSourceDocument(
+        auth,
+        route.params.id,
+        route.params.invoice_id,
+      );
+      return new Response(source.body, {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": source.mimeType,
+          "Content-Disposition": `inline; filename*=UTF-8''${
+            encodeURIComponent(source.fileName)
+          }`,
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+    if (
+      route.name === "exception-correct-invoice-reference" &&
+      req.method === "POST"
+    ) {
+      const request = await body(req);
+      assertExactKeys(
+        request,
+        ["invoice_id", "reference_no", "resolution_note"],
+        ["invoice_id", "reference_no", "resolution_note"],
+      );
+      return jsonResponse(automationSuccess(
+        await service.recordExceptionRecovery(auth, route.params.id, {
+          action_type: "correct_invoice_external_reference",
+          invoice_id: request.invoice_id,
+          corrected_reference: request.reference_no,
+          resolution_note: request.resolution_note,
+        }),
+      ));
+    }
+    if (route.name === "exception-confirm-match" && req.method === "POST") {
+      const request = await body(req);
+      assertExactKeys(
+        request,
+        ["invoice_id", "resolution_note"],
+        ["invoice_id", "resolution_note"],
+      );
+      return jsonResponse(automationSuccess(
+        await service.recordExceptionRecovery(auth, route.params.id, {
+          action_type: "confirm_receipt_invoice_match",
+          invoice_id: request.invoice_id,
+          resolution_note: request.resolution_note,
+        }),
+      ));
+    }
+    if (
+      route.name === "exception-retry-matching" && req.method === "POST"
+    ) {
+      const request = await body(req);
+      assertExactKeys(request, []);
+      return jsonResponse(automationSuccess(
+        await service.retryExceptionMatching(auth, route.params.id),
+      ));
     }
     if (
       (route.name === "exception-resolve" ||

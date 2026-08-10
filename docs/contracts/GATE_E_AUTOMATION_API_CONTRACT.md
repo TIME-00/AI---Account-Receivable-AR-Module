@@ -55,7 +55,7 @@ descending). Empty collections return `data: []`, `total: 0`.
 |---|---|---|---|---|
 | `/overview` | GET | AR Supervisor, Finance Manager, Auditor | none | bounded counts plus settings |
 | `/settings` | GET | operational roles, Auditor, System Admin | none | complete settings; absent row returns disabled defaults |
-| `/settings` | PATCH | Finance Manager or System Admin; Finance Manager for non-disabled modes | supported settings only; `straight_through` requires exact `activation_confirmation` | settings row with server-bound automation actor |
+| `/settings` | PATCH | Finance Manager or System Admin; Finance Manager for any active document/reminder mode | `operating_mode`, `reminder_mode`, and bounded policy fields only; `straight_through` requires exact `activation_confirmation` | one atomic backend-derived capability profile with server-bound actor |
 | `/sales-representatives` | GET | operational roles, Auditor, System Admin | `page`, `page_size`, optional `is_active` | sales representatives |
 | `/sales-representatives` | POST | AR Supervisor or Finance Manager | `name`, normalized `email`, E.164 `phone`, optional `is_active` | created representative |
 | `/sales-representatives/:id` | PATCH | AR Supervisor or Finance Manager | mutable contact/active fields | updated representative |
@@ -77,14 +77,20 @@ descending). Empty collections return `data: []`, `total: 0`.
 | `/commands/:id/allocate` | POST | AR Clerk, AR Supervisor, Finance Manager | exact empty JSON object; receipt, evidence, and allocations are re-derived from the immutable command/extraction | DB-authoritative allocation result |
 | `/exceptions` | GET | AR Supervisor, Finance Manager, Auditor | pagination and exact `lifecycle_status`/`reason_code` | exception queue |
 | `/exceptions/:id/retry` | POST | AR Supervisor or Finance Manager | none | re-opened retryable exception |
+| `/exceptions/:id/recovery` | GET | AR Supervisor or Finance Manager | none | restricted critical-reference recovery context and eligible same-customer Invoice choices |
+| `/exceptions/:id/source` | GET | AR Supervisor or Finance Manager | none | authenticated Receipt source document stream; private/no-store |
+| `/exceptions/:id/invoices/:invoiceId/source` | GET | AR Supervisor or Finance Manager | none | authenticated source for an eligible automated Invoice only |
+| `/exceptions/:id/correct-invoice-reference` | POST | Finance Manager | `{invoice_id,reference_no,resolution_note}` | immutable recovery record after governed posted external-reference correction |
+| `/exceptions/:id/confirm-match` | POST | Finance Manager | `{invoice_id,resolution_note}` | immutable human match authority; no Invoice metadata rewrite |
+| `/exceptions/:id/retry-matching` | POST | Finance Manager | `{}` | deterministic, locked, idempotent allocation retry; no OpenAI request |
 | `/exceptions/:id/resolve` | POST | AR Supervisor or Finance Manager | `{resolution_note}` | resolved exception |
 | `/exceptions/:id/dismiss` | POST | AR Supervisor or Finance Manager | `{resolution_note}` | dismissed exception |
 | `/reminders/evaluate` | POST | AR Supervisor or Finance Manager | `{evaluation_date:"YYYY-MM-DD"}` | created/exception counts; no send |
-| `/reminders/:id/deliver` | POST | AR Supervisor or Finance Manager | `{mailbox_id}` | delivery attempt; all kill switches/readiness enforced |
+| `/reminders/:id/deliver` | POST | AR Supervisor or Finance Manager | `{mailbox_id}` | delivery attempt; Reminder Automation profile/readiness enforced |
 | `/reminders` | GET | AR Supervisor, Finance Manager, Auditor | pagination; exact `status`; optional exact `invoice_id` | tenant- and Invoice-bound reminders |
 | `/reminder-attempts` | GET | AR Supervisor, Finance Manager, Auditor | pagination; exact `status`/`provider_type`; optional exact `reminder_id` | bounded attempts for one authorized reminder or the tenant list |
 | `/audit` | GET | AR Supervisor, Finance Manager, Auditor | pagination; optional bounded `event_type`, `entity_type`, UUID `entity_id`, and `actor_type=user|system|provider` | immutable, entity-scoped, allowlisted audit timeline |
-| `/worker/run` | POST | dedicated `X-Automation-Worker-Secret` only | scheduler sends exact `{}`; no tenant/body authority is consumed | one bounded scheduled cycle governed by each tenant's actor, lease, and kill switches |
+| `/worker/run` | POST | dedicated `X-Automation-Worker-Secret` only | scheduler sends exact `{}`; no tenant/body authority is consumed | one bounded scheduled cycle governed by each tenant's actor, lease, and derived profiles |
 
 No route accepts raw OAuth tokens, access/refresh tokens, provider authorization
 headers, client-computed financial totals, SQL, tenant inference, or AI-selected
@@ -157,12 +163,17 @@ Exact values:
 operating_mode:
   disabled | observe_only | draft_only | straight_through
 
-kill switches:
+reminder_mode:
+  off | evaluate_only | automatic_delivery
+
+derived read-only document capabilities:
   mailbox_sync_enabled
   document_intelligence_enabled
   invoice_automation_enabled
   receipt_automation_enabled
   auto_allocation_enabled
+
+derived read-only reminder capabilities:
   reminder_evaluation_enabled
   reminder_delivery_enabled
 ```
@@ -180,12 +191,19 @@ authenticated Finance Manager. `straight_through` additionally requires:
 Migration 034 creates no settings rows and activates no mode, provider,
 scheduler, allocation, or delivery switch.
 
-Accepting the Finance Manager's exact `straight_through` confirmation changes
-only the tenant operating-mode setting. It does not prove ingestion, delivery,
-or document-intelligence readiness and it does not bypass a kill switch. Every
-worker operation rechecks its own capability at runtime and fails closed when
-its enabled mailbox, opaque token, expiry metadata, adapter, or provider is not
-ready.
+The backend atomically derives the complete document profile from
+`operating_mode`: Disabled enables none; Observe Only enables mailbox sync and
+document intelligence; Draft Only additionally enables Invoice and Receipt
+automation; Straight-Through additionally enables Auto-Allocation. Raw
+capability fields are not PATCH inputs, and the database trigger/constraints
+prevent contradictory rows even when the Edge layer is bypassed.
+
+`reminder_mode` is independent of document mode. Off derives both reminder
+capabilities false, Evaluate Only derives evaluation true/delivery false, and
+Automatic Delivery derives both true. Automatic Delivery is rejected before
+the settings write unless the tenant has a ready delivery adapter and a
+connected, enabled, correctly scoped opaque credential; the database also
+fails closed on safe readiness metadata. No partial profile is persisted.
 
 Confidence values are JSON numbers in both the synthetic default object and a
 persisted row. Reminder offsets and `extraction_schema_version` are JSON
@@ -213,7 +231,7 @@ Edge-only `OPENAI_API_KEY` is present and passes bounded validation and the
 server-side `OPENAI_DOCUMENT_MODEL` value (default `gpt-5.6-luna`) is valid.
 Missing or malformed configuration selects the disabled adapter. Overview does
 not call OpenAI merely to calculate readiness. No readiness field activates a
-mode or kill switch.
+mode or capability.
 
 ## Document-intelligence provider boundary
 
@@ -254,7 +272,7 @@ model-declared policy gates, not probability claims:
 These values feed the existing fail-closed threshold contract. They never
 override strict parsing, semantic date/decimal validation, arithmetic
 reconciliation, deterministic customer resolution, duplicate checks, operating
-mode, kill switches, PostgreSQL posting, FX, or allocation authority.
+mode, derived capabilities, PostgreSQL posting, FX, or allocation authority.
 
 They also never provide Straight-Through identifier authority. Governed
 financial services generate `invoices.invoice_no` and `receipts.receipt_no` as
@@ -319,7 +337,7 @@ Successful allocation data is exactly:
 }
 ```
 
-The internally derived `evidence_type` is exactly
+The automatically derived `evidence_type` is exactly
 `exact_invoice_reference | exact_amount_single_invoice |
 explicit_partial_reference | explicit_multi_invoice_references`. The Edge layer
 does not calculate FX or authoritative financial totals. The database verifies
@@ -328,6 +346,19 @@ and target invoices, validates the source command and booked-FX authority,
 proves the reference or unique exact-amount evidence, enforces same
 customer/currency and full amount reconciliation, and then invokes the existing
 authoritative allocation transaction.
+
+After a `critical_identifier_unverified` refusal, a Finance Manager may create
+one immutable recovery authority. External-reference correction changes only a
+posted Invoice's `reference_no` through the existing governed correction RPC;
+internal number, customer, currency, amounts, posting, and source extraction do
+not change. Alternatively, match confirmation records one eligible same-
+tenant/customer/currency Invoice without rewriting Invoice metadata or the
+Receipt extraction. `Retry Matching` rechecks current status/outstanding,
+locks Receipt and Invoice, derives `min(Receipt unallocated, Invoice
+outstanding)` in PostgreSQL, records `human_confirmed_invoice` allocation
+evidence, calls the governed allocator, and resolves the exception exactly
+once. Generic exception DTOs remain redacted; candidate references exist only
+in the restricted authenticated recovery contract.
 
 ## Frozen response records
 
@@ -349,8 +380,9 @@ Reminder monetary snapshots are normalized to decimal strings by the Edge
 contract. Nullable fields are returned as JSON `null`; fields are not fabricated
 by the Edge Function.
 
-- Settings: `company_id`, `automation_actor_user_id`, `operating_mode`, all
-  seven kill-switch booleans, `reminder_stage_offsets`, `reminder_timezone`,
+- Settings: `company_id`, `automation_actor_user_id`, `operating_mode`,
+  `reminder_mode`, all seven derived capability booleans,
+  `reminder_stage_offsets`, `reminder_timezone`,
   `extraction_schema_version`, both confidence thresholds, audit timestamps and
   actor IDs.
 - Sales representative: `id`, `company_id`, `name`, normalized `email`, E.164
@@ -481,7 +513,7 @@ Migration 037's prospective Straight-Through identifier refusal:
 `internal_processing_failure`.
 
 `changed_fields` accepts only: `name`, `email`, `phone`, `is_active`,
-`operating_mode`, the seven kill-switch names, `reminder_stage_offsets`,
+`operating_mode`, `reminder_mode`, the seven derived capability names, `reminder_stage_offsets`,
 `reminder_timezone`, `minimum_overall_confidence`,
 `minimum_critical_confidence`, `default_bank_account_id`, `is_enabled`,
 `ingestion_enabled`, `delivery_enabled`, and `connection_status`.
@@ -508,6 +540,7 @@ Overview:
     "invoice_automation_enabled": false,
     "receipt_automation_enabled": false,
     "auto_allocation_enabled": false,
+    "reminder_mode": "off",
     "reminder_evaluation_enabled": false,
     "reminder_delivery_enabled": false,
     "reminder_stage_offsets": [-3, 0],
@@ -908,6 +941,46 @@ command. The partial PostgreSQL uniqueness predicate is enforced by inserting
 normally and treating only SQLSTATE `23505` from
 `uq_automation_exception_idempotency` as the already-recorded no-op; unrelated
 constraint or database failures are never swallowed.
+
+### Critical-reference recovery DTO
+
+`GET /exceptions/:id/recovery` is intentionally more privileged than the
+generic Exception collection because a reviewer must compare source evidence.
+Its strict `data` record is:
+
+```json
+{
+  "exception_id": "10000000-0000-4000-8000-000000000040",
+  "lifecycle_status": "open",
+  "reason_code": "critical_identifier_unverified",
+  "receipt": {
+    "id": "10000000-0000-4000-8000-000000000041",
+    "receipt_no": "RCT-202608-00002",
+    "status": "Posted",
+    "currency": "MYR",
+    "unallocated_amount": "137.42",
+    "attachment_id": "10000000-0000-4000-8000-000000000042"
+  },
+  "original_invoice_references": ["SUPPLIER-INV-123"],
+  "eligible_invoices": [{
+    "invoice_id": "10000000-0000-4000-8000-000000000043",
+    "invoice_no": "INV-202608-00002",
+    "reference_no": "SUPPLIER-INV-123",
+    "status": "Open",
+    "currency": "MYR",
+    "outstanding": "137.42"
+  }],
+  "latest_recovery": null
+}
+```
+
+`latest_recovery`, when non-null, contains exactly `id`, `action_type`,
+`invoice_id`, and `created_at`. Eligible invoices are capped at 100 and contain
+no customer from another tenant, currency, terminal/zero-outstanding Invoice,
+raw provider object, token, storage path, or arbitrary SQL/error content.
+Source endpoints return the reviewed attachment bytes directly with
+`private, no-store`, `nosniff`, and a sanitized filename; source bytes are
+never embedded into JSON.
 
 The extraction candidate field is `customer.customer_code`. Deterministic
 resolution compares it with the existing PostgreSQL business identifier

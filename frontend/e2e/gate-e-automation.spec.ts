@@ -112,6 +112,7 @@ const SETTINGS = {
   invoice_automation_enabled: false,
   receipt_automation_enabled: false,
   auto_allocation_enabled: false,
+  reminder_mode: "off",
   reminder_evaluation_enabled: false,
   reminder_delivery_enabled: false,
   reminder_stage_offsets: [-3, 0],
@@ -1032,9 +1033,12 @@ test.describe("Gate E automation (desktop + mobile)", () => {
     await page.goto("/automation", { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("heading", { name: "Autonomous AR Operations" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Kill Switches" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Capabilities" })).toBeVisible();
     await expect(page.getByText(/Provider Configuration Required/i).first()).toBeVisible();
-    await expect(page.getByText(/fail-closed/i)).toBeVisible();
+    // Truthful fail-closed messaging: nothing is implied to have run, and
+    // Straight-Through is reported inactive.
+    await expect(page.getByText(/Counters reflect only what has actually run/i)).toBeVisible();
+    await expect(page.getByText(/Straight-Through is not active/i)).toBeVisible();
     await expect(page.getByText("Open Exceptions")).toHaveCount(1);
     await expect(page.getByText("Processing Runs")).toHaveCount(1);
     expectClean(rec);
@@ -1062,11 +1066,15 @@ test.describe("Gate E automation (desktop + mobile)", () => {
     expectClean(rec);
   });
 
-  test("Settings: default numeric confidence values render for Finance Manager", async ({ page }) => {
+  test("Settings: capabilities and reminder automation render read-only for Finance Manager", async ({ page }) => {
     const rec = await bootAndTrack(page, "Finance Manager");
     await page.goto("/automation/settings", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Operating Mode" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Kill Switches" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Reminder Automation" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Capabilities" })).toBeVisible();
+    // Kill Switches are gone from Settings; capabilities are read-only status.
+    await expect(page.getByRole("heading", { name: "Kill Switches" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^(Enable|Disable)$/ })).toHaveCount(0);
     expectClean(rec);
   });
 

@@ -294,6 +294,7 @@ function settingsFixture(overrides: Record<string, unknown>) {
     invoice_automation_enabled: false,
     receipt_automation_enabled: false,
     auto_allocation_enabled: false,
+    reminder_mode: "off",
     reminder_evaluation_enabled: false,
     reminder_delivery_enabled: false,
     reminder_stage_offsets: [-3, 0],

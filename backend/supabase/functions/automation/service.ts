@@ -25,6 +25,8 @@ import type { CreateReceiptInput } from "../receipts/validators.ts";
 import {
   assertExactKeys,
   type AutomationOperatingMode,
+  type AutomationReminderMode,
+  documentCapabilityProfile,
   type FinancialExtraction,
   isSemanticIsoTimestamp,
   type MailboxProviderType,
@@ -32,10 +34,11 @@ import {
   normalizePhone,
   type PageMeta,
   type PageRequest,
-  parseBoolean,
+  reminderCapabilityProfile,
   requireBoundedText,
   requireIsoDate,
   requireOperatingMode,
+  requireReminderMode,
 } from "./contract.ts";
 import {
   EnvironmentSecretResolver,
@@ -75,6 +78,7 @@ import {
   documentDecisionDto,
   documentProcessingResultDto,
   exceptionDto,
+  exceptionRecoveryContextDto,
   mailboxDto,
   mapAutomationCollectionRow,
   reminderAttemptDto,
@@ -90,7 +94,20 @@ const MAX_MESSAGES_PER_RUN = 5000;
 const MAX_ATTACHMENTS_PER_MESSAGE = 100;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
 type Row = Record<string, unknown>;
+
+export interface AutomationSourceDocument {
+  body: Blob;
+  fileName: string;
+  mimeType: string;
+}
 
 const OAUTH_SECRET_REFERENCE_CONFLICT = "OAUTH_SECRET_REFERENCE_CONFLICT";
 
@@ -955,11 +972,13 @@ export class AutomationService {
     const retention = await this.purgeExpiredAttachmentContent();
     const { data: settingRows, error: settingsError } = await this.client
       .from("automation_settings").select("*")
-      .neq("operating_mode", "disabled")
       .not("automation_actor_user_id", "is", null)
       .order("company_id", { ascending: true }).limit(100);
     if (settingsError) throw settingsError;
-    const settings = (settingRows ?? []) as Row[];
+    const settings = ((settingRows ?? []) as Row[]).filter((setting) =>
+      setting.operating_mode !== "disabled" ||
+      String(setting.reminder_mode ?? "off") !== "off"
+    );
     if (settings.length === 0) {
       return {
         companies_considered: 0,
@@ -1504,15 +1523,14 @@ export class AutomationService {
         "activation_confirmation is accepted only for straight-through activation.",
       );
     }
+    if (
+      patch.reminder_mode !== undefined && patch.reminder_mode !== "off"
+    ) {
+      requireAnyRole(auth, ["Finance Manager"]);
+    }
     const allowed = new Set([
       "operating_mode",
-      "mailbox_sync_enabled",
-      "document_intelligence_enabled",
-      "invoice_automation_enabled",
-      "receipt_automation_enabled",
-      "auto_allocation_enabled",
-      "reminder_evaluation_enabled",
-      "reminder_delivery_enabled",
+      "reminder_mode",
       "reminder_stage_offsets",
       "reminder_timezone",
       "minimum_overall_confidence",
@@ -1526,27 +1544,56 @@ export class AutomationService {
       });
     }
     delete patch.activation_confirmation;
+    const current = await this.getSettings(auth);
     if (patch.operating_mode !== undefined) {
-      patch.operating_mode = requireOperatingMode(patch.operating_mode);
-      if (patch.operating_mode !== "disabled") {
-        patch.automation_actor_user_id = auth.userId;
-      } else {
-        patch.automation_actor_user_id = null;
+      const operatingMode = requireOperatingMode(patch.operating_mode);
+      if (operatingMode !== "disabled") {
+        await this.assertDocumentModeReady(auth, operatingMode);
       }
+      patch.operating_mode = operatingMode;
+      Object.assign(patch, documentCapabilityProfile(operatingMode));
     }
-    for (
-      const field of [
-        "mailbox_sync_enabled",
-        "document_intelligence_enabled",
-        "invoice_automation_enabled",
-        "receipt_automation_enabled",
-        "auto_allocation_enabled",
-        "reminder_evaluation_enabled",
-        "reminder_delivery_enabled",
-      ] as const
+    if (patch.reminder_mode !== undefined) {
+      const reminderMode = requireReminderMode(patch.reminder_mode);
+      if (reminderMode === "automatic_delivery") {
+        await this.assertReminderDeliveryReady(auth);
+      }
+      patch.reminder_mode = reminderMode;
+      Object.assign(patch, reminderCapabilityProfile(reminderMode));
+    }
+    if (
+      patch.reminder_mode === undefined &&
+      current.reminder_mode === "automatic_delivery"
     ) {
-      if (patch[field] !== undefined) {
-        patch[field] = parseBoolean(patch[field], field);
+      await this.assertReminderDeliveryReady(auth);
+    }
+    if (
+      patch.operating_mode !== undefined || patch.reminder_mode !== undefined
+    ) {
+      const desiredOperating = String(
+        patch.operating_mode ?? current.operating_mode,
+      ) as AutomationOperatingMode;
+      const desiredReminder = String(
+        patch.reminder_mode ?? current.reminder_mode,
+      ) as AutomationReminderMode;
+      const callerArmed = (patch.operating_mode !== undefined &&
+        desiredOperating !== "disabled") ||
+        (patch.reminder_mode !== undefined && desiredReminder !== "off");
+      patch.automation_actor_user_id =
+        desiredOperating === "disabled" && desiredReminder === "off"
+          ? null
+          : callerArmed
+          ? auth.userId
+          : current.automation_actor_user_id;
+      if (
+        (desiredOperating !== "disabled" || desiredReminder !== "off") &&
+        !patch.automation_actor_user_id
+      ) {
+        throw new BusinessError(
+          "AUTOMATION_ACTOR_UNAVAILABLE",
+          "Active automation requires an authorized Finance Manager.",
+          409,
+        );
       }
     }
     if (patch.reminder_stage_offsets !== undefined) {
@@ -1597,6 +1644,92 @@ export class AutomationService {
       .upsert(safe, { onConflict: "company_id" }).select("*").single();
     if (error) throw error;
     return automationSettingsDto(data as Row, auth.companyId);
+  }
+
+  private async assertReminderDeliveryReady(auth: AuthContext): Promise<void> {
+    const { data, error } = await this.client.from("automation_mailboxes")
+      .select("*")
+      .eq("company_id", auth.companyId)
+      .eq("is_enabled", true)
+      .eq("delivery_enabled", true)
+      .eq("connection_status", "connected")
+      .eq("reconnect_required", false)
+      .order("id", { ascending: true })
+      .limit(100);
+    if (error) throw error;
+    for (const mailbox of (data ?? []) as Row[]) {
+      const provider = mailbox.provider_type as MailboxProviderType;
+      if (this.deliveryProviders[provider]?.readiness().ready !== true) {
+        continue;
+      }
+      try {
+        await this.resolveOAuthAccessTokenForRuntime(mailbox, "delivery");
+        return;
+      } catch (cause) {
+        if (
+          cause instanceof BusinessError &&
+          ["OAUTH_RECONNECT_REQUIRED", "OAUTH_NOT_CONFIGURED"].includes(
+            cause.code,
+          )
+        ) continue;
+        throw cause;
+      }
+    }
+    throw new BusinessError(
+      "REMINDER_DELIVERY_NOT_READY",
+      "Reminder delivery requires a connected delivery provider.",
+      409,
+    );
+  }
+
+  private async assertDocumentModeReady(
+    auth: AuthContext,
+    mode: Exclude<AutomationOperatingMode, "disabled">,
+  ): Promise<void> {
+    if (!this.documentProvider.enabled) {
+      throw new BusinessError(
+        "DOCUMENT_INTELLIGENCE_DISABLED",
+        "Document intelligence is not ready.",
+        409,
+      );
+    }
+    const { data, error } = await this.client.from("automation_mailboxes")
+      .select("*")
+      .eq("company_id", auth.companyId)
+      .eq("is_enabled", true)
+      .eq("ingestion_enabled", true)
+      .eq("connection_status", "connected")
+      .eq("reconnect_required", false)
+      .order("id", { ascending: true })
+      .limit(100);
+    if (error) throw error;
+    for (const mailbox of (data ?? []) as Row[]) {
+      const provider = mailbox.provider_type as MailboxProviderType;
+      if (
+        this.mailboxProviders[provider]?.readiness().ready !== true ||
+        typeof mailbox.ingestion_secret_ref !== "string" ||
+        (mode !== "observe_only" && !mailbox.default_bank_account_id)
+      ) continue;
+      try {
+        await this.resolveOAuthAccessTokenForRuntime(mailbox, "ingestion");
+        return;
+      } catch (cause) {
+        if (
+          cause instanceof BusinessError &&
+          ["OAUTH_RECONNECT_REQUIRED", "OAUTH_NOT_CONFIGURED"].includes(
+            cause.code,
+          )
+        ) continue;
+        throw cause;
+      }
+    }
+    throw new BusinessError(
+      "AUTOMATION_MODE_NOT_READY",
+      mode === "observe_only"
+        ? "Automation requires a ready ingestion mailbox."
+        : "Financial automation requires ready ingestion and a receiving bank account.",
+      409,
+    );
   }
 
   async listSalesRepresentatives(
@@ -4185,6 +4318,184 @@ export class AutomationService {
     }
   }
 
+  async getExceptionRecoveryContext(
+    auth: AuthContext,
+    exceptionId: string,
+  ): Promise<Row> {
+    requireAnyRole(auth, ["AR Supervisor", "Finance Manager"]);
+    validateUUID(exceptionId, "exception_id");
+    return exceptionRecoveryContextDto(
+      await callRpc<Row>(
+        this.client,
+        "automation_recovery_context",
+        {
+          p_company_id: auth.companyId,
+          p_actor_user_id: auth.userId,
+          p_exception_id: exceptionId,
+        },
+      ),
+    );
+  }
+
+  async recordExceptionRecovery(
+    auth: AuthContext,
+    exceptionId: string,
+    input: Row,
+  ): Promise<Row> {
+    requireAnyRole(auth, ["Finance Manager"]);
+    validateUUID(exceptionId, "exception_id");
+    assertExactKeys(
+      input,
+      ["action_type", "invoice_id", "corrected_reference", "resolution_note"],
+      ["action_type", "invoice_id", "resolution_note"],
+    );
+    if (
+      input.action_type !== "correct_invoice_external_reference" &&
+      input.action_type !== "confirm_receipt_invoice_match"
+    ) {
+      throw new ValidationError("action_type is invalid.");
+    }
+    validateUUID(String(input.invoice_id), "invoice_id");
+    const note = requireBoundedText(
+      input.resolution_note,
+      "resolution_note",
+      500,
+    );
+    const correctedReference = input.action_type ===
+        "correct_invoice_external_reference"
+      ? requireBoundedText(
+        input.corrected_reference,
+        "corrected_reference",
+        50,
+      )
+      : null;
+    if (correctedReference && containsControlCharacter(correctedReference)) {
+      throw new ValidationError(
+        "corrected_reference must not contain control characters.",
+      );
+    }
+    if (
+      input.action_type === "confirm_receipt_invoice_match" &&
+      input.corrected_reference !== undefined
+    ) {
+      throw new ValidationError(
+        "corrected_reference is accepted only for Invoice reference correction.",
+      );
+    }
+    const idempotencyKey = await sha256(canonicalJson({
+      company_id: auth.companyId,
+      exception_id: exceptionId,
+      invoice_id: input.invoice_id,
+      action_type: input.action_type,
+      corrected_reference: correctedReference,
+      resolution_note: note,
+      actor_user_id: auth.userId,
+      schema_version: 1,
+    }));
+    await callRpc<Row>(this.client, "automation_record_exception_recovery", {
+      p_company_id: auth.companyId,
+      p_actor_user_id: auth.userId,
+      p_exception_id: exceptionId,
+      p_invoice_id: input.invoice_id,
+      p_action_type: input.action_type,
+      p_corrected_reference: correctedReference,
+      p_resolution_note: note,
+      p_idempotency_key: idempotencyKey,
+    });
+    return await this.getExceptionRecoveryContext(auth, exceptionId);
+  }
+
+  async retryExceptionMatching(
+    auth: AuthContext,
+    exceptionId: string,
+  ): Promise<Row> {
+    requireAnyRole(auth, ["Finance Manager"]);
+    validateUUID(exceptionId, "exception_id");
+    const result = await callRpc<Row>(
+      this.client,
+      "automation_retry_exception_matching",
+      {
+        p_company_id: auth.companyId,
+        p_actor_user_id: auth.userId,
+        p_exception_id: exceptionId,
+      },
+    );
+    return allocationResultDto(String(result.command_id), result);
+  }
+
+  async getExceptionSourceDocument(
+    auth: AuthContext,
+    exceptionId: string,
+    invoiceId?: string,
+  ): Promise<AutomationSourceDocument> {
+    requireAnyRole(auth, ["AR Supervisor", "Finance Manager"]);
+    validateUUID(exceptionId, "exception_id");
+    if (invoiceId) validateUUID(invoiceId, "invoice_id");
+    const { data: exception, error } = await this.client
+      .from("automation_exceptions")
+      .select("id,attachment_id,receipt_id,reason_code")
+      .eq("id", exceptionId).eq("company_id", auth.companyId)
+      .eq("reason_code", "critical_identifier_unverified")
+      .maybeSingle();
+    if (error) throw error;
+    const recoverable = requiredId(
+      exception as Row | null,
+      "AutomationException",
+      exceptionId,
+    );
+    let attachmentId = String(recoverable.attachment_id ?? "");
+    if (invoiceId) {
+      const context = await this.getExceptionRecoveryContext(auth, exceptionId);
+      const eligible = context.eligible_invoices as Row[];
+      if (!eligible.some((row) => row.invoice_id === invoiceId)) {
+        throw new NotFoundError("EligibleInvoice", invoiceId);
+      }
+      const { data: command, error: commandError } = await this.client
+        .from("automation_commands")
+        .select("attachment_id")
+        .eq("company_id", auth.companyId)
+        .eq("resulting_invoice_id", invoiceId)
+        .eq("command_type", "create_invoice")
+        .eq("status", "completed")
+        .order("completed_at", { ascending: false })
+        .limit(1).maybeSingle();
+      if (commandError) throw commandError;
+      attachmentId = String(command?.attachment_id ?? "");
+    }
+    if (!attachmentId) {
+      throw new NotFoundError("AutomationSourceDocument", exceptionId);
+    }
+    const { data: attachment, error: attachmentError } = await this.client
+      .from("automation_source_attachments")
+      .select(
+        "id,original_file_name,detected_mime_type,safe_storage_path,content_purged_at",
+      )
+      .eq("id", attachmentId).eq("company_id", auth.companyId)
+      .maybeSingle();
+    if (attachmentError) throw attachmentError;
+    const source = requiredId(
+      attachment as Row | null,
+      "AutomationSourceAttachment",
+      attachmentId,
+    );
+    if (source.content_purged_at !== null || !source.safe_storage_path) {
+      throw new BusinessError(
+        "ATTACHMENT_UNAVAILABLE",
+        "The source document is no longer available.",
+        409,
+      );
+    }
+    const { data: body, error: storageError } = await this.client.storage
+      .from(STORAGE_BUCKET).download(String(source.safe_storage_path));
+    if (storageError) throw storageError;
+    return {
+      body,
+      fileName: String(source.original_file_name).replace(/[\r\n"\\]/g, "_")
+        .slice(0, 255),
+      mimeType: String(source.detected_mime_type),
+    };
+  }
+
   async closeException(
     auth: AuthContext,
     id: string,
@@ -4241,9 +4552,6 @@ export class AutomationService {
     validateUUID(mailboxId, "mailbox_id");
     const settings = await this.getSettings(auth);
     if (
-      !["draft_only", "straight_through"].includes(
-        String(settings.operating_mode),
-      ) ||
       settings.reminder_delivery_enabled !== true
     ) {
       throw new BusinessError(

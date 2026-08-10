@@ -19,7 +19,9 @@ import type {
   ExceptionReasonCode,
   OperatingMode,
   ProviderType,
+  RecoveryActionType,
   ReminderAttemptStatus,
+  ReminderMode,
   ReminderStatus,
   RunStatus,
 } from "./contract";
@@ -83,6 +85,46 @@ export const OPERATING_MODE_FINANCIAL_IMPACT: Record<OperatingMode, string> = {
     "Unposted Draft records may be created automatically. Posting still requires a person.",
   straight_through:
     "Invoices and receipts may be created AND posted, and receipts auto-allocated, without a person. Requires explicit confirmation and ready providers.",
+};
+
+export const REMINDER_MODE_LABEL: Record<ReminderMode, string> = {
+  off: "Off",
+  evaluate_only: "Evaluate Only",
+  automatic_delivery: "Automatic Delivery",
+};
+
+export const REMINDER_MODE_TONE: Record<ReminderMode, BadgeTone> = {
+  off: "muted",
+  evaluate_only: "info",
+  automatic_delivery: "success",
+};
+
+export const REMINDER_MODE_DESCRIPTION: Record<ReminderMode, string> = {
+  off: "No reminder evaluation or email delivery.",
+  evaluate_only:
+    "The system determines which invoices require reminders but does not send email.",
+  automatic_delivery:
+    "The system evaluates reminders and sends approved automated reminder emails when delivery readiness is available.",
+};
+
+/**
+ * Capabilities are derived, read-only status — NOT user controls. The label map
+ * is shared with the (removed) kill-switch wording so the same seven capability
+ * names render consistently on Overview and Settings.
+ */
+export const CAPABILITY_LABEL: Record<string, string> = {
+  mailbox_sync_enabled: "Mailbox Synchronization",
+  document_intelligence_enabled: "Document Intelligence",
+  invoice_automation_enabled: "Invoice Automation",
+  receipt_automation_enabled: "Receipt Automation",
+  auto_allocation_enabled: "Auto-Allocation",
+  reminder_evaluation_enabled: "Reminder Evaluation",
+  reminder_delivery_enabled: "Reminder Delivery",
+};
+
+export const RECOVERY_ACTION_LABEL: Record<RecoveryActionType, string> = {
+  correct_invoice_external_reference: "Correct Invoice External Reference",
+  confirm_receipt_invoice_match: "Confirm Receipt-to-Invoice Match",
 };
 
 export const CONNECTION_STATUS_LABEL: Record<ConnectionStatus, string> = {
