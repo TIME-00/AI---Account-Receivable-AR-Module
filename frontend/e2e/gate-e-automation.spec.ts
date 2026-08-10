@@ -214,6 +214,36 @@ const MAILBOXES = [
   }),
 ];
 
+const BANK_ACCOUNT_ACTIVE = "10000000-0000-4000-8000-000000000301";
+const BANK_ACCOUNTS = [
+  {
+    id: BANK_ACCOUNT_ACTIVE,
+    company_id: CO,
+    bank_name: "Maybank",
+    account_no: "1234567890",
+    account_name: "E2E Operating",
+    swift_code: null,
+    currency: "MYR",
+    gl_account_id: null,
+    is_active: true,
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+  },
+  {
+    id: "10000000-0000-4000-8000-000000000302",
+    company_id: CO,
+    bank_name: "Legacy Bank",
+    account_no: "5555000011",
+    account_name: "Closed Account",
+    swift_code: null,
+    currency: "MYR",
+    gl_account_id: null,
+    is_active: false,
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+  },
+];
+
 const RUNS = [
   {
     id: RUN,
@@ -362,14 +392,27 @@ const COMMANDS = [
   command(CMD_ALLOC, "allocate_receipt", "proposed", null, null, "c".repeat(64)),
 ];
 
-function exception(id: string, lifecycle: "open" | "retryable", reasonCode: string) {
+function exception(
+  id: string,
+  lifecycle: "open" | "retryable" | "resolved" | "dismissed",
+  reasonCode: string,
+  document:
+    | {
+      file_name: string;
+      document_type: string | null;
+      processing_status: string;
+      classification_status: string | null;
+      manual_review_required: boolean;
+    }
+    | null = null,
+) {
   return {
     id,
     company_id: CO,
     mailbox_id: null,
     sync_run_id: null,
     message_id: null,
-    attachment_id: null,
+    attachment_id: document ? ATT_INV : null,
     command_id: null,
     invoice_id: null,
     receipt_id: null,
@@ -381,6 +424,8 @@ function exception(id: string, lifecycle: "open" | "retryable", reasonCode: stri
     max_retries: 3,
     actor_user_id: null,
     resolution_note: null,
+    // Automation v15 nullable bounded document monitoring projection.
+    document,
     opened_at: "2026-07-30T00:00:00Z",
     resolved_at: null,
     dismissed_at: null,
@@ -391,7 +436,15 @@ function exception(id: string, lifecycle: "open" | "retryable", reasonCode: stri
 
 const EXCEPTIONS = [
   exception(EXC_OPEN, "open", "low_confidence"),
-  exception(EXC_RETRY, "retryable", "provider_unavailable"),
+  // Retained Observe-Only receipt: a retryable internal-processing failure with a
+  // bounded v15 document projection the monitoring UI must surface.
+  exception(EXC_RETRY, "retryable", "internal_processing_failure", {
+    file_name: "gate-e-observe-receipt-20260809.png",
+    document_type: "receipt",
+    processing_status: "processed",
+    classification_status: "accepted",
+    manual_review_required: true,
+  }),
 ];
 
 const REMINDERS = [
@@ -584,6 +637,7 @@ interface Recorder {
   repPatches: Array<{ id: string; body: unknown }>;
   oauthStarts: number;
   exceptionResolveCalls: number;
+  exceptionRetryCalls: number;
   unexpected: string[];
   httpErrors: string[];
   consoleErrors: string[];
@@ -619,6 +673,7 @@ async function boot(page: Page, role: RoleName): Promise<Recorder> {
     repPatches: [],
     oauthStarts: 0,
     exceptionResolveCalls: 0,
+    exceptionRetryCalls: 0,
     unexpected: [],
     httpErrors: [],
     consoleErrors: [],
@@ -810,7 +865,20 @@ async function boot(page: Page, role: RoleName): Promise<Recorder> {
     if (path.endsWith("/automation/exceptions") && method === "GET") return collection(EXCEPTIONS);
     if (/\/automation\/exceptions\/[^/]+\/(resolve|dismiss|retry)$/.test(path) && method === "POST") {
       if (path.endsWith("/resolve")) rec.exceptionResolveCalls += 1;
-      return send(exception(EXC_OPEN, "resolved" as "open", "low_confidence"));
+      if (path.endsWith("/retry")) rec.exceptionRetryCalls += 1;
+      // The retry response is a valid v15 exception (nullable document projection
+      // included) so the strict frontend contract parses it.
+      return send(
+        path.endsWith("/retry")
+          ? exception(EXC_RETRY, "retryable", "internal_processing_failure", {
+            file_name: "gate-e-observe-receipt-20260809.png",
+            document_type: "receipt",
+            processing_status: "processed",
+            classification_status: "accepted",
+            manual_review_required: true,
+          })
+          : exception(EXC_OPEN, "resolved", "low_confidence"),
+      );
     }
     if (path.endsWith("/automation/reminders") && method === "GET") {
       // Invoice-bound ONLY: a regression to tenant-wide reminder fetching (no
@@ -846,6 +914,11 @@ async function boot(page: Page, role: RoleName): Promise<Recorder> {
       return send({ unread_count: 0 });
     }
     if (path.endsWith("/notifications") && method === "GET") return collection([]);
+
+    // Company-scoped bank accounts (reused by the Mailboxes default-receiving
+    // -bank control, exactly as Receipts/Settings consume it). Returns a plain
+    // array payload.
+    if (path.endsWith("/bank-accounts") && method === "GET") return send(BANK_ACCOUNTS);
 
     // Invoice detail page (invoice + its payment-allocation history table).
     if (/\/invoices\/[^/]+$/.test(path) && method === "GET") return send(INVOICE);
@@ -1135,6 +1208,25 @@ test.describe("Gate E automation (desktop + mobile)", () => {
       ingestion_enabled: false,
     });
 
+    // Default receiving bank account: the Gmail card exposes a company-scoped
+    // selector listing only ACTIVE accounts, safely masked (never the full
+    // number). Saving sends ONE mailbox PATCH carrying ONLY the mapping — no
+    // ingestion/delivery/settings field is coupled to it.
+    const bankSelect = page.getByLabel("Default receiving bank account").first();
+    await expect(bankSelect).toBeVisible();
+    await expect(bankSelect.getByRole("option", { name: /Maybank.*ending 7890.*MYR/ }))
+      .toHaveCount(1);
+    await expect(bankSelect.getByRole("option", { name: /Legacy Bank|Closed Account/ }))
+      .toHaveCount(0);
+    await expect(page.getByText(/1234567890/)).toHaveCount(0);
+    await bankSelect.selectOption(BANK_ACCOUNT_ACTIVE);
+    await page.getByRole("button", { name: "Save bank account" }).first().click();
+    await expect.poll(() => rec.mailboxPatches.length).toBe(2);
+    expect(rec.mailboxPatches[1].id).toBe(MB_GMAIL);
+    expect(rec.mailboxPatches[1].body).toEqual({
+      default_bank_account_id: BANK_ACCOUNT_ACTIVE,
+    });
+
     // OAuth start returns a non-allowlisted URL → the client refuses to navigate.
     await page.getByRole("button", { name: "Connect ingestion" }).first().click();
     await expect(page.getByText(/unrecognized provider|refused/i)).toBeVisible();
@@ -1185,13 +1277,30 @@ test.describe("Gate E automation (desktop + mobile)", () => {
     expectClean(rec);
   });
 
-  test("Exceptions: resolve requires a note; retry present for retryable", async ({ page }) => {
+  test("Exceptions: v15 document projection renders; retry sends exactly one request; resolve needs a note", async ({ page }) => {
     const rec = await bootAndTrack(page, "Finance Manager");
     await page.goto("/automation/exceptions", { waitUntil: "domcontentloaded" });
 
-    // Retry is offered for the retryable exception (assert before opening a modal
-    // that would overlay the table).
-    await expect(page.getByRole("button", { name: "Retry" }).first()).toBeVisible();
+    // Automation v15 nullable document projection parses and the monitoring UI
+    // surfaces the problem document identity, type, status, reason, and review.
+    // Scope to the table so the assertions never match a (hidden) filter-select
+    // <option> that shares the same label text.
+    const monitorTable = page.getByRole("table");
+    await expect(monitorTable.getByText("gate-e-observe-receipt-20260809.png")).toBeVisible();
+    await expect(monitorTable.getByText("Receipt").first()).toBeVisible();
+    await expect(monitorTable.getByText("Processed").first()).toBeVisible();
+    await expect(monitorTable.getByText("Accepted").first()).toBeVisible();
+    await expect(monitorTable.getByText(/Internal Processing Failure/i).first()).toBeVisible();
+    await expect(monitorTable.getByText("Manual review required").first()).toBeVisible();
+    // No raw extraction/provider/credential data leaks into the monitoring view.
+    await expect(page.getByText(/extracted_fields|access_token|ya29/i)).toHaveCount(0);
+
+    // Retry is offered for the retryable exception and performs EXACTLY ONE
+    // request (no auto-retry on load). Assert before opening the resolve modal.
+    expect(rec.exceptionRetryCalls).toBe(0);
+    await page.getByRole("button", { name: "Retry" }).first().click();
+    await expect.poll(() => rec.exceptionRetryCalls).toBe(1);
+    expect(rec.exceptionResolveCalls).toBe(0);
 
     await page.getByRole("button", { name: "Resolve" }).first().click();
     const dialog = page.getByRole("dialog");

@@ -18,6 +18,8 @@ import {
 } from "@/hooks/use-automation";
 import { useUserRole } from "@/hooks/use-user-role";
 import { ApiError } from "@/hooks/use-api";
+import { useBankAccounts } from "@/hooks/use-receipts";
+import type { BankAccount } from "@/types";
 import {
   PROVIDER_TYPES,
   type Mailbox,
@@ -37,14 +39,34 @@ const SECRET_REF_RE = /^[A-Z][A-Z0-9_]{2,127}$/;
 const CONFIG_ROLES = ["Finance Manager", "System Admin"];
 const SYNC_ROLES = ["AR Supervisor", "Finance Manager"];
 
+/**
+ * Mask a bank account number to its last four digits (reuses the same
+ * "ending NNNN" convention as the Receipts payment form). The full number is
+ * never rendered.
+ */
+function maskAccountNo(accountNo: string): string {
+  const digits = accountNo.replace(/\D/g, "");
+  const suffix = digits.slice(-4);
+  return suffix ? `ending ${suffix}` : "number unavailable";
+}
+
+function bankOptionLabel(account: BankAccount): string {
+  const currency = account.currency ? ` · ${account.currency}` : "";
+  return `${account.bank_name} · ${account.account_name} · ${maskAccountNo(account.account_no)}${currency}`;
+}
+
 function MailboxCard({
   mailbox,
   canConfig,
   canSync,
+  bankAccounts,
+  bankAccountsLoading,
 }: {
   mailbox: Mailbox;
   canConfig: boolean;
   canSync: boolean;
+  bankAccounts: BankAccount[];
+  bankAccountsLoading: boolean;
 }) {
   const oauth = useBeginMailboxOAuth();
   const update = useUpdateMailbox();
@@ -104,6 +126,30 @@ function MailboxCard({
       },
       {
         onSuccess: () => toast.success("Mailbox updated."),
+        onError: (error) =>
+          toast.error(error instanceof ApiError ? error.message : "Update was rejected."),
+      },
+    );
+  }
+
+  // Default receiving bank account: the company account used for Receipt records
+  // auto-created from THIS mailbox. Only active accounts are offered. Saving
+  // sends ONE mailbox PATCH carrying exactly `default_bank_account_id` — never
+  // any ingestion/delivery/OAuth/sync/settings field. `""` clears the mapping
+  // (the backend accepts an explicit null).
+  const activeBankAccounts = bankAccounts.filter((account) => account.is_active);
+  const currentBankId = mailbox.default_bank_account_id ?? "";
+  const [bankSelection, setBankSelection] = useState<string>(currentBankId);
+  const bankSelectionDirty = bankSelection !== currentBankId;
+
+  function saveBankAccount() {
+    update.mutate(
+      {
+        id: mailbox.id,
+        patch: { default_bank_account_id: bankSelection === "" ? null : bankSelection },
+      },
+      {
+        onSuccess: () => toast.success("Default receiving bank account updated."),
         onError: (error) =>
           toast.error(error instanceof ApiError ? error.message : "Update was rejected."),
       },
@@ -240,6 +286,52 @@ function MailboxCard({
           )}
         </div>
       )}
+
+      {canConfig && (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+          <label
+            htmlFor={`bank-${mailbox.id}`}
+            className="block text-[11px] font-semibold text-slate-700"
+          >
+            Default receiving bank account
+          </label>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            The company account used for Receipt records automatically created
+            from this mailbox. This is not the customer&apos;s payer bank.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              id={`bank-${mailbox.id}`}
+              value={bankSelection}
+              onChange={(e) => setBankSelection(e.target.value)}
+              disabled={update.isPending || bankAccountsLoading}
+              className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 px-2 py-1 text-[11px] text-slate-700 disabled:opacity-60"
+            >
+              <option value="">
+                {bankAccountsLoading ? "Loading accounts…" : "None (no default account)"}
+              </option>
+              {activeBankAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {bankOptionLabel(account)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={saveBankAccount}
+              disabled={update.isPending || !bankSelectionDirty}
+              className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+            >
+              Save bank account
+            </button>
+          </div>
+          {!bankAccountsLoading && activeBankAccounts.length === 0 && (
+            <p className="mt-1 text-[11px] text-amber-700">
+              No active company bank account is available to receive automated receipts.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -251,6 +343,9 @@ export default function MailboxesPage() {
 
   const { data, isLoading, isError, refetch } = useMailboxes({ page: 1, page_size: 50 });
   const create = useCreateMailbox();
+  // Reuse the existing company-scoped bank-account query (shared with Receipts /
+  // Settings). Only meaningful for config roles, who see the mapping control.
+  const bankAccountsQuery = useBankAccounts();
 
   const [showForm, setShowForm] = useState(false);
   const [provider, setProvider] = useState<ProviderType>("gmail");
@@ -403,6 +498,8 @@ export default function MailboxesPage() {
               mailbox={mailbox}
               canConfig={canConfig}
               canSync={canSync}
+              bankAccounts={bankAccountsQuery.data ?? []}
+              bankAccountsLoading={bankAccountsQuery.isLoading}
             />
           ))}
         </div>

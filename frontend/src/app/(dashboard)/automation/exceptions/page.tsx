@@ -30,11 +30,16 @@ import {
   type ExceptionReasonCode,
 } from "@/lib/automation/contract";
 import {
+  CLASSIFICATION_STATUS_LABEL,
+  CLASSIFICATION_STATUS_TONE,
+  DOCUMENT_TYPE_LABEL,
+  DOCUMENT_TYPE_TONE,
   EXCEPTION_LIFECYCLE_LABEL,
   EXCEPTION_LIFECYCLE_TONE,
   exceptionReasonLabel,
+  PROCESSING_STATUS_LABEL,
 } from "@/lib/automation/labels";
-import { formatDateTime } from "@/lib/automation/format";
+import type { AttachmentProcessingStatus } from "@/lib/automation/contract";
 
 const EDIT_ROLES = ["AR Supervisor", "Finance Manager"];
 
@@ -48,6 +53,16 @@ function safeDetail(details: Record<string, unknown> | null | undefined): string
     .slice(0, 4)
     .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : String(v)}`);
   return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
+/**
+ * Humanize the bounded document processing status. The backend projects it as a
+ * bounded string (not a closed enum), so an unrecognized value falls back to
+ * the raw string rather than blanking — the schema already guarantees it is a
+ * short, safe, non-sensitive token.
+ */
+function processingStatusLabel(value: string): string {
+  return PROCESSING_STATUS_LABEL[value as AttachmentProcessingStatus] ?? value;
 }
 
 export default function ExceptionQueuePage() {
@@ -141,39 +156,101 @@ export default function ExceptionQueuePage() {
       ) : (
         <div className="space-y-3">
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-500">
+                  <th className="px-3 py-2 font-medium">Document</th>
+                  <th className="px-3 py-2 font-medium">Type</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Reason</th>
                   <th className="px-3 py-2 font-medium">Lifecycle</th>
-                  <th className="px-3 py-2 font-medium">Details</th>
+                  <th className="px-3 py-2 font-medium">Review</th>
                   <th className="px-3 py-2 font-medium">Retries</th>
-                  <th className="px-3 py-2 font-medium">Created</th>
                   {canEdit && <th className="px-3 py-2 font-medium">Actions</th>}
                 </tr>
               </thead>
               <tbody>
-                {data.rows.map((exception) => (
-                  <tr key={exception.id} className="border-b border-slate-50 last:border-0">
-                    <td className="px-3 py-2 font-medium text-slate-700">
-                      {exceptionReasonLabel(exception.reason_code)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <AutomationBadge
-                        label={EXCEPTION_LIFECYCLE_LABEL[exception.lifecycle_status]}
-                        tone={EXCEPTION_LIFECYCLE_TONE[exception.lifecycle_status]}
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-[11px] text-slate-500">
-                      {safeDetail(exception.safe_details)}
-                    </td>
-                    <td className="px-3 py-2 tabular-nums text-slate-600">
-                      {exception.retry_count ?? 0}
-                      {exception.max_retries ? ` / ${exception.max_retries}` : ""}
-                    </td>
-                    <td className="px-3 py-2 text-slate-500">
-                      {formatDateTime(exception.created_at)}
-                    </td>
+                {data.rows.map((exception) => {
+                  const document = exception.document;
+                  // Manual-review state mirrors the backend: it is carried on the
+                  // document projection when a document is linked, and otherwise
+                  // derived from the same lifecycle rule (open/retryable require
+                  // review; resolved/dismissed do not). Resolved/dismissed rows
+                  // therefore never appear review/retry-required.
+                  const reviewRequired = document?.manual_review_required ??
+                    (exception.lifecycle_status === "open" ||
+                      exception.lifecycle_status === "retryable");
+                  return (
+                    <tr key={exception.id} className="border-b border-slate-50 last:border-0 align-top">
+                      <td className="px-3 py-2">
+                        {document
+                          ? (
+                            <span className="break-all font-medium text-slate-700" title={document.file_name}>
+                              {document.file_name}
+                            </span>
+                          )
+                          : <span className="text-slate-400">No linked document</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {document?.document_type
+                          ? (
+                            <AutomationBadge
+                              label={DOCUMENT_TYPE_LABEL[document.document_type]}
+                              tone={DOCUMENT_TYPE_TONE[document.document_type]}
+                            />
+                          )
+                          : <span className="text-slate-400">Unknown</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {document
+                          ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[11px] text-slate-600">
+                                {processingStatusLabel(document.processing_status)}
+                              </span>
+                              {document.classification_status
+                                ? (
+                                  <AutomationBadge
+                                    label={CLASSIFICATION_STATUS_LABEL[document.classification_status]}
+                                    tone={CLASSIFICATION_STATUS_TONE[document.classification_status]}
+                                  />
+                                )
+                                : <span className="text-[11px] text-slate-400">Not classified</span>}
+                            </div>
+                          )
+                          : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-slate-700">
+                          {exceptionReasonLabel(exception.reason_code)}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {safeDetail(exception.safe_details)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <AutomationBadge
+                          label={EXCEPTION_LIFECYCLE_LABEL[exception.lifecycle_status]}
+                          tone={EXCEPTION_LIFECYCLE_TONE[exception.lifecycle_status]}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        {reviewRequired
+                          ? (
+                            <span className="text-[11px] font-semibold text-amber-700">
+                              Manual review required
+                            </span>
+                          )
+                          : (
+                            <span className="text-[11px] text-slate-500">
+                              No manual review required
+                            </span>
+                          )}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-slate-600">
+                        {exception.retry_count ?? 0}
+                        {exception.max_retries ? ` / ${exception.max_retries}` : ""}
+                      </td>
                     {canEdit && (
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
@@ -215,8 +292,9 @@ export default function ExceptionQueuePage() {
                         </div>
                       </td>
                     )}
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

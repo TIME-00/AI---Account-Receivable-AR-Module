@@ -665,6 +665,28 @@ export const commandSchema = z.object({
 }).strict();
 export type AutomationCommand = z.infer<typeof commandSchema>;
 
+/**
+ * Bounded monitoring projection for the linked source document (Automation
+ * v15). This mirrors the backend `exceptionDto` `document` object EXACTLY: it
+ * exposes only human-readable file identity, document/classification status,
+ * and a lifecycle-derived manual-review flag. It NEVER carries document bytes,
+ * raw extraction fields, provider payloads, or any OAuth/credential data.
+ *
+ * Bounds mirror the backend: `file_name` is a required string ≤255, and
+ * `processing_status` is a required bounded string ≤40 (the backend projects it
+ * as a bounded string, not a closed enum, so the mirror must not over-constrain
+ * it to the attachment-status enum and fail-close on a valid backend value).
+ * `document_type` and `classification_status` are the backend enums (nullable).
+ */
+export const exceptionDocumentSchema = z.object({
+  file_name: z.string().min(1).max(255),
+  document_type: z.enum(DOCUMENT_TYPES).nullable(),
+  processing_status: z.string().min(1).max(40),
+  classification_status: z.enum(CLASSIFICATION_STATUSES).nullable(),
+  manual_review_required: z.boolean(),
+}).strict();
+export type ExceptionDocument = z.infer<typeof exceptionDocumentSchema>;
+
 export const exceptionSchema = z.object({
   id: uuid,
   company_id: uuid,
@@ -684,6 +706,10 @@ export const exceptionSchema = z.object({
   max_retries: z.number().int().nonnegative(),
   actor_user_id: uuid.nullable(),
   resolution_note: z.string().nullable(),
+  // Automation v15 always emits this key; the value is nullable (no linked
+  // document) or the exact bounded projection above. Required, not optional —
+  // a missing key means a contract drift and must fail closed.
+  document: exceptionDocumentSchema.nullable(),
   opened_at: isoTimestamp.nullable(),
   resolved_at: isoTimestamp.nullable(),
   dismissed_at: isoTimestamp.nullable(),

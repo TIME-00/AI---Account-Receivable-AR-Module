@@ -277,6 +277,7 @@ describe("Mailboxes", () => {
         ],
         meta: { page: 1, page_size: 50, total: 1, has_more: false },
       })),
+      route("/bank-accounts", () => ({ data: [] })),
     ]);
     renderWithProviders(<MailboxesPage />);
     expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
@@ -319,12 +320,43 @@ describe("Mailboxes", () => {
     };
   }
 
-  function mountMailboxes(row: Record<string, unknown>) {
+  const BANK_ACTIVE_1 = "10000000-0000-4000-8000-000000000301";
+  const BANK_ACTIVE_2 = "10000000-0000-4000-8000-000000000302";
+  const BANK_INACTIVE = "10000000-0000-4000-8000-000000000303";
+
+  function bankAccount(overrides: Record<string, unknown> = {}) {
+    return {
+      id: BANK_ACTIVE_1,
+      company_id: CO,
+      bank_name: "Maybank",
+      account_no: "1234567890",
+      account_name: "TSH Synergy Operating",
+      swift_code: null,
+      currency: "MYR",
+      gl_account_id: null,
+      is_active: true,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  const BANK_ACCOUNTS = [
+    bankAccount(),
+    bankAccount({ id: BANK_ACTIVE_2, bank_name: "CIMB", account_name: "TSH Synergy Collections", account_no: "9876543210", currency: "MYR" }),
+    bankAccount({ id: BANK_INACTIVE, bank_name: "Legacy Bank", account_name: "Closed Account", account_no: "5555000011", is_active: false }),
+  ];
+
+  function mountMailboxes(
+    row: Record<string, unknown>,
+    banks: Record<string, unknown>[] = BANK_ACCOUNTS,
+  ) {
     fakeApi = createFakeApi([
       route("/automation/mailboxes", () => ({
         data: [row],
         meta: { page: 1, page_size: 50, total: 1, has_more: false },
       })),
+      route("/bank-accounts", () => ({ data: banks })),
     ]);
     renderWithProviders(<MailboxesPage />);
   }
@@ -395,6 +427,88 @@ describe("Mailboxes", () => {
     expect(body).not.toHaveProperty("is_enabled");
     expect(body).not.toHaveProperty("ingestion_enabled");
   });
+
+  // ── Default receiving bank account mapping (Draft Receipt prerequisite) ──────
+  it("offers only ACTIVE company bank accounts in the default-receiving-bank selector", async () => {
+    mountMailboxes(connectedMailbox());
+    const select = await screen.findByLabelText("Default receiving bank account");
+    // Active accounts appear (masked, never the full number).
+    expect(screen.getByRole("option", { name: /Maybank.*ending 7890.*MYR/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /CIMB.*ending 3210/ })).toBeInTheDocument();
+    // Inactive account is not offered.
+    expect(screen.queryByRole("option", { name: /Legacy Bank|Closed Account/ })).toBeNull();
+    // Full account numbers are never rendered.
+    expect(screen.queryByText(/1234567890|9876543210/)).toBeNull();
+    expect(select).toHaveValue("");
+  });
+
+  it("reflects the mailbox's existing default account as the current selection", async () => {
+    mountMailboxes(connectedMailbox({ default_bank_account_id: BANK_ACTIVE_2 }));
+    const select = await screen.findByLabelText("Default receiving bank account");
+    expect(select).toHaveValue(BANK_ACTIVE_2);
+  });
+
+  it("saves with exactly one PATCH carrying only default_bank_account_id", async () => {
+    mountMailboxes(connectedMailbox());
+    fakeApi.patch.mockResolvedValue(
+      connectedMailbox({ default_bank_account_id: BANK_ACTIVE_1 }),
+    );
+    const select = await screen.findByLabelText("Default receiving bank account");
+    fireEvent.change(select, { target: { value: BANK_ACTIVE_1 } });
+    fireEvent.click(screen.getByRole("button", { name: "Save bank account" }));
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalledTimes(1));
+    const [path, body] = fakeApi.patch.mock.calls[0];
+    expect(path).toBe(`/automation/mailboxes/${MB}`);
+    expect(body).toEqual({ default_bank_account_id: BANK_ACTIVE_1 });
+    // No ingestion/delivery/settings/OAuth state is coupled to the bank save.
+    for (
+      const forbidden of [
+        "is_enabled",
+        "ingestion_enabled",
+        "delivery_enabled",
+        "ingestion_secret_ref",
+        "delivery_secret_ref",
+        "operating_mode",
+      ]
+    ) {
+      expect(body).not.toHaveProperty(forbidden);
+    }
+  });
+
+  it("clears the mapping with an exact { default_bank_account_id: null } PATCH", async () => {
+    mountMailboxes(connectedMailbox({ default_bank_account_id: BANK_ACTIVE_1 }));
+    fakeApi.patch.mockResolvedValue(connectedMailbox({ default_bank_account_id: null }));
+    const select = await screen.findByLabelText("Default receiving bank account");
+    fireEvent.change(select, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save bank account" }));
+    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalledTimes(1));
+    const [, body] = fakeApi.patch.mock.calls[0];
+    expect(body).toEqual({ default_bank_account_id: null });
+  });
+
+  it("prevents duplicate bank-account save while pending and disables save when unchanged", async () => {
+    mountMailboxes(connectedMailbox());
+    const save = await screen.findByRole("button", { name: "Save bank account" });
+    // No change yet → save is disabled.
+    expect(save).toBeDisabled();
+    fakeApi.patch.mockReturnValue(new Promise(() => {}));
+    const select = screen.getByLabelText("Default receiving bank account");
+    fireEvent.change(select, { target: { value: BANK_ACTIVE_1 } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(save).toBeDisabled());
+    fireEvent.click(save);
+    fireEvent.click(save);
+    expect(fakeApi.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render the bank-account control for an unauthorized read-only role", async () => {
+    roles = ["Auditor"];
+    mountMailboxes(connectedMailbox());
+    expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Default receiving bank account")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save bank account" })).toBeNull();
+  });
 });
 
 describe("Production PostgreSQL UUID identifiers render through page + hook paths", () => {
@@ -460,6 +574,7 @@ describe("Production PostgreSQL UUID identifiers render through page + hook path
         ],
         meta: { page: 1, page_size: 50, total: 1, has_more: false },
       })),
+      route("/bank-accounts", () => ({ data: [] })),
     ]);
     renderWithProviders(<MailboxesPage />);
     expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
@@ -490,6 +605,7 @@ describe("Exception Queue", () => {
             max_retries: 3,
             actor_user_id: null,
             resolution_note: null,
+            document: null,
             opened_at: "2026-07-31T00:00:00Z",
             resolved_at: null,
             dismissed_at: null,
@@ -505,6 +621,155 @@ describe("Exception Queue", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     // No note → the resolve mutation is never called.
     await waitFor(() => expect(fakeApi.post).not.toHaveBeenCalled());
+  });
+});
+
+// ── Automation v15 Exceptions monitoring + Retry (retained Observe-Only rows) ──
+describe("Exceptions v15 monitoring + Retry", () => {
+  const EXC_INV = "10000000-0000-4000-8000-000000000201";
+  const EXC_RCPT = "10000000-0000-4000-8000-000000000202";
+  const EXC_UNSUP = "10000000-0000-4000-8000-000000000203";
+
+  function exceptionRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: EXC_INV,
+      company_id: CO,
+      mailbox_id: MB,
+      sync_run_id: null,
+      message_id: null,
+      attachment_id: "10000000-0000-4000-8000-000000000091",
+      command_id: null,
+      invoice_id: null,
+      receipt_id: null,
+      reason_code: "internal_processing_failure",
+      idempotency_key: null,
+      lifecycle_status: "retryable",
+      safe_details: { error_code: "INTERNAL_PROCESSING_FAILURE" },
+      retry_count: 0,
+      max_retries: 3,
+      actor_user_id: null,
+      resolution_note: null,
+      document: null,
+      opened_at: "2026-08-09T00:00:00Z",
+      resolved_at: null,
+      dismissed_at: null,
+      created_at: "2026-08-09T00:00:00Z",
+      updated_at: "2026-08-09T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  const retainedInvoice = exceptionRow({
+    id: EXC_INV,
+    document: {
+      file_name: "gate-e-observe-invoice-20260809.png",
+      document_type: "invoice",
+      processing_status: "processed",
+      classification_status: "accepted",
+      manual_review_required: true,
+    },
+  });
+  const retainedReceipt = exceptionRow({
+    id: EXC_RCPT,
+    document: {
+      file_name: "gate-e-observe-receipt-20260809.png",
+      document_type: "receipt",
+      processing_status: "processed",
+      classification_status: "accepted",
+      manual_review_required: true,
+    },
+  });
+  const unsupported = exceptionRow({
+    id: EXC_UNSUP,
+    reason_code: "unsupported_document",
+    lifecycle_status: "open",
+    document: {
+      file_name: "gate-e-observe-unsupported-20260809.png",
+      document_type: "unsupported",
+      processing_status: "processed",
+      classification_status: "rejected",
+      manual_review_required: true,
+    },
+  });
+
+  function mountExceptions(rows: Record<string, unknown>[]) {
+    fakeApi = createFakeApi([
+      routePrefix("/automation/exceptions", () => ({
+        data: rows,
+        meta: { page: 1, page_size: 15, total: rows.length, has_more: false },
+      })),
+    ]);
+    renderWithProviders(<ExceptionQueuePage />);
+  }
+
+  it("renders v15 document identity, type, status, reason, and review for each retained row", async () => {
+    mountExceptions([retainedInvoice, retainedReceipt, unsupported]);
+    // File identity is visible for each problem document.
+    expect(await screen.findByText("gate-e-observe-invoice-20260809.png")).toBeInTheDocument();
+    expect(screen.getByText("gate-e-observe-receipt-20260809.png")).toBeInTheDocument();
+    expect(screen.getByText("gate-e-observe-unsupported-20260809.png")).toBeInTheDocument();
+    // Type badges.
+    expect(screen.getAllByText("Invoice").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Receipt").length).toBeGreaterThan(0);
+    expect(screen.getByText("Unsupported")).toBeInTheDocument();
+    // Status (processing + classification) visible.
+    expect(screen.getAllByText("Processed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Accepted").length).toBeGreaterThan(0);
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    // Humanized reason (not the raw code).
+    expect(screen.getAllByText(/Internal processing failure/i).length).toBeGreaterThan(0);
+    // Review requirement visible.
+    expect(screen.getAllByText("Manual review required").length).toBe(3);
+  });
+
+  it("shows 'No linked document' when document is null and never leaks raw payloads", async () => {
+    mountExceptions([exceptionRow({ document: null })]);
+    expect(await screen.findByText("No linked document")).toBeInTheDocument();
+    // No raw extraction/provider JSON leaks into the DOM.
+    expect(screen.queryByText(/extracted_fields|access_token|ya29|provider_body/i)).toBeNull();
+  });
+
+  it("sends exactly one Retry POST for a retryable retained row and prevents duplicates while pending", async () => {
+    mountExceptions([retainedInvoice]);
+    // Never resolves so the pending state persists.
+    fakeApi.post.mockReturnValue(new Promise(() => {}));
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    fireEvent.click(retry);
+    await waitFor(() => expect(retry).toBeDisabled());
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+    expect(fakeApi.post).toHaveBeenCalledTimes(1);
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/exceptions/${EXC_INV}/retry`);
+    // Retry carries no financial/OpenAI authority from the frontend.
+    expect(body).toBeUndefined();
+  });
+
+  it("does not offer Retry for a resolved row and never marks it review-required", async () => {
+    mountExceptions([
+      exceptionRow({
+        lifecycle_status: "resolved",
+        resolved_at: "2026-08-09T01:00:00Z",
+        resolution_note: "Handled.",
+        document: {
+          file_name: "gate-e-observe-invoice-20260809.png",
+          document_type: "invoice",
+          processing_status: "processed",
+          classification_status: "accepted",
+          manual_review_required: false,
+        },
+      }),
+    ]);
+    expect(await screen.findByText("gate-e-observe-invoice-20260809.png")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByText("No manual review required")).toBeInTheDocument();
+    expect(screen.queryByText("Manual review required")).toBeNull();
+  });
+
+  it("does not auto-retry on load", async () => {
+    mountExceptions([retainedInvoice, retainedReceipt]);
+    await screen.findByText("gate-e-observe-invoice-20260809.png");
+    expect(fakeApi.post).not.toHaveBeenCalled();
   });
 });
 

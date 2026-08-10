@@ -352,6 +352,7 @@ describe("exception reason codes + normalized lifecycle fields", () => {
     max_retries: 3,
     actor_user_id: null,
     resolution_note: null,
+    document: null,
     opened_at: TS,
     resolved_at: null,
     dismissed_at: null,
@@ -368,6 +369,182 @@ describe("exception reason codes + normalized lifecycle fields", () => {
     const parsed = parseGateEData(exceptionSchema, { ...base, reason_code: "low_confidence" });
     expect(parsed.opened_at).toBe(TS);
     expect(parsed.max_retries).toBe(3);
+  });
+
+  // ── Automation v15 nullable `document` monitoring projection ────────────────
+  // The frontend mirror must accept the exact bounded backend object and null,
+  // and fail closed on any drift. `base.document` is null; each case overrides.
+  const validInvoiceDocument = {
+    file_name: "gate-e-observe-invoice-20260809.png",
+    document_type: "invoice",
+    processing_status: "processed",
+    classification_status: "accepted",
+    manual_review_required: true,
+  };
+
+  it("1. accepts document = null", () => {
+    expect(exceptionSchema.safeParse({ ...base, reason_code: "low_confidence" }).success)
+      .toBe(true);
+  });
+
+  it("2. accepts a valid Invoice document projection", () => {
+    const parsed = parseGateEData(exceptionSchema, {
+      ...base,
+      reason_code: "internal_processing_failure",
+      lifecycle_status: "retryable",
+      document: validInvoiceDocument,
+    });
+    expect(parsed.document?.file_name).toBe("gate-e-observe-invoice-20260809.png");
+    expect(parsed.document?.document_type).toBe("invoice");
+  });
+
+  it("3. accepts a valid Receipt projection", () => {
+    const parsed = parseGateEData(exceptionSchema, {
+      ...base,
+      reason_code: "internal_processing_failure",
+      lifecycle_status: "retryable",
+      document: {
+        file_name: "gate-e-observe-receipt-20260809.png",
+        document_type: "receipt",
+        processing_status: "processed",
+        classification_status: "accepted",
+        manual_review_required: true,
+      },
+    });
+    expect(parsed.document?.document_type).toBe("receipt");
+  });
+
+  it("4. accepts an unsupported projection (nullable classification)", () => {
+    const parsed = parseGateEData(exceptionSchema, {
+      ...base,
+      reason_code: "unsupported_document",
+      document: {
+        file_name: "gate-e-observe-unsupported-20260809.png",
+        document_type: "unsupported",
+        processing_status: "processed",
+        classification_status: "rejected",
+        manual_review_required: true,
+      },
+    });
+    expect(parsed.document?.document_type).toBe("unsupported");
+  });
+
+  it("5. accepts manual_review_required = true for open/retryable", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        lifecycle_status: "open",
+        document: { ...validInvoiceDocument, manual_review_required: true },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("6. accepts a resolved/dismissed projection with manual_review_required = false", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        lifecycle_status: "resolved",
+        resolved_at: TS,
+        document: { ...validInvoiceDocument, manual_review_required: false },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("7. rejects an unknown document_type", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: { ...validInvoiceDocument, document_type: "purchase_order" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("8. rejects an unknown classification_status", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: { ...validInvoiceDocument, classification_status: "escalated" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("9. rejects a processing_status that exceeds the bounded contract", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: { ...validInvoiceDocument, processing_status: "x".repeat(41) },
+      }).success,
+    ).toBe(false);
+    // A blank processing_status is also rejected (required, non-empty).
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: { ...validInvoiceDocument, processing_status: "" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("10. rejects an overlong file_name", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: { ...validInvoiceDocument, file_name: "a".repeat(256) },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("11. rejects a missing required nested key", () => {
+    const { manual_review_required: _omit, ...withoutFlag } = validInvoiceDocument;
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: withoutFlag,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("12. rejects an extra unknown nested field", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: { ...validInvoiceDocument, extraction_json: { total: 100 } },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("13. rejects a non-boolean manual_review_required", () => {
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        document: { ...validInvoiceDocument, manual_review_required: "true" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("14. remains strict at the top level (unknown fields + missing document fail closed)", () => {
+    // Unknown top-level field fails.
+    expect(
+      exceptionSchema.safeParse({
+        ...base,
+        reason_code: "low_confidence",
+        surprise: "x",
+      }).success,
+    ).toBe(false);
+    // The `document` key is required (v15 always emits it): omitting it fails.
+    const { document: _omitDoc, ...withoutDocument } = base;
+    expect(
+      exceptionSchema.safeParse({ ...withoutDocument, reason_code: "low_confidence" }).success,
+    ).toBe(false);
   });
 });
 
