@@ -1273,3 +1273,86 @@ build, diff check, and added-line secret/auth-state scan. The Git-integrated
 Production bundle at the canonical `/automation` route returns HTTP 200,
 contains the new authoritative status copy, and no longer contains the stale
 inactive-provider warning. No manual duplicate Vercel deployment was created.
+
+## Authenticated v17 closure and critical-identifier authority gate
+
+The Finance Manager completed the normal authenticated post-version-17 browser
+verification. Automation > Documents loaded without HTTP 500 and rendered the
+five expected controlled decisions. The current Draft Receipt rendered its
+processed/accepted decision, `gpt-5.6-luna` provider/model provenance, 100%
+provider-declared overall and critical confidence, valid deterministic
+validation, customer-code resolution, completed Create Receipt command, and
+result link. The Documents collection and command/result projection remediation
+is therefore CLOSED / PASS.
+
+Automation > Overview also rendered the live authoritative state: Draft Only,
+mailbox ingestion ready, document intelligence ready, reminder-email delivery
+not ready, and Straight-Through inactive. The stale hard-coded inactive-provider
+warning is absent. The Overview truthfulness remediation is CLOSED / PASS.
+
+The source/candidate discrepancy remains factual evidence: the controlled
+Invoice image visibly contains `GATEE-INV-DRAFT-20260810-001`, while the stored
+provider candidate and unposted Draft contain
+`GATE-INV-DRAFT-20260810-001`. The Receipt candidate contains the former value
+as an Invoice-reference candidate. That cross-document mismatch is useful
+conflict evidence, but both candidates came through the same provider and it is
+not independent source-text authority. The existing Draft Invoice and Receipt
+remain unchanged and no second OpenAI request is authorized.
+
+Repository inspection found no active independent OCR/source-text verifier or
+authoritative bank-transaction feed. The first independent review correctly
+rejected a local design that treated every optional external reference as a
+command-wide prerequisite: that was secure but would have made normal Invoice
+and Receipt Straight-Through creation structurally unavailable. Claude modified
+nothing and Production remained untouched.
+
+The corrected bounded design applies authority at its actual financial stage.
+Governed services generate `invoices.invoice_no` and `receipts.receipt_no` as
+internal financial identities. Optional extracted supplier Invoice and Receipt
+payment references remain non-authoritative metadata and exact duplicate
+evidence; they do not block otherwise valid creation and cannot select a
+tenant, customer, system document number, matching target, allocation, posting,
+FX, or journal behavior. Receipt-to-Invoice candidates become positive authority
+only during matching/allocation. The second independent review correctly found
+that matching only against `invoices.invoice_no` was functionally incomplete:
+a Receipt normally cites the external identifier printed on the source Invoice,
+not a later system-generated number. Claude modified nothing and Production
+remained unchanged.
+
+The corrected local boundary supports both legitimate exact forms. Each
+explicit candidate must resolve uniquely to one eligible Invoice through
+`invoices.invoice_no` or `invoices.reference_no` inside the authenticated
+company, resolved-customer, same-currency, eligible-status, and positive-
+outstanding scope. External `reference_no` remains lookup evidence rather than
+primary authority. Zero or ambiguous matches, and distinct references that
+collapse onto one Invoice, fail closed. The service uses two bounded exact
+queries rather than an N+1 or fuzzy lookup; proposed allocations retain the
+original evidence. Prospective Migration 038 replaces only the authoritative
+allocation RPC so PostgreSQL independently enforces the same uniqueness and
+financial boundary before allocating.
+
+Uncorroborated explicit matching evidence leaves the already-created Receipt
+intact, withholds allocation, and creates one idempotent open
+`critical_identifier_unverified` exception containing only a fixed error code.
+Migration 037 only extends the bounded exception reason constraint; it changes
+no setting, RLS policy, grant, existing document, or financial row. This local
+scope and Migration 038 are not applied to Production and require another
+independent read-only review before migration/function/frontend deployment.
+The existing `GATEE...` Receipt reference still does not exactly match the
+stored `GATE...` Invoice external reference, so that controlled pair remains a
+deliberate allocation refusal with a redacted monitorable exception. Gate E remains OPEN;
+Auto-Allocation, reminders, delivery, and Straight-Through remain disabled.
+
+Local Codex validation at the corrected third-review checkpoint passed: Gate E
+Automation 103/103, activation prerequisites 28/28, OpenAI document
+intelligence 41/41, scheduler 26/26, combined focused backend 198/198, full
+backend 461/461, all 17 deployable Edge entrypoints, Deno check/fmt/lint,
+focused frontend contract and Automation 131/131, full frontend Vitest 65 files
+/ 976 tests, frontend TypeScript, targeted ESLint, Production build, Git diff
+check, and added-line secret/auth-state scan. Migration 038b is a rollback-only
+catalog and synthetic resolver smoke prepared for the independent review and
+later controlled migration-validation step; it was not executed because no
+local or Production migration was authorized in this gate. Production was not
+mutated, no migration was applied,
+and no function or frontend deployment occurred during this
+implementation/self-review gate.

@@ -53,6 +53,7 @@ import {
   exactAutomationDecimalNumber,
   isAutomationExceptionIdempotencyConflict,
   mailboxCapabilityIsReady,
+  resolveReceiptInvoiceReferenceAuthority,
   tokenExpiryIsCurrent,
 } from "./automation/service.ts";
 import {
@@ -3048,6 +3049,24 @@ Deno.test("Automatic allocation planner accepts only exact authoritative evidenc
     assertEquals(exact.allocations[0].amount, "100.00");
   }
 
+  const external = buildAutomaticAllocationPlan({
+    receipt_unallocated: "100.00",
+    invoice_references: ["SUPPLIER-INV-123"],
+    payment_reference: "PAYMENT-METADATA-001",
+    invoices: [{
+      id: "invoice-1",
+      invoice_no: "INV-202608-00001",
+      reference_no: "SUPPLIER-INV-123",
+      matched_reference: "SUPPLIER-INV-123",
+      outstanding: "100.00",
+    }],
+  });
+  assert(external.ok);
+  if (external.ok) {
+    assertEquals(external.evidence.invoice_references, ["SUPPLIER-INV-123"]);
+    assertEquals(external.allocations[0].invoice_id, "invoice-1");
+  }
+
   const partial = buildAutomaticAllocationPlan({
     receipt_unallocated: "40.10",
     invoice_references: ["INV-001"],
@@ -3120,6 +3139,628 @@ Deno.test("Automatic allocation planner rejects ambiguous and mismatched evidenc
     }),
     { ok: false, error_code: "INVOICE_REFERENCE_NOT_EXACT" },
   );
+});
+
+Deno.test("Receipt references resolve uniquely through internal or external Invoice identifiers", () => {
+  const boundary = {
+    company_id: auth.companyId,
+    customer_id: customerId,
+    currency: "MYR",
+  };
+  const invoice = {
+    id: "10000000-0000-4000-8000-000000000041",
+    company_id: auth.companyId,
+    customer_id: customerId,
+    currency: "MYR",
+    status: "Open",
+    outstanding: "100.00",
+    invoice_no: "INV-202608-00001",
+    reference_no: "SUPPLIER-INV-123",
+  };
+  for (const reference of [invoice.invoice_no, invoice.reference_no]) {
+    const result = resolveReceiptInvoiceReferenceAuthority(
+      [reference],
+      [invoice],
+      boundary,
+    );
+    assert(result.ok);
+    assertEquals(result.status, "corroborated");
+    assertEquals(result.invoices[0].id, invoice.id);
+    assertEquals(result.invoices[0].matched_reference, reference);
+  }
+  assertEquals(
+    resolveReceiptInvoiceReferenceAuthority([], [], boundary),
+    { ok: true, status: "not_required", invoices: [] },
+  );
+});
+
+Deno.test("Receipt reference resolution fails closed for missing, ambiguous, duplicate-target, and out-of-bound evidence", () => {
+  const boundary = {
+    company_id: auth.companyId,
+    customer_id: customerId,
+    currency: "MYR",
+  };
+  const invoice = {
+    id: "10000000-0000-4000-8000-000000000042",
+    company_id: auth.companyId,
+    customer_id: customerId,
+    currency: "MYR",
+    status: "Open",
+    outstanding: "100.00",
+    invoice_no: "INV-202608-00002",
+    reference_no: "SUPPLIER-DUPLICATE",
+  };
+  const error = (
+    result: ReturnType<typeof resolveReceiptInvoiceReferenceAuthority>,
+  ) => {
+    assert(!result.ok);
+    assertEquals(result.status, "unverified");
+    assertEquals(result.unverified_fields, ["invoice_reference"]);
+    return result.error_code;
+  };
+  assertEquals(
+    error(resolveReceiptInvoiceReferenceAuthority(
+      ["GATEE-INV-DRAFT-20260810-001"],
+      [{ ...invoice, reference_no: "GATE-INV-DRAFT-20260810-001" }],
+      boundary,
+    )),
+    "INVOICE_REFERENCE_NOT_FOUND",
+  );
+  assertEquals(
+    error(resolveReceiptInvoiceReferenceAuthority(
+      ["SUPPLIER-DUPLICATE"],
+      [invoice, { ...invoice, id: "10000000-0000-4000-8000-000000000043" }],
+      boundary,
+    )),
+    "INVOICE_REFERENCE_AMBIGUOUS",
+  );
+  assertEquals(
+    error(resolveReceiptInvoiceReferenceAuthority(
+      [invoice.invoice_no, invoice.reference_no],
+      [invoice],
+      boundary,
+    )),
+    "INVOICE_REFERENCE_DUPLICATE_TARGET",
+  );
+  for (
+    const candidate of [
+      { ...invoice, company_id: "20000000-0000-4000-8000-000000000001" },
+      { ...invoice, customer_id: "20000000-0000-4000-8000-000000000002" },
+      { ...invoice, currency: "SGD" },
+      { ...invoice, status: "Draft" },
+      { ...invoice, outstanding: "0.00" },
+    ]
+  ) {
+    assertEquals(
+      error(resolveReceiptInvoiceReferenceAuthority(
+        [invoice.reference_no],
+        [candidate],
+        boundary,
+      )),
+      "INVOICE_REFERENCE_NOT_FOUND",
+    );
+  }
+});
+
+Deno.test("Optional external references remain metadata while system numbers remain authoritative", async () => {
+  const documentResult = validateDocumentResult({
+    classification: {
+      schema_version: 1,
+      document_type: "invoice",
+      confidence: 1,
+      critical_field_confidence: 1,
+      provider: "fixture",
+      model: "fixture-v1",
+      provider_version: "1",
+      trace_id: "trace-critical-identifier",
+    },
+    extraction: {
+      schema_version: 1,
+      document_type: "invoice",
+      customer: { customer_code: "CUST-00007" },
+      invoice_date: "2026-08-10",
+      due_date: "2026-08-12",
+      currency: "MYR",
+      reference_no: "GATE-INV-DRAFT-20260810-001",
+      subtotal: "100.00",
+      tax_total: "0.00",
+      total: "100.00",
+      lines: [{
+        description: "Controlled service",
+        quantity: "1",
+        unit_price: "100.00",
+        line_total: "100.00",
+      }],
+    },
+    field_confidence: {},
+  });
+  assertEquals(
+    documentResult.extraction?.reference_no,
+    "GATE-INV-DRAFT-20260810-001",
+  );
+  const automation = await Deno.readTextFile(
+    new URL("./automation/service.ts", import.meta.url),
+  );
+  const commandStart = automation.indexOf("async executeCommand(");
+  const allocationStart = automation.indexOf(
+    "private async proposeAndAllocateReceipt(",
+    commandStart,
+  );
+  const commandCreation = automation.slice(commandStart, allocationStart);
+  assert(commandStart >= 0 && allocationStart > commandStart);
+  assert(!commandCreation.includes("critical_identifier_unverified"));
+  assert(commandCreation.includes("reference_no: payload.reference_no"));
+  assert(
+    commandCreation.includes('postAtomically: mode === "straight_through"'),
+  );
+
+  const invoiceService = await Deno.readTextFile(
+    new URL("./invoices/service.ts", import.meta.url),
+  );
+  const receiptService = await Deno.readTextFile(
+    new URL("./receipts/service.ts", import.meta.url),
+  );
+  assert(invoiceService.includes("const invoiceNo = await getNextSequence("));
+  assert(invoiceService.includes("invoice_no: invoiceNo"));
+  assert(receiptService.includes("const receiptNo = await getNextSequence("));
+  assert(receiptService.includes("receipt_no: receiptNo"));
+});
+
+Deno.test("Provider confidence cannot bypass Receipt matching authority", () => {
+  const result = validateDocumentResult({
+    classification: {
+      schema_version: 1,
+      document_type: "receipt",
+      confidence: 1,
+      critical_field_confidence: 1,
+      provider: "fixture",
+      model: "fixture-v1",
+      provider_version: "1",
+      trace_id: "trace-receipt-authority",
+    },
+    extraction: {
+      schema_version: 1,
+      document_type: "receipt",
+      customer: { customer_code: "CUST-00007" },
+      receipt_date: "2026-08-10",
+      currency: "MYR",
+      amount: "100.00",
+      payment_method: "TT",
+      reference_no: "GATEE-RCPT-DRAFT-20260810-001",
+      invoice_references: ["GATE-INV-DRAFT-20260810-001"],
+    },
+    field_confidence: {},
+  });
+  assert(result.extraction?.document_type === "receipt");
+  assertEquals(result.extraction.reference_no, "GATEE-RCPT-DRAFT-20260810-001");
+  const resolution = resolveReceiptInvoiceReferenceAuthority(
+    result.extraction.invoice_references,
+    [{
+      id: "10000000-0000-4000-8000-000000000044",
+      company_id: auth.companyId,
+      customer_id: customerId,
+      currency: "MYR",
+      status: "Open",
+      outstanding: "100.00",
+      invoice_no: "INV-202608-00001",
+      reference_no: "GATEE-INV-DRAFT-20260810-001",
+    }],
+    { company_id: auth.companyId, customer_id: customerId, currency: "MYR" },
+  );
+  assert(!resolution.ok);
+  assertEquals(resolution.error_code, "INVOICE_REFERENCE_NOT_FOUND");
+});
+
+Deno.test("Exact external-reference conflicts remain company/customer bound and fail closed", async () => {
+  let count = 1;
+  const filters: Array<[string, unknown]> = [];
+  const client = {
+    from(table: string) {
+      assertEquals(table, "invoices");
+      const query = {
+        select(_columns: string, options: Record<string, unknown>) {
+          assertEquals(options, { count: "exact", head: true });
+          return query;
+        },
+        eq(field: string, value: unknown) {
+          filters.push([field, value]);
+          return query;
+        },
+        then(resolve: (value: unknown) => unknown) {
+          return Promise.resolve({ count, error: null }).then(resolve);
+        },
+      };
+      return query;
+    },
+  };
+  const service = new AutomationService({ client: client as never });
+  const internal = service as unknown as {
+    assertNoFinancialIdentifierConflict: (
+      auth: AuthContext,
+      extraction: Record<string, unknown>,
+      customerId: string,
+    ) => Promise<void>;
+  };
+  const extraction = {
+    schema_version: 1,
+    document_type: "invoice",
+    customer: { customer_code: "CUST-00007" },
+    invoice_date: "2026-08-10",
+    due_date: "2026-08-12",
+    currency: "MYR",
+    reference_no: "SUPPLIER-REF-001",
+    subtotal: "100.00",
+    tax_total: "0.00",
+    total: "100.00",
+    lines: [],
+  };
+  await rejects(
+    () =>
+      internal.assertNoFinancialIdentifierConflict(
+        auth,
+        extraction,
+        customerId,
+      ),
+    "INVOICE_CONFLICT",
+  );
+  assertEquals(filters, [
+    ["company_id", auth.companyId],
+    ["customer_id", customerId],
+    ["reference_no", "SUPPLIER-REF-001"],
+  ]);
+  count = 0;
+  await internal.assertNoFinancialIdentifierConflict(
+    auth,
+    extraction,
+    customerId,
+  );
+});
+
+Deno.test("Receipt allocation resolves a unique external Invoice reference inside the financial boundary", async () => {
+  const receiptId = "10000000-0000-4000-8000-000000000021";
+  const commandId = "10000000-0000-4000-8000-000000000022";
+  const invoiceId = "10000000-0000-4000-8000-000000000023";
+  const filters: Array<[string, string, unknown]> = [];
+  const inFilters: Array<[string, string, unknown]> = [];
+  const gtFilters: Array<[string, string, unknown]> = [];
+  const client = {
+    from(table: string) {
+      let referenceField = "";
+      const query = {
+        select() {
+          return query;
+        },
+        eq(field: string, value: unknown) {
+          filters.push([table, field, value]);
+          return query;
+        },
+        in(field: string, value: unknown) {
+          inFilters.push([table, field, value]);
+          if (field === "invoice_no" || field === "reference_no") {
+            referenceField = field;
+          }
+          return query;
+        },
+        gt(field: string, value: unknown) {
+          gtFilters.push([table, field, value]);
+          return query;
+        },
+        order() {
+          return query;
+        },
+        limit() {
+          return query;
+        },
+        maybeSingle() {
+          assertEquals(table, "receipts");
+          return Promise.resolve({
+            data: {
+              id: receiptId,
+              customer_id: customerId,
+              currency: "MYR",
+              status: "Posted",
+              unallocated_amount: "100.00",
+            },
+            error: null,
+          });
+        },
+        then(resolve: (value: unknown) => unknown) {
+          assertEquals(table, "invoices");
+          return Promise.resolve({
+            data: referenceField === "reference_no"
+              ? [{
+                id: invoiceId,
+                company_id: auth.companyId,
+                invoice_no: "INV-202608-00001",
+                reference_no: "SUPPLIER-INV-123",
+                customer_id: customerId,
+                currency: "MYR",
+                status: "Open",
+                outstanding: "100.00",
+              }]
+              : [],
+            error: null,
+          }).then(resolve);
+        },
+      };
+      return query;
+    },
+  };
+  const service = new AutomationService({ client: client as never });
+  const persistedInputs: Array<Record<string, unknown>> = [];
+  const internal = service as unknown as {
+    proposeAndAllocateReceipt: (
+      auth: AuthContext,
+      command: Record<string, unknown>,
+      extraction: Record<string, unknown>,
+    ) => Promise<Record<string, unknown> | null>;
+    persistAutomaticAllocation: (
+      auth: AuthContext,
+      commandId: string,
+      input: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+  };
+  internal.persistAutomaticAllocation = (_auth, receivedCommandId, input) => {
+    assertEquals(receivedCommandId, commandId);
+    persistedInputs.push(input);
+    return Promise.resolve({ id: "10000000-0000-4000-8000-000000000024" });
+  };
+  const command = {
+    id: commandId,
+    status: "completed",
+    command_type: "create_receipt",
+    resulting_receipt_id: receiptId,
+    mailbox_id: mailboxId,
+    message_id: "10000000-0000-4000-8000-000000000025",
+    attachment_id: attachmentId,
+  };
+  const result = await internal.proposeAndAllocateReceipt(auth, command, {
+    schema_version: 1,
+    document_type: "receipt",
+    customer: { customer_code: "CUST-00007" },
+    receipt_date: "2026-08-10",
+    currency: "MYR",
+    amount: "100.00",
+    payment_method: "TT",
+    reference_no: "PAYMENT-METADATA-001",
+    invoice_references: ["SUPPLIER-INV-123"],
+  });
+  assert(result);
+  assertEquals(persistedInputs.length, 1);
+  assertEquals(
+    (persistedInputs[0].evidence as Record<string, unknown>).payment_reference,
+    "PAYMENT-METADATA-001",
+  );
+  assertEquals(
+    (persistedInputs[0].allocations as Array<Record<string, unknown>>)[0]
+      .invoice_id,
+    invoiceId,
+  );
+  assertEquals(filters, [
+    ["receipts", "id", receiptId],
+    ["receipts", "company_id", auth.companyId],
+    ["invoices", "company_id", auth.companyId],
+    ["invoices", "customer_id", customerId],
+    ["invoices", "currency", "MYR"],
+    ["invoices", "company_id", auth.companyId],
+    ["invoices", "customer_id", customerId],
+    ["invoices", "currency", "MYR"],
+  ]);
+  assertEquals(inFilters, [
+    ["invoices", "status", ["Open", "Overdue", "Partially Paid"]],
+    ["invoices", "invoice_no", ["SUPPLIER-INV-123"]],
+    ["invoices", "status", ["Open", "Overdue", "Partially Paid"]],
+    ["invoices", "reference_no", ["SUPPLIER-INV-123"]],
+  ]);
+  assertEquals(gtFilters, [
+    ["invoices", "outstanding", 0],
+    ["invoices", "outstanding", 0],
+  ]);
+});
+
+Deno.test("Unverified Receipt matching evidence withholds allocation once and redacts values", async () => {
+  const receiptId = "10000000-0000-4000-8000-000000000031";
+  const commandId = "10000000-0000-4000-8000-000000000032";
+  const exceptions: Array<Record<string, unknown>> = [];
+  const client = {
+    from(table: string) {
+      const query = {
+        select() {
+          return query;
+        },
+        eq() {
+          return query;
+        },
+        in() {
+          return query;
+        },
+        gt() {
+          return query;
+        },
+        order() {
+          return query;
+        },
+        limit() {
+          return query;
+        },
+        maybeSingle() {
+          assertEquals(table, "receipts");
+          return Promise.resolve({
+            data: {
+              id: receiptId,
+              customer_id: customerId,
+              currency: "MYR",
+              status: "Posted",
+              unallocated_amount: "100.00",
+            },
+            error: null,
+          });
+        },
+        then(resolve: (value: unknown) => unknown) {
+          assertEquals(table, "invoices");
+          return Promise.resolve({ data: [], error: null }).then(resolve);
+        },
+        insert(value: Record<string, unknown>) {
+          assertEquals(table, "automation_exceptions");
+          const duplicate = exceptions.some((row) =>
+            row.idempotency_key === value.idempotency_key
+          );
+          if (!duplicate) exceptions.push(value);
+          return Promise.resolve({
+            error: duplicate
+              ? {
+                code: "23505",
+                message:
+                  'duplicate key value violates unique constraint "uq_automation_exception_idempotency"',
+              }
+              : null,
+          });
+        },
+      };
+      return query;
+    },
+  };
+  const service = new AutomationService({ client: client as never });
+  let allocationCalls = 0;
+  const internal = service as unknown as {
+    proposeAndAllocateReceipt: (
+      auth: AuthContext,
+      command: Record<string, unknown>,
+      extraction: Record<string, unknown>,
+    ) => Promise<Record<string, unknown> | null>;
+    persistAutomaticAllocation: () => Promise<Record<string, unknown>>;
+  };
+  internal.persistAutomaticAllocation = () => {
+    allocationCalls++;
+    return Promise.resolve({});
+  };
+  const command = {
+    id: commandId,
+    status: "completed",
+    command_type: "create_receipt",
+    resulting_receipt_id: receiptId,
+    mailbox_id: mailboxId,
+    message_id: "10000000-0000-4000-8000-000000000033",
+    attachment_id: attachmentId,
+  };
+  const extraction = {
+    schema_version: 1,
+    document_type: "receipt",
+    customer: { customer_code: "CUST-00007" },
+    receipt_date: "2026-08-10",
+    currency: "MYR",
+    amount: "100.00",
+    payment_method: "TT",
+    reference_no: "PAYMENT-METADATA-001",
+    invoice_references: ["GATE-INV-DRAFT-20260810-001"],
+  };
+  assertEquals(
+    await internal.proposeAndAllocateReceipt(auth, command, extraction),
+    null,
+  );
+  assertEquals(
+    await internal.proposeAndAllocateReceipt(auth, command, extraction),
+    null,
+  );
+  assertEquals(command.status, "completed");
+  assertEquals(command.resulting_receipt_id, receiptId);
+  assertEquals(allocationCalls, 0);
+  assertEquals(exceptions.length, 1);
+  assertEquals(exceptions[0].reason_code, "critical_identifier_unverified");
+  assertEquals(exceptions[0].lifecycle_status, "open");
+  assertEquals(exceptions[0].safe_details, {
+    error_code: "INVOICE_REFERENCE_NOT_FOUND",
+  });
+  const serialized = JSON.stringify(exceptions);
+  assert(!serialized.includes("GATE-INV"));
+  assert(!serialized.includes("PAYMENT-METADATA"));
+});
+
+Deno.test("Migration 037 adds only the bounded critical-identifier reason", async () => {
+  const migration = await Deno.readTextFile(
+    new URL(
+      "../../../database/037_gate_e_critical_identifier_authority.sql",
+      import.meta.url,
+    ),
+  );
+  const smoke = await Deno.readTextFile(
+    new URL(
+      "../../../database/037b_gate_e_critical_identifier_authority_smoke_tests.sql",
+      import.meta.url,
+    ),
+  );
+  assert(migration.includes("'critical_identifier_unverified'"));
+  assert(
+    migration.includes("VALIDATE CONSTRAINT chk_automation_exception_reason"),
+  );
+  assert(!/\b(?:GRANT|REVOKE)\b/.test(migration));
+  assert(!/\b(?:INSERT|UPDATE|DELETE)\b/.test(migration));
+  assert(!migration.includes("operating_mode"));
+  assert(smoke.includes("ROLLBACK;"));
+  assert(smoke.includes("relrowsecurity"));
+  assert(smoke.includes("has_table_privilege('anon'"));
+  assert(smoke.includes("has_table_privilege('authenticated'"));
+});
+
+Deno.test("Migration 038 keeps Receipt reference resolution exact, unique, and DB-authoritative", async () => {
+  const migration = await Deno.readTextFile(
+    new URL(
+      "../../../database/038_gate_e_receipt_invoice_reference_authority.sql",
+      import.meta.url,
+    ),
+  );
+  const smoke = await Deno.readTextFile(
+    new URL(
+      "../../../database/038b_gate_e_receipt_invoice_reference_authority_smoke_tests.sql",
+      import.meta.url,
+    ),
+  );
+  for (
+    const required of [
+      "automation_resolve_receipt_invoice_references",
+      "count(DISTINCT matches.invoice_id)",
+      "i.company_id = p_company_id",
+      "i.customer_id = p_customer_id",
+      "i.currency = p_currency",
+      "i.status IN ('Open', 'Overdue', 'Partially Paid')",
+      "i.outstanding > 0",
+      "i.invoice_no = requested.reference",
+      "i.reference_no = requested.reference",
+      "count(DISTINCT resolved.invoice_id)",
+      "resolved.invoice_id = v_invoice.id",
+      "Invoice reference evidence is not uniquely resolvable",
+      "pg_advisory_xact_lock",
+      "automation_fx_is_authoritative",
+      "public.allocate_receipt",
+    ]
+  ) {
+    assert(
+      migration.includes(required),
+      `Missing Migration 038 rule: ${required}`,
+    );
+  }
+  assert(migration.includes("SECURITY DEFINER"));
+  assert(migration.includes("SET search_path = ''"));
+  assert(migration.includes("FROM PUBLIC, anon, authenticated"));
+  assert(migration.includes("TO service_role"));
+  assert(migration.includes("OWNER TO postgres"));
+  assert(
+    migration.includes("idx_invoices_company_customer_reference"),
+  );
+  assert(migration.includes("WHERE reference_no IS NOT NULL"));
+  assert(!migration.includes("CREATE UNIQUE INDEX"));
+  assert(!migration.includes("UPDATE public.automation_settings"));
+  assert(!migration.includes("ALTER TABLE"));
+  assert(!migration.includes("CREATE POLICY"));
+  assert(smoke.includes("ROLLBACK;"));
+  assert(smoke.includes("has_function_privilege("));
+  assert(smoke.includes("count(DISTINCT matches.invoice_id)"));
+  assert(smoke.includes("i.invoice_no = requested.reference"));
+  assert(smoke.includes("i.reference_no = requested.reference"));
+  assert(smoke.includes("idx_invoices_company_customer_reference"));
+  assert(smoke.includes("Unique external Invoice reference did not resolve"));
+  assert(smoke.includes("Ambiguous external Invoice reference resolved"));
+  assert(smoke.includes("Non-exact GATEE/GATE reference resolved"));
 });
 
 Deno.test("Migration 034 installs all Gate E tables, RLS, grants, and no activation", async () => {

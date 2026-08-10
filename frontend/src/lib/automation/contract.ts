@@ -208,6 +208,7 @@ export const EXCEPTION_REASON_CODES = [
   "customer_ambiguous",
   "invoice_conflict",
   "receipt_conflict",
+  "critical_identifier_unverified",
   "missing_salesman",
   "invalid_salesman_email",
   "allocation_evidence_insufficient",

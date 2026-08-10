@@ -360,8 +360,8 @@ describe("exception reason codes + normalized lifecycle fields", () => {
     updated_at: TS,
   };
 
-  it("exposes exactly the 27 frozen reason codes", () => {
-    expect(EXCEPTION_REASON_CODES).toHaveLength(27);
+  it("exposes exactly the 28 frozen reason codes", () => {
+    expect(EXCEPTION_REASON_CODES).toHaveLength(28);
     expect(EXCEPTION_REASON_CODES).toContain("missing_salesman");
   });
 
@@ -412,6 +412,26 @@ describe("exception reason codes + normalized lifecycle fields", () => {
       },
     });
     expect(parsed.document?.document_type).toBe("receipt");
+  });
+
+  it("accepts a monitorable critical-identifier refusal", () => {
+    const parsed = parseGateEData(exceptionSchema, {
+      ...base,
+      reason_code: "critical_identifier_unverified",
+      lifecycle_status: "open",
+      safe_details: {
+        error_code: "INVOICE_REFERENCE_NOT_AUTHORITATIVE",
+      },
+      document: {
+        ...validInvoiceDocument,
+        file_name: "controlled-receipt.png",
+        document_type: "receipt",
+      },
+    });
+    expect(parsed.reason_code).toBe("critical_identifier_unverified");
+    expect(parsed.safe_details).toEqual({
+      error_code: "INVOICE_REFERENCE_NOT_AUTHORITATIVE",
+    });
   });
 
   it("4. accepts an unsupported projection (nullable classification)", () => {

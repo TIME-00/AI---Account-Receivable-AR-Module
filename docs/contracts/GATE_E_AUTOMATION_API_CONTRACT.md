@@ -256,6 +256,32 @@ override strict parsing, semantic date/decimal validation, arithmetic
 reconciliation, deterministic customer resolution, duplicate checks, operating
 mode, kill switches, PostgreSQL posting, FX, or allocation authority.
 
+They also never provide Straight-Through identifier authority. Governed
+financial services generate `invoices.invoice_no` and `receipts.receipt_no` as
+the authoritative internal identities. Optional extracted Invoice supplier
+references and Receipt payment references are persisted as non-authoritative
+external metadata and exact duplicate evidence. They cannot select a tenant,
+customer, system document number, match, allocation, posting, FX, or journal,
+and their presence does not by itself refuse otherwise valid Invoice/Receipt
+creation. The payment reference may be retained in allocation evidence for
+traceability and tamper binding, but it never selects an Invoice or allocation
+amount.
+
+An extracted Receipt-to-Invoice reference becomes positive authority only at
+automatic matching/allocation. Every explicit candidate must resolve exactly
+and uniquely to one eligible Invoice through either the governed internal
+`invoices.invoice_no` or external/source `invoices.reference_no`, inside the
+authenticated company, resolved-customer, same-currency, eligible-status, and
+positive-outstanding boundary. `reference_no` remains external lookup evidence;
+it is not globally unique and does not become an Invoice id. Zero matches,
+ambiguous matches, or multiple references resolving to one target withhold
+allocation and create one idempotent open `critical_identifier_unverified`
+exception. The safely created Receipt remains available and candidate values
+are never copied into safe exception metadata. No subject-line, fuzzy-match,
+edit-distance, same-provider agreement, or provider confidence rule may
+satisfy matching authority. Receipt evidence without explicit Invoice
+references remains subject to the existing unique exact-amount allocation rule.
+
 The provider response is not a public API DTO. Only the existing normalized
 document-decision DTO is returned to clients. Raw file bytes, prompts, provider
 responses, response IDs, API keys, authorization headers, and document text are
@@ -440,13 +466,15 @@ values installed by Migration 034: `disabled`, `pending_consent`, `connected`,
 `retryable_failure`, and `permanent_failure`. `processing_status` uses that same
 closed union; it is not a free-form slug.
 
-`reason_code` accepts only Migration 034's bounded exception vocabulary:
+`reason_code` accepts only Migration 034's bounded exception vocabulary plus
+Migration 037's prospective Straight-Through identifier refusal:
 `mailbox_not_configured`, `mailbox_reconnect_required`, `provider_unavailable`,
 `message_duplicate`, `attachment_duplicate`, `unsupported_file`, `unsafe_file`,
 `encrypted_document`, `oversized_document`, `ambiguous_classification`,
 `unsupported_document`, `low_confidence`, `extraction_schema_invalid`,
 `arithmetic_mismatch`, `currency_unsupported`, `customer_unresolved`,
 `customer_ambiguous`, `invoice_conflict`, `receipt_conflict`,
+`critical_identifier_unverified`,
 `missing_salesman`, `invalid_salesman_email`,
 `allocation_evidence_insufficient`, `allocation_currency_mismatch`,
 `allocation_conflict`, `concurrency_conflict`, `provider_delivery_failed`, and
@@ -863,6 +891,7 @@ customer_unresolved
 customer_ambiguous
 invoice_conflict
 receipt_conflict
+critical_identifier_unverified
 missing_salesman
 invalid_salesman_email
 allocation_evidence_insufficient

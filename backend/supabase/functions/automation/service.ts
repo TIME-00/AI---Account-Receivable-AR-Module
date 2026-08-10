@@ -403,6 +403,91 @@ export type AutomaticAllocationPlan =
   }
   | { ok: false; error_code: string };
 
+export type ReceiptInvoiceReferenceAuthorityResult =
+  | {
+    ok: true;
+    status: "not_required" | "corroborated";
+    invoices: Row[];
+  }
+  | {
+    ok: false;
+    status: "unverified";
+    unverified_fields: ["invoice_reference"];
+    error_code:
+      | "INVOICE_REFERENCE_NOT_FOUND"
+      | "INVOICE_REFERENCE_AMBIGUOUS"
+      | "INVOICE_REFERENCE_DUPLICATE_TARGET"
+      | "INVOICE_REFERENCE_CANDIDATE_LIMIT_EXCEEDED";
+  };
+
+/**
+ * This check belongs to matching/allocation, not Invoice or Receipt creation.
+ * Supplier Invoice and Receipt payment references remain non-authoritative
+ * external metadata. Provider confidence is intentionally absent: extracted
+ * Receipt-to-Invoice references become allocation evidence only when every
+ * candidate resolves to exactly one eligible Invoice selected by the caller
+ * inside the authenticated company/customer/currency boundary. Both the
+ * governed internal invoice_no and the external source reference_no are exact
+ * lookup evidence; neither value lets the provider select an Invoice id.
+ */
+export function resolveReceiptInvoiceReferenceAuthority(
+  invoiceReferences: readonly string[],
+  eligibleInvoices: readonly Row[],
+  boundary: { company_id: string; customer_id: string; currency: string },
+): ReceiptInvoiceReferenceAuthorityResult {
+  const references = [
+    ...new Set(invoiceReferences.map((value) => value.trim()).filter(Boolean)),
+  ];
+  if (references.length === 0) {
+    return { ok: true, status: "not_required", invoices: [] };
+  }
+  const candidates = [...new Map(
+    eligibleInvoices.filter((invoice) =>
+      String(invoice.company_id) === boundary.company_id &&
+      String(invoice.customer_id) === boundary.customer_id &&
+      String(invoice.currency) === boundary.currency &&
+      ["Open", "Overdue", "Partially Paid"].includes(String(invoice.status)) &&
+      monetaryMinorUnits(invoice.outstanding) > 0n
+    ).map((invoice) => [String(invoice.id), invoice]),
+  ).values()];
+  const resolvedInvoiceIds = new Set<string>();
+  const resolved: Row[] = [];
+  for (const reference of references) {
+    const matches = candidates.filter((invoice) =>
+      String(invoice.invoice_no ?? "") === reference ||
+      String(invoice.reference_no ?? "") === reference
+    );
+    if (matches.length === 0) {
+      return {
+        ok: false,
+        status: "unverified",
+        unverified_fields: ["invoice_reference"],
+        error_code: "INVOICE_REFERENCE_NOT_FOUND",
+      };
+    }
+    if (matches.length !== 1) {
+      return {
+        ok: false,
+        status: "unverified",
+        unverified_fields: ["invoice_reference"],
+        error_code: "INVOICE_REFERENCE_AMBIGUOUS",
+      };
+    }
+    const invoiceId = String(matches[0].id);
+    if (resolvedInvoiceIds.has(invoiceId)) {
+      return {
+        ok: false,
+        status: "unverified",
+        unverified_fields: ["invoice_reference"],
+        error_code: "INVOICE_REFERENCE_DUPLICATE_TARGET",
+      };
+    }
+    resolvedInvoiceIds.add(invoiceId);
+    resolved.push({ ...matches[0], matched_reference: reference });
+  }
+  return { ok: true, status: "corroborated", invoices: resolved };
+}
+
 export function assertAutomaticAllocationCommandEligible(command: Row): void {
   if (
     command.command_type !== "create_receipt" ||
@@ -441,7 +526,9 @@ export function buildAutomaticAllocationPlan(input: {
     | "explicit_multi_invoice_references";
   if (references.length > 0) {
     const matched = new Set(
-      input.invoices.map((invoice) => String(invoice.invoice_no)),
+      input.invoices.map((invoice) =>
+        String(invoice.matched_reference ?? invoice.invoice_no)
+      ),
     );
     if (
       input.invoices.length !== references.length ||
@@ -3658,23 +3745,78 @@ export class AutomationService {
     ].slice(0, 100);
     let invoices: Row[];
     if (references.length > 0) {
-      const { data, error } = await this.client.from("invoices")
-        .select("id,invoice_no,customer_id,currency,status,outstanding")
-        .eq("company_id", auth.companyId)
-        .eq("customer_id", receipt.customer_id)
-        .eq("currency", receipt.currency)
-        .in("status", ["Open", "Overdue", "Partially Paid"])
-        .in("invoice_no", references)
-        .order("invoice_no", { ascending: true })
-        .order("id", { ascending: true })
-        .limit(101);
-      if (error) throw error;
-      invoices = (data ?? []) as Row[];
+      const eligibleInvoiceQuery = (field: "invoice_no" | "reference_no") =>
+        this.client.from("invoices")
+          .select(
+            "id,company_id,invoice_no,reference_no,customer_id,currency,status,outstanding",
+            { count: "exact" },
+          )
+          .eq("company_id", auth.companyId)
+          .eq("customer_id", receipt.customer_id)
+          .eq("currency", receipt.currency)
+          .in("status", ["Open", "Overdue", "Partially Paid"])
+          .gt("outstanding", 0)
+          .in(field, references)
+          .order("invoice_no", { ascending: true })
+          .order("id", { ascending: true })
+          .limit(201);
+      const {
+        data: internalMatches,
+        error: internalError,
+        count: internalCount,
+      } = await eligibleInvoiceQuery("invoice_no");
+      if (internalError) throw internalError;
+      const {
+        data: externalMatches,
+        error: externalError,
+        count: externalCount,
+      } = await eligibleInvoiceQuery("reference_no");
+      if (externalError) throw externalError;
+      if (
+        (internalCount ?? internalMatches?.length ?? 0) >
+          (internalMatches?.length ?? 0) ||
+        (externalCount ?? externalMatches?.length ?? 0) >
+          (externalMatches?.length ?? 0)
+      ) {
+        await this.createAllocationException(
+          auth,
+          command,
+          receiptId,
+          "critical_identifier_unverified",
+          "INVOICE_REFERENCE_CANDIDATE_LIMIT_EXCEEDED",
+        );
+        return null;
+      }
+      const resolution = resolveReceiptInvoiceReferenceAuthority(
+        references,
+        [
+          ...((internalMatches ?? []) as Row[]),
+          ...((externalMatches ?? []) as Row[]),
+        ],
+        {
+          company_id: auth.companyId,
+          customer_id: String(receipt.customer_id),
+          currency: String(receipt.currency),
+        },
+      );
+      if (!resolution.ok) {
+        await this.createAllocationException(
+          auth,
+          command,
+          receiptId,
+          "critical_identifier_unverified",
+          resolution.error_code,
+        );
+        return null;
+      }
+      invoices = resolution.invoices;
     } else {
       const available = monetaryMinorUnits(receipt.unallocated_amount);
       if (available <= 0n) return null;
       const { data, error } = await this.client.from("invoices")
-        .select("id,invoice_no,customer_id,currency,status,outstanding")
+        .select(
+          "id,company_id,invoice_no,reference_no,customer_id,currency,status,outstanding",
+        )
         .eq("company_id", auth.companyId)
         .eq("customer_id", receipt.customer_id)
         .eq("currency", receipt.currency)
@@ -3718,7 +3860,8 @@ export class AutomationService {
       | "allocation_evidence_insufficient"
       | "allocation_currency_mismatch"
       | "allocation_conflict"
-      | "concurrency_conflict",
+      | "concurrency_conflict"
+      | "critical_identifier_unverified",
     errorCode: string,
   ): Promise<void> {
     await this.createException(auth.companyId, {
@@ -3730,6 +3873,9 @@ export class AutomationService {
       reason_code: reasonCode,
       lifecycle_status: "open",
       safe_details: { error_code: errorCode },
+      idempotency_key: await sha256(
+        `allocation_exception:${auth.companyId}:${command.id}:${receiptId}:${reasonCode}:${errorCode}`,
+      ),
       actor_user_id: auth.userId,
     });
   }

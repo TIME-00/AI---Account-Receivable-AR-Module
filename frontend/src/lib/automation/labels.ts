@@ -216,6 +216,7 @@ export const EXCEPTION_REASON_LABEL: Record<ExceptionReasonCode, string> = {
   customer_ambiguous: "Customer Ambiguous",
   invoice_conflict: "Invoice Conflict",
   receipt_conflict: "Receipt Conflict",
+  critical_identifier_unverified: "Critical Identifier Unverified",
   missing_salesman: "Missing Sales Representative",
   invalid_salesman_email: "Invalid Sales Representative Email",
   allocation_evidence_insufficient: "Allocation Evidence Insufficient",
