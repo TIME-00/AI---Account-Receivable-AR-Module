@@ -1057,3 +1057,57 @@ receiving account on the existing Gmail mailbox, then Retry each retained
 Invoice and Receipt exception exactly once. The user must not reconnect Gmail,
 connect delivery, run Sync now, alter operating mode or kill switches, retry the
 unsupported memo, or Resolve/Dismiss the retained financial exceptions.
+
+## Observe-only retained-extraction recovery closure
+
+The Finance Manager completed the single reviewed recovery checkpoint. The
+existing Gmail mailbox now has a non-null company-bound default receiving-bank
+mapping to the sole active Maybank account, `TSH Synergy Sdn Bhd - Operating
+Account`, MYR, safely identified as `****5678`. The mapping remains within the
+authenticated company and the account remains active; no account number or
+credential was retrieved or recorded.
+
+The controlled retained Invoice and Receipt exceptions were each retried
+exactly once. Production now reports retry count `1 / 3`, resolved lifecycle,
+no manual review requirement, processed document status, and accepted
+classification for both `gate-e-observe-invoice-20260809.png` and
+`gate-e-observe-receipt-20260809.png`. Each attachment still has exactly one
+provider classification and exactly one persisted extraction. The lifecycle
+audit evidence contains the original extraction insert and one deterministic
+recovery update; no second provider classification/extraction was created.
+Both recoveries resolved the controlled customer to the authenticated
+company's immutable internal `customers.id`, reran financial-identifier
+conflict validation, and reached `valid` extraction status with no validation
+codes. The effective provider model on the original classifications remains
+`gpt-5.6-luna`.
+
+The controlled unsupported memo remains intentionally open as monitoring
+evidence: `gate-e-observe-unsupported-20260809.png` is processed, classified
+unsupported/rejected, records the safe `unsupported_document` reason, requires
+manual review, and has retry count zero. The deployed settings/mode contract
+does not require all open exceptions to be resolved before Draft Only, so this
+evidence remains open and is not retried, resolved, or dismissed by the
+operator rollout.
+
+Observe-Only validation is PASS. Production remains in `observe_only`; Mailbox
+Synchronization and Document Intelligence remain enabled; Invoice Automation,
+Receipt Automation, Auto-Allocation, Reminder Evaluation, Reminder Delivery,
+and Gmail delivery remain disabled. Counts remain 16 invoices, 11 receipts, 13
+allocation details, 26 journal entries, 11 customers, zero Automation commands,
+zero allocation decisions, zero reminders, and zero delivery attempts. The
+recovery created no Invoice, Receipt, allocation, journal entry, posting,
+payment application, customer mutation, or reminder delivery.
+
+Source-contract review confirms that changing mode does not retroactively
+execute the recovered attachments: the normal scheduler processes only pending
+or retryable attachments, while both controlled financial attachments are now
+processed. Draft Only requires fresh controlled inputs through the reviewed
+mailbox pipeline. With Invoice Automation and Receipt Automation enabled,
+Draft Only creates unposted Draft financial records after deterministic
+validation; it does not post and it does not run Auto-Allocation. The next
+single human checkpoint is therefore one Finance Manager Settings visit to
+select Draft Only and enable only Invoice Automation and Receipt Automation,
+followed by one new, unique controlled Invoice/Receipt email pair to the
+already-connected Gmail inbox. Mailbox Synchronization and Document
+Intelligence stay enabled; Auto-Allocation, both reminder switches, and Gmail
+delivery stay disabled. Gate E remains OPEN.
