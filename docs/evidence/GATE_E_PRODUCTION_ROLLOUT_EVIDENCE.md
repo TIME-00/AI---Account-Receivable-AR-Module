@@ -1189,3 +1189,71 @@ as verified. Gate E remains OPEN. The next single human checkpoint is to refresh
 Automation > Documents and compare the controlled Invoice's displayed/source
 reference with the sent synthetic image. Do not change mode, switches, OAuth,
 delivery, or financial rows during that check.
+
+## Documents collection post-v16 remediation
+
+The required authenticated Finance Manager check proved that version 16 had
+not restored the Documents collection: repeated authenticated
+`GET /automation/documents?page=1&page_size=15` requests still returned HTTP
+500. The requests reached Automation successfully, while the correlated
+PostgreSQL interval contained no matching SQL error or SQLSTATE. Read-only
+Production schema inspection identified the remaining post-query failure.
+
+`automation_extraction_results.classification_id` is protected by the
+standalone unique index
+`uq_automation_extraction_version(classification_id, schema_version)`, not by
+a single-column PostgreSQL unique constraint. PostgREST therefore returns the
+reverse `extraction:automation_extraction_results(*)` relationship as an array.
+The Documents service treated that embed as one object. After the version-16
+`opened_at` correction allowed all database queries to complete, bounded DTO
+normalization received the array in place of an extraction object and failed
+closed with `AUTOMATION_RESPONSE_INVALID`, producing the observed HTTP 500.
+
+Commit `45b245cc926bbbfcc2409fa818747d50ffb2db9f`
+(`fix(gate-e): normalize document extraction projection`) normalizes the real
+PostgREST embed before command, exception, and DTO projection. It selects at
+most the extraction matching the classification schema version and retains a
+safe HTTP 500 for malformed or ambiguous embedded cardinality. The external
+`gate-e.1` response contract, strict frontend parsing, authenticated company
+filter, financial command execution, RLS, schema, and migrations are
+unchanged. A Production-shaped regression includes the extraction array and a
+completed Draft command/result projection.
+
+Validation passed: Gate E Automation 94/94, activation prerequisites 28/28,
+OpenAI 41/41, scheduler 26/26, combined focused 189/189, full recursive backend
+452/452, all 17 deployable Edge entrypoints, Deno check/format/lint, focused
+frontend Automation/contract 122/122, frontend TypeScript, diff check, and the
+added-line secret/auth-state scan. Automation alone was deployed from the
+exact commit as version 17 and is ACTIVE with bundle SHA-256
+`c51d606c896126572c5d908127adda46f7252f0daa7b278bf542f2b4f49069fd`.
+
+The post-deployment read-only snapshot remains `draft_only`, with Mailbox
+Synchronization, Document Intelligence, Invoice Automation, and Receipt
+Automation enabled; Auto-Allocation, Reminder Evaluation, Reminder Delivery,
+and Gmail delivery remain disabled. Totals remain 17 invoices, 12 receipts, 13
+allocation details, 26 journal entries, 11 customers, and 2 completed
+Automation commands. Both controlled Draft attachments remain processed with
+one accepted `gpt-5.6-luna` classification/extraction and one completed Draft
+command/result. Deployment caused no posting, allocation, journal, payment
+application, reminder delivery, customer mutation, provider reprocessing, or
+other business/financial change.
+
+No authenticated Documents request has yet reached version 17, so Production
+HTTP/browser rendering is not recorded as PASS until a normal authenticated
+refresh proves it. The Overview warning is separately confirmed stale and
+hard-coded in the frontend; it requires a bounded frontend implementation that
+derives monitoring copy from the authoritative operating mode and independent
+ingestion, document-intelligence, and delivery readiness values.
+
+The source image comparison also confirms that the Invoice contains
+`GATEE-INV-DRAFT-20260810-001`, while the persisted model candidate is
+`GATE-INV-DRAFT-20260810-001`. The provider nevertheless reported overall and
+critical confidence `1.0000` and declared no uncertainty. Existing deterministic
+validation correctly controls company, customer, arithmetic, currency,
+identifier conflicts, and financial execution, but it has no independent
+source-text corroboration capable of detecting this one-character model
+transcription error. The controlled Draft rows remain unchanged as evidence.
+Draft financial-safety behavior remains PASS, but Draft-only quality acceptance
+and Straight-Through progression remain blocked until critical financial
+identifiers receive an independently verified, fail-closed boundary. Gate E
+remains OPEN.
