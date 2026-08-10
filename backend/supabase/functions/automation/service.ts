@@ -133,6 +133,35 @@ function throwMailboxPersistenceError(error: unknown): never {
   throw error;
 }
 
+function documentDecisionExtraction(row: Row): Row | null {
+  const embedded = row.extraction;
+  if (embedded === null || embedded === undefined) return null;
+  const candidates = Array.isArray(embedded) ? embedded : [embedded];
+  const schemaVersion = Number(row.schema_version);
+  const matching = candidates.filter((candidate) => {
+    if (
+      !candidate || typeof candidate !== "object" || Array.isArray(candidate)
+    ) {
+      throw new BusinessError(
+        "AUTOMATION_RESPONSE_INVALID",
+        "Automation data could not be returned safely.",
+        500,
+        { field: "decision.extraction" },
+      );
+    }
+    return Number((candidate as Row).schema_version) === schemaVersion;
+  }) as Row[];
+  if (matching.length > 1) {
+    throw new BusinessError(
+      "AUTOMATION_RESPONSE_INVALID",
+      "Automation data could not be returned safely.",
+      500,
+      { field: "decision.extraction.cardinality" },
+    );
+  }
+  return matching[0] ?? null;
+}
+
 export function assertProviderMessageBounded(
   message: ProviderMessage,
 ): void {
@@ -1690,7 +1719,10 @@ export class AutomationService {
       .order("id", { ascending: false })
       .range(from, to);
     if (error) throw error;
-    const sourceRows = (data ?? []) as Row[];
+    const sourceRows = ((data ?? []) as Row[]).map((row): Row => ({
+      ...row,
+      extraction: documentDecisionExtraction(row),
+    }));
     const extractionIds = sourceRows.flatMap((row) => {
       const extraction = row.extraction as Row | null;
       return extraction?.id ? [String(extraction.id)] : [];

@@ -2234,7 +2234,7 @@ Deno.test("Automation document decisions use the enriched bounded service contra
   });
 });
 
-Deno.test("Document decisions order linked exceptions by their real lifecycle timestamp", async () => {
+Deno.test("Document decisions normalize the Production extraction embed and linked lifecycle", async () => {
   const ordered: Array<[string, string]> = [];
   const classification = {
     id: classificationId,
@@ -2250,7 +2250,18 @@ Deno.test("Document decisions order linked exceptions by their real lifecycle ti
     provider_version: "responses-v1",
     trace_id: "trace-draft-document",
     created_at: now,
-    extraction: null,
+    extraction: [{
+      id: extractionId,
+      schema_version: 1,
+      field_confidence: {},
+      validation_status: "valid",
+      validation_codes: [],
+      customer_id: "266b5e9f-4b75-4433-8829-a8b590f7ad01",
+      customer_resolution_method: "customer_code",
+      trace_id: "trace-draft-document",
+      validated_at: now,
+      created_at: now,
+    }],
     attachment: {
       id: attachmentId,
       message_id: "10000000-0000-4000-8000-000000000004",
@@ -2295,6 +2306,16 @@ Deno.test("Document decisions order linked exceptions by their real lifecycle ti
           return Promise.resolve({
             data: table === "automation_exceptions"
               ? [{ id: exceptionId, attachment_id: attachmentId }]
+              : table === "automation_commands"
+              ? [{
+                id: "10000000-0000-4000-8000-000000000012",
+                extraction_id: extractionId,
+                command_type: "create_invoice",
+                status: "completed",
+                resulting_invoice_id: "10000000-0000-4000-8000-000000000013",
+                resulting_receipt_id: null,
+                failure_code: null,
+              }]
               : [],
             error: null,
           });
@@ -2312,6 +2333,27 @@ Deno.test("Document decisions order linked exceptions by their real lifecycle ti
     has_more: false,
   });
   assertEquals(result.rows[0].linked_exception_ids, [exceptionId]);
+  assertEquals(result.rows[0].extraction, {
+    id: extractionId,
+    schema_version: 1,
+    document_type: "invoice",
+    validation_status: "valid",
+    validation_codes: [],
+    field_confidence: {},
+    customer_id: "266b5e9f-4b75-4433-8829-a8b590f7ad01",
+    customer_resolution_method: "customer_code",
+    trace_id: "trace-draft-document",
+    validated_at: new Date(now).toISOString(),
+    created_at: new Date(now).toISOString(),
+  });
+  assertEquals(result.rows[0].command, {
+    id: "10000000-0000-4000-8000-000000000012",
+    command_type: "create_invoice",
+    status: "completed",
+    resulting_invoice_id: "10000000-0000-4000-8000-000000000013",
+    resulting_receipt_id: null,
+    failure_code: null,
+  });
   assert(
     ordered.some(([table, field]) =>
       table === "automation_exceptions" && field === "opened_at"
