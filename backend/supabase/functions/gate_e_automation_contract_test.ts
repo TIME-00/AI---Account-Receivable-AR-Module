@@ -2234,6 +2234,327 @@ Deno.test("Automation document decisions use the enriched bounded service contra
   });
 });
 
+Deno.test("Document decisions order linked exceptions by their real lifecycle timestamp", async () => {
+  const ordered: Array<[string, string]> = [];
+  const classification = {
+    id: classificationId,
+    company_id: auth.companyId,
+    attachment_id: attachmentId,
+    schema_version: 1,
+    document_type: "invoice",
+    status: "accepted",
+    confidence: "1.0000",
+    critical_confidence: "1.0000",
+    provider_name: "openai",
+    provider_model: "gpt-5.6-luna",
+    provider_version: "responses-v1",
+    trace_id: "trace-draft-document",
+    created_at: now,
+    extraction: null,
+    attachment: {
+      id: attachmentId,
+      message_id: "10000000-0000-4000-8000-000000000004",
+      original_file_name: "controlled-draft-invoice.png",
+      detected_mime_type: "image/png",
+      size_bytes: 1234,
+      page_count: null,
+      scan_status: "unavailable",
+      safety_status: "accepted",
+      processing_status: "processed",
+      content_purged_at: null,
+    },
+  };
+  const exceptionId = "10000000-0000-4000-8000-000000000011";
+  const client = {
+    from(table: string) {
+      const query = {
+        select() {
+          return query;
+        },
+        eq() {
+          return query;
+        },
+        in() {
+          return query;
+        },
+        order(field: string) {
+          ordered.push([table, field]);
+          if (table === "automation_exceptions" && field !== "opened_at") {
+            throw new Error(`Unknown exception order column: ${field}`);
+          }
+          return query;
+        },
+        range() {
+          return Promise.resolve({
+            data: [classification],
+            count: 1,
+            error: null,
+          });
+        },
+        limit() {
+          return Promise.resolve({
+            data: table === "automation_exceptions"
+              ? [{ id: exceptionId, attachment_id: attachmentId }]
+              : [],
+            error: null,
+          });
+        },
+      };
+      return query;
+    },
+  };
+  const result = await new AutomationService({ client: client as never })
+    .listDocumentDecisions(auth, { page: 1, page_size: 15 }, {});
+  assertEquals(result.meta, {
+    page: 1,
+    page_size: 15,
+    total: 1,
+    has_more: false,
+  });
+  assertEquals(result.rows[0].linked_exception_ids, [exceptionId]);
+  assert(
+    ordered.some(([table, field]) =>
+      table === "automation_exceptions" && field === "opened_at"
+    ),
+  );
+  assert(
+    !ordered.some(([table, field]) =>
+      table === "automation_exceptions" && field === "created_at"
+    ),
+  );
+});
+
+Deno.test("Scheduled Draft recovery commands a persisted valid extraction exactly once", async () => {
+  const actorId = "10000000-0000-4000-8000-000000000012";
+  const commandId = "10000000-0000-4000-8000-000000000013";
+  const greaterThanFilters: Array<[string, unknown]> = [];
+  const notEqualFilters: Array<[string, unknown]> = [];
+  const tables: Record<string, Array<Record<string, unknown>>> = {
+    automation_settings: [{
+      company_id: auth.companyId,
+      automation_actor_user_id: actorId,
+      operating_mode: "draft_only",
+      mailbox_sync_enabled: false,
+      document_intelligence_enabled: true,
+      invoice_automation_enabled: true,
+      receipt_automation_enabled: true,
+      auto_allocation_enabled: false,
+      reminder_evaluation_enabled: false,
+      reminder_delivery_enabled: false,
+      reminder_timezone: "UTC",
+      created_at: "2026-08-06T02:00:00.000Z",
+    }],
+    user_roles: [{
+      company_id: auth.companyId,
+      user_id: actorId,
+      role: "Finance Manager",
+    }],
+    automation_mailboxes: [],
+    automation_source_attachments: [],
+    automation_audit_events: [{
+      created_at: "2026-08-06T03:00:00.000Z",
+    }],
+    automation_extraction_results: [{
+      id: extractionId,
+      extracted_fields: invoiceFixture.extraction,
+      classification: { document_type: "invoice" },
+      commands: [],
+    }],
+  };
+  const client = {
+    from(table: string) {
+      const query = {
+        select() {
+          return query;
+        },
+        neq(field: string, value: unknown) {
+          notEqualFilters.push([field, value]);
+          return query;
+        },
+        not() {
+          return query;
+        },
+        in() {
+          return query;
+        },
+        eq() {
+          return query;
+        },
+        is() {
+          return query;
+        },
+        gt(field: string, value: unknown) {
+          greaterThanFilters.push([field, value]);
+          return query;
+        },
+        order() {
+          return query;
+        },
+        limit() {
+          return query;
+        },
+        maybeSingle() {
+          return Promise.resolve({
+            data: (tables[table] ?? [])[0] ?? null,
+            error: null,
+          });
+        },
+        then(resolve: (value: unknown) => unknown) {
+          return Promise.resolve({
+            data: tables[table] ?? [],
+            error: null,
+          }).then(resolve);
+        },
+      };
+      return query;
+    },
+  };
+  const service = new AutomationService({ client: client as never });
+  const internal = service as unknown as {
+    purgeExpiredAttachmentContent: () => Promise<{
+      purged: number;
+      failures: number;
+    }>;
+    executeCommand: (
+      auth: AuthContext,
+      extractionId: string,
+    ) => Promise<Record<string, unknown>>;
+    runScheduledCycleWithLease: () => Promise<Record<string, unknown>>;
+  };
+  internal.purgeExpiredAttachmentContent = () =>
+    Promise.resolve({ purged: 0, failures: 0 });
+  let executedExtractionId: string | null = null;
+  internal.executeCommand = (_auth, receivedExtractionId) => {
+    executedExtractionId = receivedExtractionId;
+    return Promise.resolve({
+      id: commandId,
+      command_type: "create_invoice",
+      status: "completed",
+    });
+  };
+  const result = await internal.runScheduledCycleWithLease();
+  assertEquals(executedExtractionId, extractionId);
+  assertEquals(result.attachments_processed, 0);
+  assertEquals(result.commands_processed, 1);
+  assertEquals(result.failures, 0);
+  assert(
+    notEqualFilters.some(([field, value]) =>
+      field === "safe_metadata->>operating_mode" && value === "draft_only"
+    ),
+  );
+  assertEquals(greaterThanFilters, [[
+    "created_at",
+    "2026-08-06T03:00:00.000Z",
+  ]]);
+});
+
+Deno.test("Scheduled command recovery fails closed without a proven mode boundary", async () => {
+  const actorId = "10000000-0000-4000-8000-000000000012";
+  const tables: Record<string, Array<Record<string, unknown>>> = {
+    automation_settings: [{
+      company_id: auth.companyId,
+      automation_actor_user_id: actorId,
+      operating_mode: "draft_only",
+      mailbox_sync_enabled: false,
+      document_intelligence_enabled: true,
+      invoice_automation_enabled: true,
+      receipt_automation_enabled: true,
+      auto_allocation_enabled: false,
+      reminder_evaluation_enabled: false,
+      reminder_delivery_enabled: false,
+      reminder_timezone: "UTC",
+      created_at: "2026-08-06T02:00:00.000Z",
+    }],
+    user_roles: [{
+      company_id: auth.companyId,
+      user_id: actorId,
+      role: "Finance Manager",
+    }],
+    automation_mailboxes: [],
+    automation_source_attachments: [],
+    automation_audit_events: [],
+    automation_extraction_results: [{
+      id: extractionId,
+      extracted_fields: invoiceFixture.extraction,
+      classification: { document_type: "invoice" },
+      commands: [],
+    }],
+  };
+  const selectedTables: string[] = [];
+  const client = {
+    from(table: string) {
+      const query = {
+        select() {
+          selectedTables.push(table);
+          return query;
+        },
+        neq() {
+          return query;
+        },
+        not() {
+          return query;
+        },
+        in() {
+          return query;
+        },
+        eq() {
+          return query;
+        },
+        is() {
+          return query;
+        },
+        gt() {
+          return query;
+        },
+        order() {
+          return query;
+        },
+        limit() {
+          return query;
+        },
+        maybeSingle() {
+          return Promise.resolve({
+            data: (tables[table] ?? [])[0] ?? null,
+            error: null,
+          });
+        },
+        then(resolve: (value: unknown) => unknown) {
+          return Promise.resolve({
+            data: tables[table] ?? [],
+            error: null,
+          }).then(resolve);
+        },
+      };
+      return query;
+    },
+  };
+  const service = new AutomationService({ client: client as never });
+  const internal = service as unknown as {
+    purgeExpiredAttachmentContent: () => Promise<{
+      purged: number;
+      failures: number;
+    }>;
+    executeCommand: () => Promise<Record<string, unknown>>;
+    runScheduledCycleWithLease: () => Promise<Record<string, unknown>>;
+  };
+  internal.purgeExpiredAttachmentContent = () =>
+    Promise.resolve({ purged: 0, failures: 0 });
+  let executed = false;
+  internal.executeCommand = () => {
+    executed = true;
+    return Promise.resolve({});
+  };
+  const result = await internal.runScheduledCycleWithLease();
+  assertEquals(executed, false);
+  assertEquals(result.commands_processed, 0);
+  assertEquals(result.failures, 1);
+  assertEquals(
+    selectedTables.filter((table) => table === "automation_extraction_results")
+      .length,
+    0,
+  );
+});
+
 Deno.test("Duplicate mailbox OAuth reference returns a tenant-safe 409", async () => {
   const client = {
     from(table: string) {

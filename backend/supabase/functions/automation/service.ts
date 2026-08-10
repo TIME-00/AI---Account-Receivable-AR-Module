@@ -1009,30 +1009,11 @@ export class AutomationService {
       for (const attachment of (attachments ?? []) as Row[]) {
         remainingAttachments--;
         try {
-          const decision = await this.processAttachment(
+          await this.processAttachment(
             auth,
             String(attachment.id),
           );
           attachmentsProcessed++;
-          const extraction = decision.extraction as Row | undefined;
-          if (extraction?.validation_status === "valid") {
-            const command = await this.executeCommand(
-              auth,
-              String(extraction.id),
-            );
-            commandsProcessed++;
-            if (
-              setting.auto_allocation_enabled === true &&
-              setting.operating_mode === "straight_through"
-            ) {
-              const allocation = await this.proposeAndAllocateReceipt(
-                auth,
-                command,
-                extraction.extracted_fields as FinancialExtraction,
-              );
-              if (allocation) allocationsCompleted++;
-            }
-          }
         } catch (processingError) {
           failures++;
           const errorCode = processingError instanceof BusinessError
@@ -1064,6 +1045,91 @@ export class AutomationService {
               safe_details: { error_code: errorCode },
             });
           }
+        }
+      }
+    }
+
+    // Financial commands are a durable backlog separate from document
+    // processing. This closes the crash window between a valid persisted
+    // extraction and command creation without exposing raw extraction fields
+    // through the public document-processing DTO. The most recent audit event
+    // from a different operating mode is the lower activation boundary, so a
+    // later Draft/Straight-Through mode never retroactively commands documents
+    // accepted under Observe Only.
+    let remainingCommands = 200;
+    for (const [companyId, auth] of authByCompany) {
+      if (remainingCommands === 0) break;
+      const setting = settingsByCompany.get(companyId);
+      const mode = String(setting?.operating_mode ?? "disabled");
+      if (!setting || mode === "disabled") continue;
+      const { data: priorModeEvent, error: priorModeError } = await this.client
+        .from("automation_audit_events").select("created_at")
+        .eq("company_id", companyId)
+        .eq("entity_type", "automation_settings")
+        .not("safe_metadata->>operating_mode", "is", null)
+        .neq("safe_metadata->>operating_mode", mode)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (priorModeError) throw priorModeError;
+      const activationBoundary = String(priorModeEvent?.created_at ?? "");
+      if (!isSemanticIsoTimestamp(activationBoundary)) {
+        failures++;
+        continue;
+      }
+      const { data: extractionRows, error: extractionError } = await this.client
+        .from("automation_extraction_results")
+        .select(
+          "id,extracted_fields,classification:automation_document_classifications!inner(document_type),commands:automation_commands()",
+        )
+        .eq("company_id", companyId)
+        .eq("validation_status", "valid")
+        .gt("created_at", activationBoundary)
+        .is("commands", null)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .limit(remainingCommands);
+      if (extractionError) throw extractionError;
+      for (const extraction of (extractionRows ?? []) as Row[]) {
+        if (remainingCommands === 0) break;
+        const classification = extraction.classification as Row | null;
+        const documentType = String(classification?.document_type ?? "");
+        if (
+          (documentType === "invoice" &&
+            setting.invoice_automation_enabled !== true) ||
+          (documentType === "receipt" &&
+            setting.receipt_automation_enabled !== true) ||
+          !["invoice", "receipt"].includes(documentType)
+        ) continue;
+        remainingCommands--;
+        try {
+          const command = await this.executeCommand(
+            auth,
+            String(extraction.id),
+          );
+          commandsProcessed++;
+          if (
+            setting.auto_allocation_enabled === true &&
+            mode === "straight_through"
+          ) {
+            const extractedFields = extraction.extracted_fields;
+            if (
+              !extractedFields || typeof extractedFields !== "object" ||
+              Array.isArray(extractedFields)
+            ) {
+              throw new BusinessError(
+                "ALLOCATION_EVIDENCE_INSUFFICIENT",
+                "Stored document evidence is unavailable for automatic allocation.",
+                409,
+              );
+            }
+            const allocation = await this.proposeAndAllocateReceipt(
+              auth,
+              command,
+              extractedFields as FinancialExtraction,
+            );
+            if (allocation) allocationsCompleted++;
+          }
+        } catch {
+          failures++;
         }
       }
     }
@@ -1656,7 +1722,7 @@ export class AutomationService {
         .select("id,attachment_id")
         .eq("company_id", auth.companyId)
         .in("attachment_id", attachmentIds)
-        .order("created_at", { ascending: true })
+        .order("opened_at", { ascending: true })
         .limit(1000);
       if (exceptionError) throw exceptionError;
       for (const exception of (exceptions ?? []) as Row[]) {
