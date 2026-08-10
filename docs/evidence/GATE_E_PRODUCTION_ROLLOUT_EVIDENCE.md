@@ -1484,3 +1484,84 @@ execute the allocation amount. These migrations and Edge changes are local
 only: they have not been committed, pushed, applied, deployed, or activated.
 They require the planned single Claude backend/database read-only review plus
 substantial frontend implementation before any Production write.
+
+## Final functional activation macro-gate — reviewed implementation deployment
+
+Claude Code completed the single planned handoff with backend/database verdict
+PASS, no blocking defects, and final frontend verdict PASS. Claude changed only
+the approved 13 frontend source/test/E2E files. Codex independently reviewed the
+actual frontend diff and returned PASS with no blocking defects: Operating Mode
+is the only document-profile mutation, Capabilities are read-only, Reminder
+Automation sends only `reminder_mode`, recovery context remains separately
+restricted, and Retry Matching sends an empty body with no provider or financial
+authority. The stale E2E assertion was updated to the truthful live Overview
+copy rather than weakened.
+
+The approved 14-file Codex backend/database/docs/dependency scope and 13-file
+Claude frontend scope were frozen together as commit
+`2f7199c6720e3086064fc38e0d63722da9f254cf`, parent
+`7708083edf2c8b19c7094d87baa812a87e70dbfe`, and pushed to `main` at ahead/behind
+`0/0`. `Poster/`, `social-media/`, Playwright authentication state, generated
+attachments, and secret files were excluded. Final validation passed: Gate E
+Automation 110/110, activation prerequisites 28/28, OpenAI 41/41, scheduler
+26/26, focused backend 205/205, full backend 468/468, all 17 Edge entrypoints,
+Deno check/fmt/lint, focused frontend 165/165, full frontend 65 files and
+1000/1000 tests, TypeScript, ESLint, Production build, and the six targeted
+deterministic Playwright flows. The complete 34-flow Playwright run showed every
+test passing before a Windows dev-server teardown timeout; the separate targeted
+run exited cleanly. Lockfile, installed-tree, and runtime dependency audits each
+reported zero vulnerabilities, so the GitHub repository banner is not
+reproducible from current `main`.
+
+Production Migration 039 was applied exactly once and recorded as
+`20260810185134 gate_e_authoritative_capability_profiles`; rollback-only 039b was
+not installed. The existing Draft Only row remained Draft Only and was atomically
+normalized to Mailbox Synchronization, Document Intelligence, Invoice Automation,
+and Receipt Automation enabled, with Auto-Allocation disabled. `reminder_mode`
+was backfilled to `off`, leaving evaluation and delivery disabled. The profile
+trigger and document/reminder profile constraints are active; the private profile
+function is postgres-owned, SECURITY INVOKER, has an empty search path, and is
+not executable by Data API roles.
+
+Production Migration 040 was applied exactly once and recorded as
+`20260810185201 gate_e_exception_recovery_authority`; rollback-only 040b was not
+installed. `automation_exception_recoveries` is postgres-owned, empty, RLS-enabled,
+append-only, and unavailable to browser roles. The recovery context, record, and
+Retry Matching functions are postgres-owned SECURITY DEFINER functions with empty
+search paths and service-only execution. Human-confirmed Invoice evidence is in
+the bounded allocation vocabulary. No historical extraction or financial row was
+changed by either migration. The Supabase advisor's RLS-with-no-policy INFO for
+the recovery table is the intended service-only posture; unrelated pre-existing
+advisor notices were not broadened by this gate.
+
+Only the Automation Edge Function was redeployed from the reviewed commit. It
+advanced from v18 to v19, is ACTIVE, and has bundle SHA-256
+`9fff30c18c3d569a5a5364ce7a16dad71b789f34ebda9e152a0e853b3dd1495b`.
+Git-integrated Vercel deployment `dpl_D7gVHtAjZ7pYivNFzBpU2mSrV16o` is READY in
+Production for the exact same commit; no duplicate manual deployment was created,
+and the canonical frontend returned HTTP 200. Authenticated post-deploy v19 logs
+showed HTTP 200 for Overview, Documents, and Exceptions, including the real
+Documents collection contract that previously failed in older versions.
+
+The authoritative post-deployment baseline remains exactly 17 Invoices, 12
+Receipts, 13 allocation details, 26 journal entries, 11 customers, two Automation
+commands, and zero allocation decisions, reminders, delivery attempts, or
+recoveries. There are no accepted pending attachments, unfinished commands, or
+failed commands. The Gmail mailbox remains connected, ingestion-enabled,
+non-reconnect-required, history-cursor-backed, and mapped to the receiving bank;
+delivery remains disabled. The active ten-minute scheduler continues to succeed.
+Historical Draft Invoice `INV-202608-00001`, Draft Receipt `RCT-202608-00001`,
+their original GATE/GATEE mismatch, and the open unsupported exception remain
+unchanged.
+
+Production is intentionally still Draft Only with Reminder Automation Off. A
+collision-free fresh positive test token
+`GATEE-ST-20260811-0300-K7Q2` is reserved for the next controlled activation
+step. Deterministic A4 Invoice and Receipt PDFs were generated under the ignored
+`tests/fixtures/generated/` directory and are not part of Git. Straight-Through
+has not yet been armed and no controlled email has yet been sent. The next
+checkpoint is the authenticated Finance Manager Straight-Through confirmation,
+followed by sending the Invoice first and Receipt second to the existing ingestion
+mailbox; natural scheduler processing will then prove posting, external-reference
+matching, Auto-Allocation, and idempotency before the separate negative recovery
+and reminder stages.
