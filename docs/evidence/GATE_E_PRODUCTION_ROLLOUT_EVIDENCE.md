@@ -1621,3 +1621,39 @@ one allocation decision. Customers, reminders, deliveries, recoveries, the
 historical Draft pair, and the historical unsupported exception are unchanged.
 Gate E remains OPEN for the separately generated deterministic mismatch/recovery
 pair and Reminder Evaluation/Delivery proof.
+
+## Final functional activation - deterministic mismatch pre-recovery proof
+
+The controlled negative token `GATEE-ST-NEG-20260811-0330-K7Q2` was sent as an
+Invoice email followed by a deliberately non-matching Receipt email. No manual
+Sync or resend occurred. The 19:50 UTC natural scheduler cycle completed with
+exactly two messages and two attachments persisted and processed, two completed
+financial commands, zero allocations, and one expected fail-closed processing
+failure. OpenAI `gpt-5.6-luna` through `responses-v1` ran exactly once for each
+attachment; both classifications were accepted and both extractions were valid.
+
+Straight-Through created and posted governed Invoice `INV-202608-00003` with
+external reference `GATEE-ST-NEG-20260811-0330-K7Q2-INV`, governed NET30 due date
+2026-09-10, and MYR 43.17 outstanding. It separately created and posted Receipt
+`RCT-202608-00003` with payment reference
+`GATEE-ST-NEG-20260811-0330-K7Q2-PAY`, receipt amount MYR 43.17, MYR 0.00
+allocated, and MYR 43.17 still unallocated. The original immutable Receipt
+extraction contains explicit Invoice candidate
+`GATEE-ST-NEG-20260811-0330-K7Q2-NOMATCH`.
+
+The explicit candidate resolves to zero eligible authoritative Invoices under
+the required company, customer, currency, lifecycle, outstanding, and exact
+`invoice_no`/`reference_no` boundary. No allocation detail or allocation decision
+exists for this Receipt, and no Invoice received the MYR 43.17. Exactly one open
+`critical_identifier_unverified` exception is linked to the Receipt; its generic
+safe metadata contains only redacted error code `INVOICE_REFERENCE_NOT_FOUND`
+and does not expose the candidate value. No recovery has yet been recorded.
+
+The following 20:00 UTC natural scheduler cycle completed with zero messages,
+attachments, commands, allocations, duplicates, or failures. Target counts remain
+exactly two attachments, two classifications, two extractions, two commands, one
+exception, zero recoveries, zero allocation decisions, and zero allocations.
+The historical Draft pair and historical unsupported exception remain unchanged.
+The next governed step is Finance Manager confirmation of Receipt-to-Invoice match
+against `INV-202608-00003`, followed by idempotent Retry Matching; the Invoice
+external reference must not be modified.
