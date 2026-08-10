@@ -1111,3 +1111,81 @@ followed by one new, unique controlled Invoice/Receipt email pair to the
 already-connected Gmail inbox. Mailbox Synchronization and Document
 Intelligence stay enabled; Auto-Allocation, both reminder switches, and Gmail
 delivery stay disabled. Gate E remains OPEN.
+
+## Draft-only document collection and command recovery
+
+The Finance Manager completed the reviewed Draft-only checkpoint. Production
+now has operating mode `draft_only`; Mailbox Synchronization, Document
+Intelligence, Invoice Automation, and Receipt Automation are enabled while
+Auto-Allocation, Reminder Evaluation, Reminder Delivery, and Gmail delivery
+remain disabled. The natural scheduler ingested the controlled Invoice and
+Receipt messages in two successful cycles, persisted one attachment for each,
+and processed each attachment exactly once with `gpt-5.6-luna`. Each target
+still has exactly one classification and one extraction.
+
+The authenticated Documents collection returned HTTP 500 before any frontend
+contract parsing. Correlated PostgreSQL logs reported SQLSTATE `42703` because
+the linked-exception lookup ordered `automation_exceptions.created_at`, while
+that table's real lifecycle timestamp is `opened_at`. A second runtime defect
+prevented Draft command execution: the scheduler treated the intentionally
+flattened public document-processing DTO as though it contained a private
+nested extraction object. Valid persisted extractions therefore completed
+without a financial command.
+
+Commit `0d23cf75bb8b3e62bc0ae97432b6cef9041fe464`
+(`fix(gate-e): recover draft automation processing`) fixes both defects without
+a migration or frontend change. Linked exceptions are ordered by `opened_at`.
+Financial command execution is a separate, bounded, company-scoped durable
+backlog over valid uncommanded extractions. Its lower bound is the most recent
+audited prior operating mode; a missing or malformed activation boundary fails
+closed, preventing Observe-only extractions from becoming retroactively
+financial. Invoice and Receipt switches remain independent, command creation
+and financial execution retain their existing idempotency boundaries, and
+Auto-Allocation remains restricted to Straight-Through with its kill switch.
+
+Local validation passed: Gate E Automation 94/94 at the committed freeze,
+activation prerequisites 28/28, OpenAI 41/41, scheduler 26/26, combined focused
+189/189, full recursive backend 452/452, all 17 deployable Edge entrypoints,
+Deno check/format/lint, focused frontend contract/Automation 122/122, frontend
+TypeScript, diff check, and added-line secret/auth-state scan. Automation alone
+was deployed from the exact commit as version 16, ACTIVE, with bundle SHA-256
+`991d291eb70d7d43c1878a36f95ef5168c4b0ac050d6a63a9d202c061e8c5384`.
+
+The next natural version-16 cycle found exactly two eligible valid Draft-era
+extractions and created exactly two completed commands. It created unposted
+Draft Invoice `INV-202608-00001` and unposted Draft Receipt
+`RCT-202608-00001`. Both belong to the authenticated company and resolve
+authoritatively to internal customer identity for business code `CUST-00007`.
+The Invoice is MYR 100.00 with one line, zero tax, `posted_at = null`, and no
+journal effect. Its Draft due date is null by the existing financial contract;
+the authoritative posting path derives due date from customer payment terms,
+not from the AI candidate. The Receipt is MYR 100.00, Draft, `posted_at = null`,
+allocated MYR 0.00, unallocated MYR 100.00, and uses the active company-bound
+Maybank MYR receiving account ending `****5678`. No allocation was created.
+
+One provider-candidate discrepancy remains to be reconciled against the actual
+controlled source image before Draft-only can be formally closed: the persisted
+Invoice candidate and resulting Draft reference are
+`GATE-INV-DRAFT-20260810-001`, while the rollout instruction expected
+`GATEE-INV-DRAFT-20260810-001`. The Receipt candidate preserved
+`GATEE-RCPT-DRAFT-20260810-001` and the expected Invoice reference candidate.
+The system cannot safely infer whether the source image itself used the shorter
+Invoice reference; an authenticated/source-artifact human comparison is
+required. No provider retry is authorized or needed for this check.
+
+A subsequent natural scheduler cycle left the two target classifications,
+extractions, commands, and financial results unchanged. Financial totals are
+now 17 invoices and 12 receipts solely because Draft Only intentionally created
+one controlled Draft of each. Allocation details remain 13, journal entries 26,
+customers 11, allocation decisions zero, reminders zero, and delivery attempts
+zero. No posting, payment application, allocation, journal, customer mutation,
+or delivery occurred. The open unsupported Observe-only exception remains
+untouched.
+
+The Production-shaped Documents service regression proves the corrected
+backend query and bounded DTO contract, but no authenticated Documents GET has
+occurred after version 16, so the Production browser surface is not yet claimed
+as verified. Gate E remains OPEN. The next single human checkpoint is to refresh
+Automation > Documents and compare the controlled Invoice's displayed/source
+reference with the sent synthetic image. Do not change mode, switches, OAuth,
+delivery, or financial rows during that check.
