@@ -1356,3 +1356,100 @@ local or Production migration was authorized in this gate. Production was not
 mutated, no migration was applied,
 and no function or frontend deployment occurred during this
 implementation/self-review gate.
+
+## Critical-identifier and Receipt-to-Invoice authority Production rollout
+
+The third independent Claude Code read-only review returned PASS with no
+blocking defects and modified nothing. The exact reviewed 15-file scope was
+committed as `082cb0933ad59a01b9d1c767145be5a82a81a3cf` with parent
+`72776eff94aa0409f56397aa28d92fad2a426262`, then pushed to `main` with
+ahead/behind `0/0`. No `Poster/`, `social-media/`, browser authentication state,
+or unrelated file entered the commit.
+
+The Production preflight confirmed the existing 27-code exception constraint,
+unchanged RLS and grants, the governed Invoice identity/reference columns, and
+the single existing allocation-RPC signature and security boundary. Migration
+037 was then applied exactly once and recorded in migration history as
+`20260811000000 gate_e_critical_identifier_authority`. Its reason vocabulary
+now contains all 28 codes, including `critical_identifier_unverified`. RLS,
+the existing policy, grants, settings, and all business/financial counts were
+unchanged.
+
+Migration 038 was then applied exactly once and recorded as
+`20260811010000 gate_e_receipt_invoice_reference_authority`. Production catalog
+verification proved:
+
+- `idx_invoices_company_customer_reference` is a non-unique partial B-tree over
+  `(company_id, customer_id, reference_no)` where `reference_no IS NOT NULL`;
+- `automation_resolve_receipt_invoice_references(uuid,uuid,text,jsonb)` is
+  postgres-owned, STABLE, SECURITY INVOKER, and has an empty `search_path`;
+- PUBLIC-derived `anon`, `authenticated`, and `service_role` cannot execute the
+  private resolver;
+- `automation_allocate_receipt(uuid,uuid,uuid,uuid,text,jsonb,jsonb,text)` still
+  has exactly one overload, is postgres-owned and SECURITY DEFINER with an
+  empty `search_path`, denies browser roles, and grants execution only to
+  `service_role`;
+- its reviewed role check, advisory lock, FX authority, amount reconciliation,
+  unique-reference resolution, governed `allocate_receipt` call, concurrency,
+  idempotency, and over-allocation boundaries remain present.
+
+The rollback-only `037b` and `038b` smoke files were not installed or executed
+as persistent Production migrations. Their catalog, ambiguity, cross-column,
+cross-company, customer, currency, status, outstanding, redaction, and
+idempotency cases remain covered by the approved local smoke/static review and
+the full green validation matrix. No permanent Production financial fixture
+was created merely to repeat those cases.
+
+Only the Automation Edge Function was redeployed from the clean committed
+source. It advanced from version 17 to version 18, is ACTIVE, retains
+`verify_jwt=false` for the reviewed in-function authentication contract, and
+has bundle SHA-256
+`4482999782fb0a31ac1ddda2836846cc348c2c79d443984b34ffc66594ce12cf`.
+The Git-integrated Vercel status on the same implementation commit completed
+successfully; no duplicate manual deployment was created. The canonical site
+and `/automation`, `/automation/documents`, `/automation/exceptions`, and
+`/automation/settings` routes returned HTTP 200.
+
+Production-safe authority checks used existing eligible rows and returned only
+booleans/counts. Exact governed `invoice_no` resolution passed, and a unique
+exact external `reference_no` resolution passed even though the internal and
+external identifiers differ. Another customer, wrong currency, the ineligible
+zero-outstanding controlled Draft, and the controlled `GATEE...` versus
+`GATE...` mismatch all returned no match. Production has one company and no
+eligible ambiguous-reference fixture, so cross-company, ambiguous-reference,
+and cross-column-collision behavior was not manufactured in Production; the
+reviewed rollback-only smoke and regression suite prove those fail-closed
+paths. The private resolver remains unavailable to Data API roles, while the
+approved server allocation path retains its required authority.
+
+The post-deployment read-equivalent snapshot contains the same five controlled
+document decisions: two processed/accepted/completed Draft command results,
+the two processed/accepted Observe-only financial decisions, and the processed/
+rejected unsupported decision. The unsupported exception remains open with
+zero retries. No automatic Retry or new critical-identifier exception occurred,
+and no candidate reference appears in safe exception metadata. The strict
+frontend/backend vocabulary and DTO compatibility remain covered by the
+approved 131 focused frontend tests and 976-test full suite. No browser session
+or authentication state was accessed for this deployment verification.
+
+The authoritative before/after financial baseline is unchanged: 17 Invoices,
+12 Receipts, 13 allocation details, 26 journal entries, 11 customers, 2
+Automation commands, zero allocation decisions, zero reminders, and zero
+delivery attempts. Production remains `draft_only`; Mailbox Synchronization,
+Document Intelligence, Invoice Automation, and Receipt Automation remain on,
+while Auto-Allocation, Reminder Evaluation, Reminder Delivery, and
+Straight-Through remain off. Controlled Invoice `INV-202608-00001` remains
+Draft/unposted with the original `GATE-INV-DRAFT-20260810-001` evidence and no
+outstanding balance; controlled Receipt `RCT-202608-00001` remains
+Draft/unposted, MYR 0.00 allocated and MYR 100.00 unallocated. No posting,
+allocation, journal, payment application, customer mutation, reminder, or
+delivery was caused by either migration or deployment.
+
+The critical-identifier / Receipt-to-Invoice matching-authority rollout is
+CLOSED / PASS. Gate E as a whole remains OPEN. The next consolidated activation
+checkpoint is a new, unique controlled Straight-Through Invoice/Receipt pair:
+first prove autonomous Invoice and Receipt creation with exact external
+reference resolution, then enable and prove Auto-Allocation under the new
+service/PostgreSQL authority boundary, retaining a negative ambiguous or
+non-matching case before progressing to Reminder Evaluation and the separate
+Gmail delivery-consent checkpoint.
