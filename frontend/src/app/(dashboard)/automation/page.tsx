@@ -74,10 +74,16 @@ export default function AutomationOverviewPage() {
       <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <p>
-          Automation is <strong>implemented and fail-closed</strong>. No real
-          document-intelligence provider, mailbox connection, email delivery, or
-          scheduler is active, and Production straight-through processing is
-          disabled. Counters reflect only what has actually run.
+          Automation operating mode is{" "}
+          <strong>{OPERATING_MODE_LABEL[settings.operating_mode]}</strong>.
+          Mailbox ingestion is {data.ingestion_ready ? "ready" : "not ready"};
+          document intelligence is{" "}
+          {data.document_intelligence_ready ? "ready" : "not ready"}; and
+          reminder-email delivery is {data.delivery_ready ? "ready" : "not ready"}.{" "}
+          {settings.operating_mode === "straight_through"
+            ? "Straight-Through is active under the configured capability switches."
+            : "Straight-Through is not active."}{" "}
+          Counters reflect only what has actually run.
         </p>
       </div>
 

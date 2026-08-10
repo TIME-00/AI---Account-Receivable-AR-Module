@@ -149,7 +149,40 @@ describe("Automation Overview", () => {
     renderWithProviders(<AutomationOverviewPage />);
     expect((await screen.findAllByText("Disabled")).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Provider Configuration Required/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/fail-closed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Automation operating mode is/i)).toHaveTextContent(
+      /Mailbox ingestion is not ready; document intelligence is not ready; and reminder-email delivery is not ready/i,
+    );
+  });
+
+  it("reports live Draft-only readiness without the stale inactive-provider warning", async () => {
+    const draftOverview = {
+      ...OVERVIEW,
+      settings: {
+        ...SETTINGS,
+        operating_mode: "draft_only",
+        mailbox_sync_enabled: true,
+        document_intelligence_enabled: true,
+        invoice_automation_enabled: true,
+        receipt_automation_enabled: true,
+      },
+      ingestion_ready: true,
+      document_intelligence_ready: true,
+      delivery_ready: false,
+      connected_mailbox_count: 1,
+      last_successful_sync_at: "2026-08-10T10:40:00Z",
+    };
+    fakeApi = createFakeApi([
+      route("/automation/overview", () => ({ data: draftOverview })),
+    ]);
+    renderWithProviders(<AutomationOverviewPage />);
+
+    const status = await screen.findByText(/Automation operating mode is/i);
+    expect(status).toHaveTextContent(/Draft Only/i);
+    expect(status).toHaveTextContent(
+      /Mailbox ingestion is ready; document intelligence is ready; and reminder-email delivery is not ready/i,
+    );
+    expect(status).toHaveTextContent(/Straight-Through is not active/i);
+    expect(status).not.toHaveTextContent(/No real document-intelligence provider/i);
   });
 
   it("renders an error + retry when the overview fails to parse", async () => {
