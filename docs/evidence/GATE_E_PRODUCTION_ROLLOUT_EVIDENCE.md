@@ -1565,3 +1565,59 @@ followed by sending the Invoice first and Receipt second to the existing ingesti
 mailbox; natural scheduler processing will then prove posting, external-reference
 matching, Auto-Allocation, and idempotency before the separate negative recovery
 and reminder stages.
+
+## Final functional activation — Straight-Through positive proof
+
+The Finance Manager authenticated checkpoint set Operating Mode to
+`straight_through` while Reminder Automation remained `off`. Production persisted
+one coherent derived document profile: Mailbox Synchronization, Document
+Intelligence, Invoice Automation, Receipt Automation, and Auto-Allocation enabled;
+Reminder Evaluation and Reminder Delivery disabled. No raw capability toggle was
+used.
+
+The collision-free controlled token `GATEE-ST-20260811-0300-K7Q2` was sent as an
+Invoice email followed by a Receipt email. The 19:20 UTC natural scheduler cycle
+completed with exactly two messages seen/persisted, two attachments persisted and
+processed, two commands completed, one allocation completed, and zero failures.
+No manual Sync was used. Both PDF attachments passed the bounded safety path and
+were processed exactly once.
+
+OpenAI `gpt-5.6-luna` through `responses-v1` classified the first attachment as
+Invoice and the second as Receipt, each accepted at overall and critical confidence
+1.0000. Each attachment has exactly one classification and one extraction. The
+Invoice extraction retained external reference
+`GATEE-ST-20260811-0300-K7Q2-INV`, customer code `CUST-00007`, invoice date
+2026-08-11, due date 2026-09-10, MYR, and total 137.42. The Receipt extraction
+retained payment reference `GATEE-ST-20260811-0300-K7Q2-PAY`, the exact Invoice
+external reference, customer code `CUST-00007`, receipt date 2026-08-11, MYR, and
+amount 137.42. Both deterministic extractions are valid with no validation codes
+and resolve the same internal customer through `customer_code`.
+
+Straight-Through created and posted governed Invoice `INV-202608-00002` and
+Receipt `RCT-202608-00002`. The Invoice's internal number remains system-generated;
+its external `reference_no` is preserved separately. NET30 posting produced due
+date 2026-09-10. The Receipt used the company-bound Maybank MYR operating account
+ending 5678 and preserved the payment reference as metadata.
+
+The Receipt candidate resolved uniquely and exactly against the posted Invoice's
+external `reference_no` within the company/customer/currency/eligible/outstanding
+boundary. One `exact_invoice_reference` decision allocated MYR 137.42 using the
+backend-derived amount. Exactly one active allocation detail exists, Invoice
+outstanding is zero with status Paid, Receipt allocated amount is 137.42,
+unallocated amount is zero, and status is Fully Allocated. One balanced MYR 137.42
+Invoice journal and one balanced MYR 137.42 Receipt journal were created. No
+exception was opened for either document.
+
+The following 19:30 UTC natural scheduler cycle completed successfully with zero
+messages, attachments, commands, allocations, duplicates, or failures. Counts
+remained exactly two target messages, two attachments, two classifications, two
+extractions, two commands, one allocation, two journals, and zero target
+exceptions. This proves provider, command, financial, allocation, journal, and
+exception idempotency without repeating OpenAI.
+
+The legitimate Production delta from the positive proof is now one Invoice, one
+Receipt, one allocation detail, two journal entries, two Automation commands, and
+one allocation decision. Customers, reminders, deliveries, recoveries, the
+historical Draft pair, and the historical unsupported exception are unchanged.
+Gate E remains OPEN for the separately generated deterministic mismatch/recovery
+pair and Reminder Evaluation/Delivery proof.
