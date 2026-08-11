@@ -71,7 +71,11 @@ BEGIN
       AND proc.proname = 'automation_oauth_delivery_finalize'
       AND owner_role.rolname = 'postgres'
       AND proc.prosecdef
-      AND proc.proconfig @> ARRAY['search_path=']::TEXT[]
+      AND EXISTS (
+        SELECT 1
+        FROM pg_catalog.unnest(proc.proconfig) AS setting(value)
+        WHERE setting.value IN ('search_path=', 'search_path=""')
+      )
   ) THEN
     RAISE EXCEPTION 'MIGRATION_042_FINALIZER_CATALOG_INVALID';
   END IF;
