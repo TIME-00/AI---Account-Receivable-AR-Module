@@ -4415,3 +4415,36 @@ Deno.test("Migration 040 keeps recovery immutable, tenant-bound, redacted, and D
   assert(smoke.includes("service_role"));
   assert(smoke.includes("authenticated"));
 });
+
+Deno.test("Migration 041 fixes empty-search-path Retry Matching without broadening authority", async () => {
+  const sql = await Deno.readTextFile(
+    new URL(
+      "../../../database/041_gate_e_retry_matching_runtime_compatibility.sql",
+      import.meta.url,
+    ),
+  );
+  const smoke = await Deno.readTextFile(
+    new URL(
+      "../../../database/041b_gate_e_retry_matching_runtime_compatibility_smoke_tests.sql",
+      import.meta.url,
+    ),
+  );
+  assert(sql.includes("extensions.digest("));
+  assert(!sql.includes("encode(digest("));
+  assert(sql.includes("SET search_path = ''"));
+  assert(
+    sql.includes(
+      "REVOKE ALL ON FUNCTION public.allocate_receipt(UUID, UUID, UUID, JSONB)",
+    ),
+  );
+  assert(sql.includes("FROM PUBLIC, anon, authenticated"));
+  assert(sql.includes("TO service_role"));
+  assert(
+    sql.includes("LEAST(v_receipt.unallocated_amount, v_invoice.outstanding)"),
+  );
+  assert(sql.includes("'human_confirmed_invoice'"));
+  assert(smoke.includes("gate-e-runtime-probe"));
+  assert(smoke.includes("has_function_privilege"));
+  assert(smoke.includes("ROLLBACK;"));
+  assert(!smoke.includes("COMMIT;"));
+});

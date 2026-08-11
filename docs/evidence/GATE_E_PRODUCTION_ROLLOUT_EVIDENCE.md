@@ -1657,3 +1657,52 @@ The historical Draft pair and historical unsupported exception remain unchanged.
 The next governed step is Finance Manager confirmation of Receipt-to-Invoice match
 against `INV-202608-00003`, followed by idempotent Retry Matching; the Invoice
 external reference must not be modified.
+
+## Retry Matching Production failure diagnosis and bounded local remediation
+
+The Finance Manager recorded exactly one governed
+`confirm_receipt_invoice_match` recovery for the controlled Receipt against
+`INV-202608-00003`. The immutable recovery and audit rows retain the authenticated
+actor, original Receipt candidate, selected Invoice, resolution note, and source
+links; the original extraction remains unchanged.
+
+The subsequent Production Retry Matching request returned HTTP 500. PostgreSQL
+logged SQLSTATE `42883`: `function digest(text, unknown) does not exist`.
+Migration 040 correctly pins the SECURITY DEFINER function to `search_path=''`,
+but the retry idempotency-key expression called pgcrypto `digest` without its
+`extensions` schema. The failure occurred before allocation-decision insertion.
+Authoritative post-failure state proves complete transactional rollback: the
+Exception remains open, the Receipt remains Posted with MYR 0 allocated and MYR
+43.17 unallocated, the Invoice remains Open with MYR 43.17 outstanding, and the
+pair has zero allocation details and zero allocation decisions.
+
+Pending Migration 041 replaces the affected function with the same reviewed
+financial/tenant/role/idempotency logic and schema-qualifies pgcrypto as
+`extensions.digest`. It applies the same empty-search-path qualification to the
+Reminder Evaluation exception branch. Its bounded security hardening also removes
+a legacy direct `anon` EXECUTE grant from `allocate_receipt`; authenticated and
+anon roles remain unable to invoke financial allocation directly, while the
+reviewed service path retains EXECUTE. Migration 041 and its 041b rollback-only
+smoke are local only until independent review and must not be described as
+deployed.
+
+Local remediation validation is PASS: Gate E Automation 111/111, activation
+prerequisites 28/28, OpenAI 41/41, scheduler 26/26, combined focused 206/206,
+full backend 469/469, and all 17 deployable Edge entrypoints type-check. Deno
+format/lint, diff check, and added-line secret/auth-state scan pass. The 041
+function bodies are byte-for-byte equivalent to the deployed 039/040 logic after
+normalizing only the two `extensions.digest` qualifications; the additional
+privilege change only revokes legacy direct browser/anonymous execution from the
+foundational allocation RPC.
+
+The separately completed reminder preparation is preserved. The current audited
+assignment for controlled customer `CUST-00007` resolves to the active controlled
+representative and authorized test mailbox. Reminder Automation is
+`evaluate_only`, so evaluation is enabled and delivery is disabled. The 20:20 UTC
+natural scheduler ingested and processed the single controlled reminder Invoice
+once, creating posted `INV-202608-00004` for MYR 91.23 with governed due date
+2026-08-13. Deterministic evaluation created exactly one pending stage -3 reminder
+for the controlled representative; no delivery attempt exists. The 20:30 UTC
+natural cycle completed with zero messages, attachments, commands, allocations,
+or failures, and the reminder count remained one. This proves evaluation and
+stage idempotency while delivery remains provider-gated.
