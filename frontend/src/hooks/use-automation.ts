@@ -36,6 +36,8 @@ import {
   commandSchema,
   currentAssignmentSchema,
   type CurrentAssignment,
+  type DeliveryActionResult,
+  deliveryActionResultSchema,
   documentDecisionSchema,
   exceptionSchema,
   GATE_E_CONTRACT_VERSION,
@@ -374,6 +376,74 @@ export function useBeginMailboxOAuth() {
       );
       return parseGateEData(oauthStartSchema, data);
     },
+  });
+}
+
+// ─── Governed Delivery onboarding (post-Gate-E Migration 042) ─────────────────
+//
+// `Enable delivery` is ONE business action against ONE governed endpoint with an
+// exact empty `{}` payload. The frontend carries no activation authority: the
+// server decides whether an existing valid credential is enabled directly or
+// provider consent must be obtained first, and the server alone enables Delivery
+// after the callback. The browser never PATCHes `delivery_enabled` to activate.
+
+/** Shared mutation body for every governed Delivery action — exactly `{}`. */
+const DELIVERY_ACTION_PAYLOAD = {} as const;
+
+function useDeliveryAction(action: "enable" | "reconnect") {
+  const api = useApi();
+  const qc = useQueryClient();
+  const { companyId } = useCompanyId();
+  return useMutation<DeliveryActionResult, unknown, string>({
+    mutationFn: async (id: string) => {
+      const data = await api.post<unknown>(
+        `${AUTOMATION_BASE}/mailboxes/${id}/delivery/${action}`,
+        DELIVERY_ACTION_PAYLOAD,
+        GATE_E_OPTS,
+      );
+      return parseGateEData(deliveryActionResultSchema, data);
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: automationRoot(companyId) }),
+  });
+}
+
+/**
+ * `POST /mailboxes/:id/delivery/enable` — the single Delivery business action.
+ * Returns either the refreshed mailbox (`enabled`) or a server-authored consent
+ * start (`oauth_required`); the caller must re-validate the authorization URL.
+ */
+export function useEnableMailboxDelivery() {
+  return useDeliveryAction("enable");
+}
+
+/**
+ * `POST /mailboxes/:id/delivery/reconnect` — always starts fresh consent with
+ * the distinct `reconnect_delivery` server intent.
+ */
+export function useReconnectMailboxDelivery() {
+  return useDeliveryAction("reconnect");
+}
+
+/**
+ * `POST /mailboxes/:id/delivery/disable` — retains the stored credential and
+ * invalidates any pending activation. Returns the strict mailbox DTO.
+ */
+export function useDisableMailboxDelivery() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const { companyId } = useCompanyId();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const data = await api.post<unknown>(
+        `${AUTOMATION_BASE}/mailboxes/${id}/delivery/disable`,
+        DELIVERY_ACTION_PAYLOAD,
+        GATE_E_OPTS,
+      );
+      return parseGateEData(mailboxSchema, data);
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: automationRoot(companyId) }),
   });
 }
 

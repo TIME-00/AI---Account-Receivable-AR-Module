@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Mail, Plus, RefreshCw } from "lucide-react";
 import { AutomationBadge } from "@/components/features/automation/automation-badge";
@@ -12,7 +12,10 @@ import {
 import {
   useBeginMailboxOAuth,
   useCreateMailbox,
+  useDisableMailboxDelivery,
+  useEnableMailboxDelivery,
   useMailboxes,
+  useReconnectMailboxDelivery,
   useSyncMailbox,
   useUpdateMailbox,
 } from "@/hooks/use-automation";
@@ -32,7 +35,13 @@ import {
   switchStatusLabel,
 } from "@/lib/automation/labels";
 import { formatDateTime } from "@/lib/automation/format";
-import { openOAuthAuthorizationUrl } from "@/lib/automation/oauth";
+import {
+  DELIVERY_ENABLED_MESSAGE,
+  navigateToOAuthAuthorizationUrl,
+  openOAuthAuthorizationUrl,
+  readOAuthCallbackOutcome,
+  stripOAuthCallbackQuery,
+} from "@/lib/automation/oauth";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SECRET_REF_RE = /^[A-Z][A-Z0-9_]{2,127}$/;
@@ -71,7 +80,79 @@ function MailboxCard({
   const oauth = useBeginMailboxOAuth();
   const update = useUpdateMailbox();
   const sync = useSyncMailbox();
+  const enableDelivery = useEnableMailboxDelivery();
+  const reconnectDelivery = useReconnectMailboxDelivery();
+  const disableDelivery = useDisableMailboxDelivery();
   const status = CONNECTION_STATUS_LABEL[mailbox.connection_status];
+
+  // ── Governed Delivery onboarding ───────────────────────────────────────────
+  // Exactly ONE Delivery control is offered at a time, derived only from
+  // server-authoritative mailbox state:
+  //   reconnect required        → Reconnect delivery
+  //   enabled and healthy       → Disable delivery   (never "Connect delivery")
+  //   disabled (credential or   → Enable delivery    (the server decides whether
+  //   not) and healthy                                consent is actually needed)
+  const deliveryAction: "reconnect" | "disable" | "enable" =
+    mailbox.delivery_reconnect_required
+      ? "reconnect"
+      : mailbox.delivery_enabled
+        ? "disable"
+        : "enable";
+  // One shared pending gate: no Delivery action can be queued behind another,
+  // and a duplicate click on the in-flight control cannot start a second call.
+  const deliveryPending =
+    enableDelivery.isPending ||
+    reconnectDelivery.isPending ||
+    disableDelivery.isPending;
+  const deliveryFailed =
+    enableDelivery.isError || reconnectDelivery.isError || disableDelivery.isError;
+
+  /**
+   * Enable/reconnect run against the governed endpoint with an exact `{}` body.
+   * The server returns either the enabled mailbox or a consent start; the
+   * frontend NEVER PATCHes `delivery_enabled` and never infers activation from
+   * any callback query parameter.
+   */
+  function startDelivery(kind: "enable" | "reconnect") {
+    const mutation = kind === "enable" ? enableDelivery : reconnectDelivery;
+    mutation.mutate(mailbox.id, {
+      onSuccess: (result) => {
+        if (result.outcome === "enabled") {
+          // The hook already invalidated the automation root, so the card
+          // re-reads authoritative state rather than trusting this response.
+          toast.success(DELIVERY_ENABLED_MESSAGE);
+          return;
+        }
+        // Re-validate the backend-supplied URL against the provider allowlist
+        // (HTTPS, exact host, no credentials, no odd port) before navigating.
+        const validation = navigateToOAuthAuthorizationUrl(
+          result.provider,
+          result.authorization_url,
+        );
+        if (!validation.ok) {
+          toast.error(validation.reason ?? "The authorization link was refused.");
+        }
+      },
+      onError: (error) =>
+        toast.error(
+          error instanceof ApiError
+            ? error.message
+            : "The delivery action was rejected.",
+        ),
+    });
+  }
+
+  function stopDelivery() {
+    disableDelivery.mutate(mailbox.id, {
+      onSuccess: () => toast.success("Delivery disabled."),
+      onError: (error) =>
+        toast.error(
+          error instanceof ApiError
+            ? error.message
+            : "The delivery action was rejected.",
+        ),
+    });
+  }
 
   function beginOAuth(capability: "ingestion" | "delivery") {
     oauth.mutate(
@@ -97,17 +178,6 @@ function MailboxCard({
           toast.error(
             error instanceof ApiError ? error.message : "OAuth start is unavailable.",
           ),
-      },
-    );
-  }
-
-  function toggle(field: "delivery_enabled") {
-    update.mutate(
-      { id: mailbox.id, patch: { [field]: !mailbox[field] } },
-      {
-        onSuccess: () => toast.success("Mailbox updated."),
-        onError: (error) =>
-          toast.error(error instanceof ApiError ? error.message : "Update was rejected."),
       },
     );
   }
@@ -211,8 +281,12 @@ function MailboxCard({
           <dd>{mailbox.cursor_present ? (mailbox.cursor_kind ?? "Present") : "None"}</dd>
         </div>
         <div>
-          <dt className="text-slate-400">Reconnect</dt>
+          <dt className="text-slate-400">Ingestion reconnect</dt>
           <dd>{mailbox.reconnect_required ? "Required" : "No"}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-400">Delivery reconnect</dt>
+          <dd>{mailbox.delivery_reconnect_required ? "Required" : "No"}</dd>
         </div>
         <div>
           <dt className="text-slate-400">Last success</dt>
@@ -242,28 +316,35 @@ function MailboxCard({
               </button>
               <button
                 type="button"
-                onClick={() => beginOAuth("delivery")}
-                disabled={oauth.isPending}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
-              >
-                Connect delivery
-              </button>
-              <button
-                type="button"
                 onClick={toggleIngestion}
                 disabled={update.isPending}
                 className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
               >
                 {mailbox.ingestion_enabled ? "Disable ingestion" : "Enable ingestion"}
               </button>
-              <button
-                type="button"
-                onClick={() => toggle("delivery_enabled")}
-                disabled={update.isPending}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
-              >
-                {mailbox.delivery_enabled ? "Disable delivery" : "Enable delivery"}
-              </button>
+              {deliveryAction === "disable" ? (
+                <button
+                  type="button"
+                  onClick={stopDelivery}
+                  disabled={deliveryPending}
+                  aria-busy={deliveryPending}
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  Disable delivery
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => startDelivery(deliveryAction)}
+                  disabled={deliveryPending}
+                  aria-busy={deliveryPending}
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  {deliveryAction === "reconnect"
+                    ? "Reconnect delivery"
+                    : "Enable delivery"}
+                </button>
+              )}
             </>
           )}
           {canSync && (
@@ -285,6 +366,27 @@ function MailboxCard({
             </button>
           )}
         </div>
+      )}
+
+      {canConfig && (
+        // Honest, non-blocking status for the governed Delivery action. Never
+        // claims success on its own — activation is reported only after the
+        // server-authoritative response or the server-completed callback.
+        <p
+          role="status"
+          aria-live="polite"
+          className="mt-1.5 text-[11px] text-slate-500"
+        >
+          {deliveryPending
+            ? "Delivery action in progress…"
+            : deliveryFailed
+              ? "The last delivery action did not complete. Nothing was changed."
+              : deliveryAction === "reconnect"
+                ? "Delivery authorization must be reconnected before reminders can send."
+                : deliveryAction === "disable"
+                  ? "Delivery is enabled for reminder sending."
+                  : "Delivery is disabled. Enable delivery requests provider consent only if it is required."}
+        </p>
       )}
 
       {canConfig && (
@@ -341,8 +443,36 @@ export default function MailboxesPage() {
   const canConfig = roles.some((r) => CONFIG_ROLES.includes(r));
   const canSync = roles.some((r) => SYNC_ROLES.includes(r));
 
-  const { data, isLoading, isError, refetch } = useMailboxes({ page: 1, page_size: 50 });
+  const { data, isLoading, isError, isFetching, refetch } = useMailboxes({
+    page: 1,
+    page_size: 50,
+  });
   const create = useCreateMailbox();
+
+  // ── Provider callback return (display only) ────────────────────────────────
+  // The backend completes consent server-side and redirects here with a bounded
+  // query value. That value is FEEDBACK ONLY: it grants no authority, no mailbox
+  // field is written from it, and Delivery was already enabled (or not) by the
+  // server's atomic finalizer. We surface a safe message, re-read authoritative
+  // state, then strip the query so a refresh cannot repeat the message.
+  const callbackHandled = useRef(false);
+  useEffect(() => {
+    // Wait for the first read to settle so the follow-up refresh is a real
+    // re-read rather than a request de-duplicated into the one already open.
+    if (callbackHandled.current || isFetching) return;
+    callbackHandled.current = true;
+    const search = window.location.search;
+    const outcome = readOAuthCallbackOutcome(search);
+    if (outcome.kind === "none") return;
+    if (outcome.kind === "success") toast.success(outcome.message);
+    else toast.error(outcome.message);
+    void refetch();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${stripOAuthCallbackQuery(search)}${window.location.hash}`,
+    );
+  }, [isFetching, refetch]);
   // Reuse the existing company-scoped bank-account query (shared with Receipts /
   // Settings). Only meaningful for config roles, who see the mapping control.
   const bankAccountsQuery = useBankAccounts();
@@ -351,7 +481,6 @@ export default function MailboxesPage() {
   const [provider, setProvider] = useState<ProviderType>("gmail");
   const [address, setAddress] = useState("");
   const [ingestionRef, setIngestionRef] = useState("");
-  const [deliveryRef, setDeliveryRef] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   function submit() {
@@ -360,16 +489,16 @@ export default function MailboxesPage() {
     if (!EMAIL_RE.test(addr)) next.address = "Enter a valid mailbox address.";
     if (ingestionRef && !SECRET_REF_RE.test(ingestionRef))
       next.ingestion = "Use an uppercase reference name (e.g. AR_MAILBOX_INGESTION_1).";
-    if (deliveryRef && !SECRET_REF_RE.test(deliveryRef))
-      next.delivery = "Use an uppercase reference name.";
     setErrors(next);
     if (Object.keys(next).length > 0) return;
+    // The browser never supplies a Delivery Vault name: the server provisions a
+    // collision-safe opaque reference when Delivery is first enabled.
     create.mutate(
       {
         provider_type: provider,
         mailbox_address: addr,
         ingestion_secret_ref: ingestionRef || null,
-        delivery_secret_ref: deliveryRef || null,
+        delivery_secret_ref: null,
       },
       {
         onSuccess: () => {
@@ -377,7 +506,6 @@ export default function MailboxesPage() {
           setShowForm(false);
           setAddress("");
           setIngestionRef("");
-          setDeliveryRef("");
         },
         onError: (error) =>
           toast.error(error instanceof ApiError ? error.message : "Could not create mailbox."),
@@ -451,17 +579,10 @@ export default function MailboxesPage() {
             />
             {errors.ingestion && <span className="text-red-600">{errors.ingestion}</span>}
           </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-medium text-slate-700">Delivery secret reference (optional)</span>
-            <input
-              value={deliveryRef}
-              onChange={(e) => setDeliveryRef(e.target.value)}
-              placeholder="AR_MAILBOX_DELIVERY_1"
-              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-              aria-invalid={Boolean(errors.delivery)}
-            />
-            {errors.delivery && <span className="text-red-600">{errors.delivery}</span>}
-          </label>
+          <p className="col-span-full text-[11px] text-slate-500">
+            Delivery needs no reference here: the server provisions its own
+            opaque one the first time you enable delivery on the mailbox.
+          </p>
           <div className="col-span-full flex gap-2">
             <button
               type="submit"

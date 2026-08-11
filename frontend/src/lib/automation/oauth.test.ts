@@ -5,7 +5,12 @@
 // ============================================================================
 
 import { describe, expect, it } from "vitest";
-import { validateOAuthAuthorizationUrl } from "./oauth";
+import {
+  DELIVERY_ENABLED_MESSAGE,
+  readOAuthCallbackOutcome,
+  stripOAuthCallbackQuery,
+  validateOAuthAuthorizationUrl,
+} from "./oauth";
 
 describe("validateOAuthAuthorizationUrl", () => {
   it("accepts the exact Google authorization origin", () => {
@@ -92,5 +97,102 @@ describe("validateOAuthAuthorizationUrl", () => {
     );
     expect(r.ok).toBe(true);
     expect(r.href).toContain("/9188040d-6c67-4c5b-b112-36a304b66dad/");
+  });
+});
+
+// ============================================================================
+// Post-Gate-E — provider callback return. The query is PRESENTATION ONLY: it
+// must never be able to fabricate a success, render attacker text, or survive
+// into a refresh.
+// ============================================================================
+
+describe("readOAuthCallbackOutcome", () => {
+  it("reports the exact Delivery success message for delivery_oauth=success", () => {
+    const outcome = readOAuthCallbackOutcome("?delivery_oauth=success");
+    expect(outcome).toEqual({
+      kind: "success",
+      capability: "delivery",
+      message: "Delivery enabled successfully.",
+    });
+    expect(DELIVERY_ENABLED_MESSAGE).toBe("Delivery enabled successfully.");
+  });
+
+  it("keeps the ingestion callback distinct from the Delivery one", () => {
+    const outcome = readOAuthCallbackOutcome("?oauth=success");
+    expect(outcome.kind).toBe("success");
+    if (outcome.kind === "success") {
+      expect(outcome.capability).toBe("ingestion");
+      expect(outcome.message).not.toBe(DELIVERY_ENABLED_MESSAGE);
+    }
+  });
+
+  it("maps a known safe failure code to a safe cancel/failure message", () => {
+    const outcome = readOAuthCallbackOutcome("?oauth=error&code=OAUTH_PROVIDER_DENIED");
+    expect(outcome.kind).toBe("error");
+    if (outcome.kind === "error") {
+      expect(outcome.message).toMatch(/cancelled/i);
+      expect(outcome.message).toContain("OAUTH_PROVIDER_DENIED");
+    }
+  });
+
+  it("falls back to a generic safe message for an unknown or unsafe code", () => {
+    for (
+      const search of [
+        "?oauth=error",
+        "?oauth=error&code=SOMETHING_NEW",
+        "?oauth=error&code=<script>alert(1)</script>",
+        "?oauth=error&code=lowercase",
+        `?oauth=error&code=${"A".repeat(81)}`,
+      ]
+    ) {
+      const outcome = readOAuthCallbackOutcome(search);
+      expect(outcome.kind).toBe("error");
+      if (outcome.kind === "error") {
+        expect(outcome.message).not.toContain("<");
+        expect(outcome.message).toMatch(/Nothing was changed/);
+      }
+    }
+  });
+
+  it("ignores any value that is not exactly success or error", () => {
+    for (
+      const search of [
+        "",
+        "?",
+        "?page=2",
+        "?delivery_oauth=",
+        "?delivery_oauth=enabled",
+        "?delivery_oauth=SUCCESS",
+        "?oauth=true",
+      ]
+    ) {
+      expect(readOAuthCallbackOutcome(search)).toEqual({ kind: "none" });
+    }
+  });
+
+  it("never lets a crafted query fabricate a Delivery success", () => {
+    // Only the exact backend-emitted pair produces the success message.
+    expect(readOAuthCallbackOutcome("?oauth=success&delivery_oauth=error").kind).toBe(
+      "error",
+    );
+    expect(readOAuthCallbackOutcome("?code=OAUTH_PROVIDER_DENIED")).toEqual({
+      kind: "none",
+    });
+  });
+});
+
+describe("stripOAuthCallbackQuery", () => {
+  it("removes every callback key so a refresh cannot repeat the message", () => {
+    expect(stripOAuthCallbackQuery("?delivery_oauth=success")).toBe("");
+    expect(stripOAuthCallbackQuery("?oauth=error&code=OAUTH_PROVIDER_DENIED")).toBe("");
+  });
+
+  it("preserves unrelated query parameters", () => {
+    expect(stripOAuthCallbackQuery("?page=2&delivery_oauth=success")).toBe("?page=2");
+  });
+
+  it("returns an empty string for an already-clean location", () => {
+    expect(stripOAuthCallbackQuery("")).toBe("");
+    expect(stripOAuthCallbackQuery("?")).toBe("");
   });
 });

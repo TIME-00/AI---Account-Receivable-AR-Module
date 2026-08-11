@@ -24,6 +24,7 @@ import type {
 import type { CreateReceiptInput } from "../receipts/validators.ts";
 import {
   assertExactKeys,
+  type AutomationOAuthIntent,
   type AutomationOperatingMode,
   type AutomationReminderMode,
   documentCapabilityProfile,
@@ -66,6 +67,7 @@ import {
   type OAuthSecretStore,
   type OAuthTokenSet,
   refreshOAuthTokens,
+  serializeOAuthTokenSet,
   validateOAuthRedirectUri,
   VaultOAuthSecretStore,
 } from "./oauth.ts";
@@ -253,6 +255,11 @@ async function sha256(value: string): Promise<string> {
     .join("");
 }
 
+export function deliverySecretReference(mailboxId: string): string {
+  validateUUID(mailboxId, "mailbox_id");
+  return `AR_DELIVERY_${mailboxId.replaceAll("-", "").toUpperCase()}`;
+}
+
 function extension(fileName: string): string {
   const parts = fileName.toLowerCase().split(".");
   return parts.length === 2 ? parts[1] : "bin";
@@ -325,9 +332,12 @@ export function mailboxCapabilityIsReady(
   now: Date,
   adapterReady: boolean,
 ): boolean {
-  return adapterReady && row.is_enabled === true &&
-    row.connection_status === "connected" &&
-    row.reconnect_required === false &&
+  return adapterReady &&
+    (capability === "delivery" || row.is_enabled === true) &&
+    (capability === "delivery"
+      ? row.delivery_reconnect_required === false
+      : row.connection_status === "connected" &&
+        row.reconnect_required === false) &&
     row[`${capability}_enabled`] === true &&
     typeof row[`${capability}_secret_ref`] === "string" &&
     String(row[`${capability}_secret_ref`]).trim().length > 0 &&
@@ -769,14 +779,27 @@ export class AutomationService {
 
   private async markMailboxReconnectRequired(
     mailbox: Row,
+    capability: OAuthCapability,
     code: string,
   ): Promise<void> {
-    const { error } = await this.client.from("automation_mailboxes").update({
-      reconnect_required: true,
-      connection_status: "reconnect_required",
-      redacted_error_code: code,
-      updated_at: this.now().toISOString(),
-    }).eq("id", mailbox.id).eq("company_id", mailbox.company_id);
+    const patch = capability === "delivery"
+      ? {
+        delivery_enabled: false,
+        delivery_reconnect_required: true,
+        redacted_error_code: mailbox.reconnect_required === true
+          ? mailbox.redacted_error_code
+          : code,
+        updated_at: this.now().toISOString(),
+      }
+      : {
+        reconnect_required: true,
+        connection_status: "reconnect_required",
+        redacted_error_code: code,
+        updated_at: this.now().toISOString(),
+      };
+    const { error } = await this.client.from("automation_mailboxes").update(
+      patch,
+    ).eq("id", mailbox.id).eq("company_id", mailbox.company_id);
     if (error) throw error;
   }
 
@@ -798,6 +821,7 @@ export class AutomationService {
       ) {
         await this.markMailboxReconnectRequired(
           mailbox,
+          capability,
           "OAUTH_CREDENTIAL_INVALID",
         );
       }
@@ -813,6 +837,7 @@ export class AutomationService {
     ) {
       await this.markMailboxReconnectRequired(
         mailbox,
+        capability,
         "OAUTH_SCOPE_INSUFFICIENT",
       );
       throw new BusinessError(
@@ -824,6 +849,7 @@ export class AutomationService {
     if (!current.refresh_token) {
       await this.markMailboxReconnectRequired(
         mailbox,
+        capability,
         "OAUTH_REFRESH_TOKEN_REQUIRED",
       );
       throw new BusinessError(
@@ -871,8 +897,13 @@ export class AutomationService {
       await this.oauthSecretStore.writeTokenSet(context, refreshed);
       const { error } = await this.client.from("automation_mailboxes").update({
         [`${capability}_token_expires_at`]: refreshed.expires_at,
-        reconnect_required: false,
-        redacted_error_code: null,
+        ...(capability === "delivery"
+          ? { delivery_reconnect_required: false }
+          : { reconnect_required: false }),
+        redacted_error_code: capability === "delivery" &&
+            mailbox.reconnect_required === true
+          ? mailbox.redacted_error_code
+          : null,
         updated_at: this.now().toISOString(),
       }).eq("id", mailbox.id).eq("company_id", mailbox.company_id);
       if (error) throw error;
@@ -888,6 +919,7 @@ export class AutomationService {
       ) {
         await this.markMailboxReconnectRequired(
           mailbox,
+          capability,
           "OAUTH_TOKEN_REFRESH_REJECTED",
         );
       }
@@ -1288,8 +1320,8 @@ export class AutomationService {
       const { data: deliveryMailbox, error: deliveryMailboxError } = await this
         .client.from("automation_mailboxes").select("id")
         .eq("company_id", companyId).eq("delivery_enabled", true)
-        .eq("connection_status", "connected")
-        .eq("reconnect_required", false).order("id", { ascending: true })
+        .eq("delivery_reconnect_required", false)
+        .order("id", { ascending: true })
         .limit(1).maybeSingle();
       if (deliveryMailboxError) throw deliveryMailboxError;
       if (!deliveryMailbox) {
@@ -1362,7 +1394,7 @@ export class AutomationService {
     const { data: mailboxes, error: mailboxError } = await this.client
       .from("automation_mailboxes")
       .select(
-        "id,company_id,provider_type,connection_status,reconnect_required,is_enabled,ingestion_enabled,delivery_enabled,ingestion_secret_ref,delivery_secret_ref,ingestion_token_expires_at,delivery_token_expires_at,last_successful_sync_at,last_failed_sync_at",
+        "id,company_id,provider_type,connection_status,reconnect_required,delivery_reconnect_required,is_enabled,ingestion_enabled,delivery_enabled,ingestion_secret_ref,delivery_secret_ref,ingestion_token_expires_at,delivery_token_expires_at,last_successful_sync_at,last_failed_sync_at",
       )
       .eq("company_id", auth.companyId)
       .order("id", { ascending: true })
@@ -1468,6 +1500,7 @@ export class AutomationService {
       reconnect_required_mailbox_count:
         mailboxRows.filter((row) =>
           row.reconnect_required === true ||
+          row.delivery_reconnect_required === true ||
           row.connection_status === "reconnect_required"
         ).length,
       last_successful_sync_at: latest("last_successful_sync_at"),
@@ -1650,10 +1683,8 @@ export class AutomationService {
     const { data, error } = await this.client.from("automation_mailboxes")
       .select("*")
       .eq("company_id", auth.companyId)
-      .eq("is_enabled", true)
       .eq("delivery_enabled", true)
-      .eq("connection_status", "connected")
-      .eq("reconnect_required", false)
+      .eq("delivery_reconnect_required", false)
       .order("id", { ascending: true })
       .limit(100);
     if (error) throw error;
@@ -2208,6 +2239,7 @@ export class AutomationService {
       is_enabled: false,
       ingestion_enabled: false,
       delivery_enabled: false,
+      delivery_reconnect_required: false,
       created_by: auth.userId,
       updated_by: auth.userId,
     };
@@ -2311,8 +2343,7 @@ export class AutomationService {
     }
     if (
       next.delivery_enabled === true &&
-      (next.connection_status !== "connected" ||
-        next.reconnect_required === true ||
+      (next.delivery_reconnect_required === true ||
         !next.delivery_secret_ref)
     ) {
       throw new BusinessError(
@@ -2382,6 +2413,7 @@ export class AutomationService {
     }
     if (capabilities.includes("delivery")) {
       patch.delivery_enabled = false;
+      patch.delivery_reconnect_required = false;
       patch.delivery_token_expires_at = null;
     }
     const ingestionRemains = !capabilities.includes("ingestion") &&
@@ -2402,6 +2434,7 @@ export class AutomationService {
     auth: AuthContext,
     mailboxId: string,
     capability: "ingestion" | "delivery",
+    requestedIntent?: AutomationOAuthIntent,
   ): Promise<Row> {
     requireAnyRole(auth, ["Finance Manager", "System Admin"]);
     validateUUID(mailboxId, "mailbox_id");
@@ -2409,11 +2442,47 @@ export class AutomationService {
       .from("automation_mailboxes").select("*")
       .eq("id", mailboxId).eq("company_id", auth.companyId).maybeSingle();
     if (error) throw error;
-    const mailbox = requiredId(
+    let mailbox = requiredId(
       mailboxRaw as Row | null,
       "Mailbox",
       mailboxId,
     );
+    const intent: AutomationOAuthIntent = capability === "delivery"
+      ? requestedIntent === "reconnect_delivery"
+        ? "reconnect_delivery"
+        : "enable_delivery"
+      : "connect_capability";
+    if (capability === "delivery" && !mailbox.delivery_secret_ref) {
+      const reference = deliverySecretReference(mailboxId);
+      const { data: assignedRaw, error: assignmentError } = await this.client
+        .from("automation_mailboxes").update({
+          delivery_secret_ref: reference,
+          updated_by: auth.userId,
+          updated_at: this.now().toISOString(),
+        }).eq("id", mailboxId).eq("company_id", auth.companyId)
+        .is("delivery_secret_ref", null).select("*").maybeSingle();
+      if (assignmentError) throwMailboxPersistenceError(assignmentError);
+      if (assignedRaw) {
+        mailbox = assignedRaw as Row;
+      } else {
+        const { data: refreshedRaw, error: refreshedError } = await this.client
+          .from("automation_mailboxes").select("*").eq("id", mailboxId)
+          .eq("company_id", auth.companyId).maybeSingle();
+        if (refreshedError) throw refreshedError;
+        mailbox = requiredId(
+          refreshedRaw as Row | null,
+          "Mailbox",
+          mailboxId,
+        );
+        if (!mailbox.delivery_secret_ref) {
+          throw new BusinessError(
+            "SECRET_REFERENCE_UNAVAILABLE",
+            "Mailbox delivery authorization could not be prepared safely.",
+            503,
+          );
+        }
+      }
+    }
     const provider = mailbox.provider_type as MailboxProviderType;
     const clientId = this.oauthClientId(provider);
     const redirectUri = this.oauthRedirectUri(provider);
@@ -2425,6 +2494,15 @@ export class AutomationService {
     const scopes = this.oauthRequiredScopes(provider, capability);
     const expiresAt = new Date(this.now().getTime() + 10 * 60 * 1000)
       .toISOString();
+    if (capability === "delivery") {
+      const { error: invalidateError } = await this.client.from(
+        "automation_oauth_states",
+      ).update({ consumed_at: this.now().toISOString() })
+        .eq("company_id", auth.companyId).eq("mailbox_id", mailboxId)
+        .eq("provider_type", provider).is("consumed_at", null)
+        .in("oauth_intent", ["enable_delivery", "reconnect_delivery"]);
+      if (invalidateError) throw invalidateError;
+    }
     const { error: stateError } = await this.client.from(
       "automation_oauth_states",
     ).insert({
@@ -2436,6 +2514,7 @@ export class AutomationService {
       requested_scopes: scopes,
       expires_at: expiresAt,
       created_by: auth.userId,
+      oauth_intent: intent,
     });
     if (stateError) throw stateError;
     const authorizationUrl = buildOAuthAuthorizationUrl({
@@ -2459,7 +2538,104 @@ export class AutomationService {
       ),
       expires_at: expiresAt,
       capability,
+      intent,
     };
+  }
+
+  async enableMailboxDelivery(
+    auth: AuthContext,
+    mailboxId: string,
+  ): Promise<Row> {
+    requireAnyRole(auth, ["Finance Manager", "System Admin"]);
+    validateUUID(mailboxId, "mailbox_id");
+    const { data: mailboxRaw, error } = await this.client.from(
+      "automation_mailboxes",
+    ).select("*").eq("id", mailboxId).eq("company_id", auth.companyId)
+      .maybeSingle();
+    if (error) throw error;
+    const mailbox = requiredId(mailboxRaw as Row | null, "Mailbox", mailboxId);
+    if (mailbox.delivery_enabled === true) {
+      return { outcome: "enabled", mailbox: mailboxDto(mailbox) };
+    }
+    if (mailbox.delivery_secret_ref) {
+      try {
+        await this.resolveOAuthAccessTokenForRuntime(mailbox, "delivery");
+        const { data: enabledRaw, error: enabledError } = await this.client
+          .from("automation_mailboxes").update({
+            delivery_enabled: true,
+            delivery_reconnect_required: false,
+            updated_by: auth.userId,
+            updated_at: this.now().toISOString(),
+          }).eq("id", mailboxId).eq("company_id", auth.companyId)
+          .select("*").maybeSingle();
+        if (enabledError) throwMailboxPersistenceError(enabledError);
+        return {
+          outcome: "enabled",
+          mailbox: mailboxDto(
+            requiredId(enabledRaw as Row | null, "Mailbox", mailboxId),
+          ),
+        };
+      } catch (caught) {
+        if (
+          !(caught instanceof BusinessError) ||
+          ![
+            "OAUTH_SECRET_UNAVAILABLE",
+            "OAUTH_SECRET_INVALID",
+            "OAUTH_SECRET_RESOLUTION_FAILED",
+            "OAUTH_RECONNECT_REQUIRED",
+          ].includes(caught.code)
+        ) throw caught;
+      }
+    }
+    return {
+      outcome: "oauth_required",
+      ...(await this.beginOAuth(
+        auth,
+        mailboxId,
+        "delivery",
+        "enable_delivery",
+      )),
+    };
+  }
+
+  async reconnectMailboxDelivery(
+    auth: AuthContext,
+    mailboxId: string,
+  ): Promise<Row> {
+    return {
+      outcome: "oauth_required",
+      ...(await this.beginOAuth(
+        auth,
+        mailboxId,
+        "delivery",
+        "reconnect_delivery",
+      )),
+    };
+  }
+
+  async disableMailboxDelivery(
+    auth: AuthContext,
+    mailboxId: string,
+  ): Promise<Row> {
+    requireAnyRole(auth, ["Finance Manager", "System Admin"]);
+    validateUUID(mailboxId, "mailbox_id");
+    const disabledAt = this.now().toISOString();
+    const { error: invalidateError } = await this.client.from(
+      "automation_oauth_states",
+    ).update({ consumed_at: disabledAt }).eq("company_id", auth.companyId)
+      .eq("mailbox_id", mailboxId).is("consumed_at", null)
+      .in("oauth_intent", ["enable_delivery", "reconnect_delivery"]);
+    if (invalidateError) throw invalidateError;
+    const { data, error } = await this.client.from("automation_mailboxes")
+      .update({
+        delivery_enabled: false,
+        delivery_reconnect_required: false,
+        updated_by: auth.userId,
+        updated_at: disabledAt,
+      }).eq("id", mailboxId).eq("company_id", auth.companyId).select("*")
+      .maybeSingle();
+    if (error) throwMailboxPersistenceError(error);
+    return mailboxDto(requiredId(data as Row | null, "Mailbox", mailboxId));
   }
 
   async completeOAuth(
@@ -2494,6 +2670,9 @@ export class AutomationService {
     }
     const mailbox = oauthState.mailbox as Row;
     const companyId = String(oauthState.company_id);
+    const intent = String(
+      oauthState.oauth_intent ?? "connect_capability",
+    ) as AutomationOAuthIntent;
     if (
       mailbox.provider_type !== provider ||
       String(oauthState.redirect_uri) !== this.oauthRedirectUri(provider)
@@ -2578,32 +2757,64 @@ export class AutomationService {
         secret_reference: secretReference,
       },
       required_scopes: requestedScopes,
-      writer: this.oauthSecretStore,
+      writer: capability === "delivery" &&
+          ["enable_delivery", "reconnect_delivery"].includes(intent)
+        ? {
+          writeTokenSet: async (context, tokens) => {
+            const { error: finalizeError } = await this.client.rpc(
+              "automation_oauth_delivery_finalize",
+              {
+                p_state_id: oauthState.id,
+                p_company_id: companyId,
+                p_mailbox_id: String(mailbox.id),
+                p_provider_type: provider,
+                p_actor_user_id: oauthState.created_by,
+                p_oauth_intent: intent,
+                p_secret_reference: context.secret_reference,
+                p_secret_payload: serializeOAuthTokenSet(tokens),
+                p_token_expires_at: tokens.expires_at,
+              },
+            );
+            if (finalizeError) {
+              throw new BusinessError(
+                "OAUTH_DELIVERY_FINALIZE_FAILED",
+                "Mailbox delivery authorization could not be activated safely.",
+                503,
+              );
+            }
+          },
+        }
+        : this.oauthSecretStore,
       fetcher: this.oauthFetcher,
       now: this.now(),
     });
-    const completedAt = this.now().toISOString();
-    const { data: connectedMailbox, error: mailboxUpdateError } = await this
-      .client.from("automation_mailboxes").update({
-        connection_status: "connected",
-        reconnect_required: false,
-        [
-          capability === "delivery"
-            ? "delivery_token_expires_at"
-            : "ingestion_token_expires_at"
-        ]: result.expires_at,
-        redacted_error_code: null,
-        updated_by: oauthState.created_by,
-        updated_at: completedAt,
-      }).eq("id", mailbox.id).eq("company_id", companyId).select("id")
-      .maybeSingle();
-    if (mailboxUpdateError) throw mailboxUpdateError;
-    if (!connectedMailbox) {
-      throw new BusinessError(
-        "OAUTH_MAILBOX_UPDATE_FAILED",
-        "Mailbox authorization state could not be persisted.",
-        409,
-      );
+    if (
+      capability !== "delivery" ||
+      !["enable_delivery", "reconnect_delivery"].includes(intent)
+    ) {
+      const completedAt = this.now().toISOString();
+      const { data: connectedMailbox, error: mailboxUpdateError } = await this
+        .client.from("automation_mailboxes").update({
+          connection_status: "connected",
+          reconnect_required: false,
+          [
+            capability === "delivery"
+              ? "delivery_token_expires_at"
+              : "ingestion_token_expires_at"
+          ]: result.expires_at,
+          redacted_error_code: null,
+          updated_by: oauthState.created_by,
+          updated_at: completedAt,
+        }).eq("id", mailbox.id).eq("company_id", companyId).select("id")
+        .maybeSingle();
+      if (mailboxUpdateError) throw mailboxUpdateError;
+      if (!connectedMailbox) {
+        throw new BusinessError(
+          "OAUTH_MAILBOX_UPDATE_FAILED",
+          "Mailbox authorization state could not be persisted.",
+          409,
+        );
+      }
     }
     return {
       mailbox_id: mailbox.id,
@@ -2612,6 +2823,9 @@ export class AutomationService {
       connection_status: "connected",
       token_expires_at: result.expires_at,
       granted_scopes: result.scopes,
+      intent,
+      delivery_enabled: capability === "delivery" &&
+        ["enable_delivery", "reconnect_delivery"].includes(intent),
     };
   }
 
@@ -2625,7 +2839,7 @@ export class AutomationService {
     const stateHash = await sha256(state);
     const { data: stateRaw, error } = await this.client.from(
       "automation_oauth_states",
-    ).select("id,company_id,mailbox_id,expires_at,consumed_at")
+    ).select("id,company_id,mailbox_id,expires_at,consumed_at,oauth_intent")
       .eq("state_hash", stateHash).eq("provider_type", provider)
       .is("consumed_at", null).maybeSingle();
     if (error) throw error;
@@ -2657,14 +2871,25 @@ export class AutomationService {
         409,
       );
     }
+    const deliveryIntent = ["enable_delivery", "reconnect_delivery"].includes(
+      String(oauthState.oauth_intent),
+    );
     const { error: mailboxError } = await this.client.from(
       "automation_mailboxes",
-    ).update({
-      connection_status: "error",
-      reconnect_required: true,
-      redacted_error_code: "OAUTH_PROVIDER_DENIED",
-      updated_at: claimedAt,
-    }).eq("id", oauthState.mailbox_id).eq(
+    ).update(
+      deliveryIntent
+        ? {
+          delivery_enabled: false,
+          delivery_reconnect_required: true,
+          updated_at: claimedAt,
+        }
+        : {
+          connection_status: "error",
+          reconnect_required: true,
+          redacted_error_code: "OAUTH_PROVIDER_DENIED",
+          updated_at: claimedAt,
+        },
+    ).eq("id", oauthState.mailbox_id).eq(
       "company_id",
       oauthState.company_id,
     );
@@ -4587,9 +4812,8 @@ export class AutomationService {
       mailboxId,
     );
     if (
-      mailbox.connection_status !== "connected" ||
       mailbox.delivery_enabled !== true ||
-      mailbox.reconnect_required === true ||
+      mailbox.delivery_reconnect_required === true ||
       !mailbox.delivery_secret_ref
     ) {
       throw new BusinessError(

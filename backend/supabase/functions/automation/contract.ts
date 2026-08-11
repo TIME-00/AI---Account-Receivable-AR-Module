@@ -20,10 +20,16 @@ export const REMINDER_MODES = [
   "evaluate_only",
   "automatic_delivery",
 ] as const;
+export const OAUTH_INTENTS = [
+  "connect_capability",
+  "enable_delivery",
+  "reconnect_delivery",
+] as const;
 
 export type MailboxProviderType = typeof PROVIDERS[number];
 export type AutomationOperatingMode = typeof OPERATING_MODES[number];
 export type AutomationReminderMode = typeof REMINDER_MODES[number];
+export type AutomationOAuthIntent = typeof OAUTH_INTENTS[number];
 
 export interface AutomationCapabilityProfile {
   mailbox_sync_enabled: boolean;

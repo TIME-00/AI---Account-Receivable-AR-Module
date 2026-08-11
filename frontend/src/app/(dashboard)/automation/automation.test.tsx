@@ -303,6 +303,7 @@ describe("Mailboxes", () => {
             last_successful_sync_at: null,
             last_failed_sync_at: null,
             reconnect_required: false,
+            delivery_reconnect_required: false,
             is_enabled: false,
             ingestion_enabled: false,
             delivery_enabled: false,
@@ -346,6 +347,7 @@ describe("Mailboxes", () => {
       last_successful_sync_at: null,
       last_failed_sync_at: null,
       reconnect_required: false,
+      delivery_reconnect_required: false,
       is_enabled: false,
       ingestion_enabled: false,
       delivery_enabled: false,
@@ -403,9 +405,10 @@ describe("Mailboxes", () => {
     expect(await screen.findByRole("button", { name: "Enable ingestion" })).toBeInTheDocument();
     // The removed generic mailbox master switch must not exist (exact Enable/Disable).
     expect(screen.queryByRole("button", { name: /^(Enable|Disable)$/ })).toBeNull();
-    // OAuth connect controls and the independent delivery control remain.
+    // Ingestion OAuth connect remains; Delivery is now a single governed action
+    // and no longer exposes a separate "Connect delivery" control.
     expect(screen.getByRole("button", { name: "Connect ingestion" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect delivery" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect delivery" })).toBeNull();
     expect(screen.getByRole("button", { name: "Enable delivery" })).toBeInTheDocument();
   });
 
@@ -451,17 +454,24 @@ describe("Mailboxes", () => {
     expect(fakeApi.patch).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps delivery activation independent — it never mutates the ingestion fields", async () => {
+  it("keeps delivery activation independent — it never PATCHes the ingestion fields", async () => {
     mountMailboxes(connectedMailbox({ delivery_secret_configured: true }));
-    fakeApi.patch.mockResolvedValue(
-      connectedMailbox({ delivery_secret_configured: true, delivery_enabled: true }),
-    );
+    fakeApi.post.mockResolvedValue({
+      outcome: "enabled",
+      mailbox: connectedMailbox({
+        delivery_secret_configured: true,
+        delivery_enabled: true,
+        delivery_token_expires_at: "2026-09-01T00:00:00Z",
+      }),
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
-    await waitFor(() => expect(fakeApi.patch).toHaveBeenCalledTimes(1));
-    const [, body] = fakeApi.patch.mock.calls[0];
-    expect(body).toEqual({ delivery_enabled: true });
-    expect(body).not.toHaveProperty("is_enabled");
-    expect(body).not.toHaveProperty("ingestion_enabled");
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalledTimes(1));
+    // Delivery is a governed POST — never a mailbox PATCH, so no ingestion or
+    // master-switch field can ride along with it.
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/mailboxes/${MB}/delivery/enable`);
+    expect(body).toEqual({});
   });
 
   // ── Default receiving bank account mapping (Draft Receipt prerequisite) ──────
@@ -547,6 +557,411 @@ describe("Mailboxes", () => {
   });
 });
 
+// ============================================================================
+// Post-Gate-E — governed one-action mailbox Delivery onboarding.
+//
+// Delivery activation authority lives ENTIRELY on the server. The page offers
+// exactly one Delivery control derived from authoritative mailbox state, calls
+// one governed endpoint with an exact `{}` body, navigates only to a
+// re-validated provider URL, and never PATCHes `delivery_enabled` or infers
+// activation from a callback query parameter.
+// ============================================================================
+
+describe("Mailboxes — governed Delivery onboarding", () => {
+  const DELIVERY_MB = MB;
+  const AUTH_URL =
+    "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&scope=gmail.send";
+
+  function deliveryMailbox(overrides: Record<string, unknown> = {}) {
+    return {
+      id: DELIVERY_MB,
+      company_id: CO,
+      provider_type: "gmail",
+      mailbox_address: "ar@example.com",
+      default_bank_account_id: null,
+      connection_status: "connected",
+      ingestion_secret_configured: true,
+      delivery_secret_configured: false,
+      ingestion_token_expires_at: "2026-09-01T00:00:00Z",
+      delivery_token_expires_at: null,
+      cursor_kind: null,
+      cursor_present: false,
+      last_successful_sync_at: null,
+      last_failed_sync_at: null,
+      reconnect_required: false,
+      delivery_reconnect_required: false,
+      is_enabled: true,
+      ingestion_enabled: true,
+      delivery_enabled: false,
+      redacted_error_code: null,
+      created_at: "2026-07-31T00:00:00Z",
+      updated_at: "2026-07-31T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  /** Delivery configured, healthy and enabled — the steady operating state. */
+  const ENABLED = deliveryMailbox({
+    delivery_secret_configured: true,
+    delivery_token_expires_at: "2026-09-01T00:00:00Z",
+    delivery_enabled: true,
+  });
+  /** Disabled, but the stored credential is retained and still current. */
+  const DISABLED_WITH_CREDENTIAL = deliveryMailbox({
+    delivery_secret_configured: true,
+    delivery_token_expires_at: "2026-09-01T00:00:00Z",
+    delivery_enabled: false,
+  });
+  /** Never authorized: no credential was ever provisioned for delivery. */
+  const NEVER_AUTHORIZED = deliveryMailbox();
+  /** Credential revoked/expired server-side — send authority must be redone. */
+  const RECONNECT_REQUIRED = deliveryMailbox({
+    delivery_secret_configured: true,
+    delivery_token_expires_at: "2026-09-01T00:00:00Z",
+    delivery_enabled: false,
+    delivery_reconnect_required: true,
+  });
+
+  let mailboxGets = 0;
+
+  function mount(row: Record<string, unknown>) {
+    mailboxGets = 0;
+    fakeApi = createFakeApi([
+      route("/automation/mailboxes", () => {
+        mailboxGets += 1;
+        return {
+          data: [row],
+          meta: { page: 1, page_size: 50, total: 1, has_more: false },
+        };
+      }),
+      route("/bank-accounts", () => ({ data: [] })),
+    ]);
+    renderWithProviders(<MailboxesPage />);
+  }
+
+  const assignSpy = vi.fn();
+
+  beforeEach(() => {
+    assignSpy.mockClear();
+    // jsdom's `location.assign` is not implemented; replace it so a same-tab
+    // OAuth navigation is observable instead of throwing.
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        assign: assignSpy,
+        search: "",
+        pathname: "/automation/mailboxes",
+        hash: "",
+      },
+    });
+  });
+
+  // ── Control derivation from authoritative state ────────────────────────────
+
+  it("configured + enabled delivery shows only 'Disable delivery' and never a Connect delivery control", async () => {
+    mount(ENABLED);
+    expect(
+      await screen.findByRole("button", { name: "Disable delivery" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect delivery" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enable delivery" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reconnect delivery" })).toBeNull();
+  });
+
+  it("disabled delivery with a current credential offers 'Enable delivery' (the server decides if consent is needed)", async () => {
+    mount(DISABLED_WITH_CREDENTIAL);
+    expect(
+      await screen.findByRole("button", { name: "Enable delivery" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disable delivery" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reconnect delivery" })).toBeNull();
+  });
+
+  it("a never-authorized mailbox still offers 'Enable delivery', not a separate connect step", async () => {
+    mount(NEVER_AUTHORIZED);
+    expect(
+      await screen.findByRole("button", { name: "Enable delivery" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect delivery" })).toBeNull();
+    expect(screen.getByText("Not set")).toBeInTheDocument();
+  });
+
+  it("delivery_reconnect_required shows 'Reconnect delivery' and nothing else", async () => {
+    mount(RECONNECT_REQUIRED);
+    expect(
+      await screen.findByRole("button", { name: "Reconnect delivery" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enable delivery" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disable delivery" })).toBeNull();
+    // Delivery reconnect health is reported separately from ingestion health.
+    expect(screen.getByText("Delivery reconnect")).toBeInTheDocument();
+    expect(screen.getByText("Ingestion reconnect")).toBeInTheDocument();
+  });
+
+  // ── Governed endpoints and exact payloads ──────────────────────────────────
+
+  it("Enable delivery calls the governed enable endpoint with an exact {} payload", async () => {
+    mount(DISABLED_WITH_CREDENTIAL);
+    fakeApi.post.mockResolvedValue({ outcome: "enabled", mailbox: ENABLED });
+    fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalledTimes(1));
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/mailboxes/${DELIVERY_MB}/delivery/enable`);
+    expect(body).toEqual({});
+    expect(Object.keys(body as object)).toHaveLength(0);
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+  });
+
+  it("Reconnect delivery calls the governed reconnect endpoint with an exact {} payload", async () => {
+    mount(RECONNECT_REQUIRED);
+    fakeApi.post.mockResolvedValue({
+      outcome: "oauth_required",
+      provider: "gmail",
+      authorization_url: AUTH_URL,
+      expires_at: "2026-08-11T00:10:00Z",
+      capability: "delivery",
+      intent: "reconnect_delivery",
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Reconnect delivery" }));
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalledTimes(1));
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/mailboxes/${DELIVERY_MB}/delivery/reconnect`);
+    expect(body).toEqual({});
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+  });
+
+  it("Disable delivery calls the governed disable endpoint with an exact {} payload", async () => {
+    mount(ENABLED);
+    fakeApi.post.mockResolvedValue(DISABLED_WITH_CREDENTIAL);
+    fireEvent.click(await screen.findByRole("button", { name: "Disable delivery" }));
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalledTimes(1));
+    const [path, body] = fakeApi.post.mock.calls[0];
+    expect(path).toBe(`/automation/mailboxes/${DELIVERY_MB}/delivery/disable`);
+    expect(body).toEqual({});
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+  });
+
+  // ── Result handling ────────────────────────────────────────────────────────
+
+  it("an 'enabled' result reports success and re-reads authoritative mailbox state", async () => {
+    mount(DISABLED_WITH_CREDENTIAL);
+    fakeApi.post.mockResolvedValue({ outcome: "enabled", mailbox: ENABLED });
+    const before = mailboxGets;
+    fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
+    await waitFor(() => expect(mailboxGets).toBeGreaterThan(before));
+    // No provider navigation happens when the server enabled directly.
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  it("an 'oauth_required' result navigates to the strictly validated provider URL only", async () => {
+    mount(NEVER_AUTHORIZED);
+    fakeApi.post.mockResolvedValue({
+      outcome: "oauth_required",
+      provider: "gmail",
+      authorization_url: AUTH_URL,
+      expires_at: "2026-08-11T00:10:00Z",
+      capability: "delivery",
+      intent: "enable_delivery",
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledTimes(1));
+    expect(assignSpy).toHaveBeenCalledWith(AUTH_URL);
+  });
+
+  it("refuses to navigate to a non-allowlisted authorization URL", async () => {
+    mount(NEVER_AUTHORIZED);
+    fakeApi.post.mockResolvedValue({
+      outcome: "oauth_required",
+      provider: "gmail",
+      authorization_url: "https://evil.example.test/o/oauth2/v2/auth?client_id=x",
+      expires_at: "2026-08-11T00:10:00Z",
+      capability: "delivery",
+      intent: "enable_delivery",
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
+    await waitFor(() => expect(fakeApi.post).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(assignSpy).not.toHaveBeenCalled());
+  });
+
+  it("fails closed when the delivery result drifts from the strict union", async () => {
+    mount(DISABLED_WITH_CREDENTIAL);
+    // A plausible-looking but contract-violating shape must not be treated as
+    // an activation.
+    fakeApi.post.mockResolvedValue({ outcome: "enabled", delivery_enabled: true });
+    fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/last delivery action did not complete/i),
+      ).toBeInTheDocument(),
+    );
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  // ── Duplicate-click protection and honest pending state ────────────────────
+
+  it("prevents duplicate Enable submissions while the governed call is pending", async () => {
+    mount(DISABLED_WITH_CREDENTIAL);
+    fakeApi.post.mockReturnValue(new Promise(() => {}));
+    const enable = await screen.findByRole("button", { name: "Enable delivery" });
+    fireEvent.click(enable);
+    await waitFor(() => expect(enable).toBeDisabled());
+    expect(enable).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(/in progress/i);
+    fireEvent.click(enable);
+    fireEvent.click(enable);
+    expect(fakeApi.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents duplicate Reconnect and Disable submissions while pending", async () => {
+    mount(RECONNECT_REQUIRED);
+    fakeApi.post.mockReturnValue(new Promise(() => {}));
+    const reconnect = await screen.findByRole("button", {
+      name: "Reconnect delivery",
+    });
+    fireEvent.click(reconnect);
+    await waitFor(() => expect(reconnect).toBeDisabled());
+    fireEvent.click(reconnect);
+    expect(fakeApi.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an honest failure state when the governed call is rejected", async () => {
+    mount(DISABLED_WITH_CREDENTIAL);
+    fakeApi.post.mockRejectedValue(
+      new ApiError("OAUTH_NOT_CONFIGURED", "Provider is not provisioned.", 503),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Enable delivery" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/last delivery action did not complete/i),
+      ).toBeInTheDocument(),
+    );
+    // The control stays offered — nothing was optimistically flipped.
+    expect(screen.getByRole("button", { name: "Enable delivery" })).toBeEnabled();
+  });
+
+  // ── Callback return is display-only ────────────────────────────────────────
+
+  /** Point the page's callback reader at a specific return query. */
+  function withCallbackQuery(search: string) {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        assign: assignSpy,
+        search,
+        pathname: "/automation/mailboxes",
+        hash: "",
+      },
+    });
+    return vi.spyOn(window.history, "replaceState");
+  }
+
+  it("delivery_oauth=success shows the safe success message, refreshes, and strips the query", async () => {
+    const replaceState = withCallbackQuery("?delivery_oauth=success");
+    mount(ENABLED);
+    // Authoritative state is re-read rather than inferred from the query.
+    await waitFor(() => expect(mailboxGets).toBeGreaterThan(1));
+    // The callback NEVER triggers a manual enable — no activation call at all.
+    expect(fakeApi.post).not.toHaveBeenCalled();
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+    // The query is removed, so a refresh cannot repeat the message.
+    await waitFor(() => expect(replaceState).toHaveBeenCalled());
+    expect(replaceState.mock.calls.at(-1)?.[2]).toBe("/automation/mailboxes");
+    // No raw callback payload is ever rendered in the normal browser flow.
+    expect(screen.queryByText(/"outcome"|"mailbox_id"|access_token/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Disable delivery" }),
+    ).toBeInTheDocument();
+    replaceState.mockRestore();
+  });
+
+  it("oauth=error with a safe code strips the query and never enables anything", async () => {
+    const replaceState = withCallbackQuery("?oauth=error&code=OAUTH_PROVIDER_DENIED");
+    mount(RECONNECT_REQUIRED);
+    await waitFor(() => expect(mailboxGets).toBeGreaterThan(1));
+    expect(fakeApi.post).not.toHaveBeenCalled();
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+    await waitFor(() => expect(replaceState).toHaveBeenCalled());
+    expect(replaceState.mock.calls.at(-1)?.[2]).toBe("/automation/mailboxes");
+    // The reconnect action is still offered; the query changed nothing.
+    expect(
+      screen.getByRole("button", { name: "Reconnect delivery" }),
+    ).toBeInTheDocument();
+    replaceState.mockRestore();
+  });
+
+  it("ignores a crafted callback query and performs no refresh or mutation", async () => {
+    const replaceState = withCallbackQuery("?delivery_oauth=enabled&code=%3Cscript%3E");
+    mount(DISABLED_WITH_CREDENTIAL);
+    expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
+    // An unrecognized value is not an outcome: nothing is announced, refreshed
+    // or written, and the mailbox still offers the normal Enable action.
+    await waitFor(() => expect(mailboxGets).toBe(1));
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(fakeApi.post).not.toHaveBeenCalled();
+    expect(fakeApi.patch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Enable delivery" }),
+    ).toBeInTheDocument();
+    replaceState.mockRestore();
+  });
+
+  // ── Independence, redaction and roles ──────────────────────────────────────
+
+  it("never renders a token value, secret name or Vault path for delivery", async () => {
+    mount(ENABLED);
+    expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
+    expect(screen.queryByText(/AR_DELIVERY|AR_MAILBOX|vault|secrets\//i)).toBeNull();
+    expect(screen.queryByText(/ya29|refresh_token|access_token/i)).toBeNull();
+    // Only the safe configured/expiry facts are shown.
+    expect(screen.getAllByText(/Configured/).length).toBeGreaterThan(0);
+  });
+
+  it("keeps ingestion, Sync now and the bank-account control untouched by delivery state", async () => {
+    roles = ["Finance Manager", "AR Supervisor"];
+    mount(RECONNECT_REQUIRED);
+    // A delivery reconnect must not remove or degrade any ingestion affordance.
+    expect(
+      await screen.findByRole("button", { name: "Connect ingestion" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Disable ingestion" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sync now/ })).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Default receiving bank account"),
+    ).toBeInTheDocument();
+  });
+
+  it("hides every delivery control from a role without mailbox configuration rights", async () => {
+    roles = ["Auditor"];
+    mount(RECONNECT_REQUIRED);
+    expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
+    for (const name of ["Enable delivery", "Disable delivery", "Reconnect delivery"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    // Safe read-only status remains visible.
+    expect(screen.getByText("Delivery reconnect")).toBeInTheDocument();
+  });
+
+  it("exposes delivery controls to System Admin, matching existing mailbox configuration roles", async () => {
+    roles = ["System Admin"];
+    mount(DISABLED_WITH_CREDENTIAL);
+    expect(
+      await screen.findByRole("button", { name: "Enable delivery" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the delivery status region announced politely for assistive technology", async () => {
+    mount(ENABLED);
+    expect(await screen.findByText("ar@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    // The action control is a real, keyboard-reachable button.
+    const disable = screen.getByRole("button", { name: "Disable delivery" });
+    expect(disable.tagName).toBe("BUTTON");
+    expect(disable).not.toHaveAttribute("tabindex", "-1");
+  });
+});
+
 describe("Production PostgreSQL UUID identifiers render through page + hook paths", () => {
   // The real Production company identifier is a canonical PostgreSQL uuid whose
   // version/variant nibbles are 0. It is a valid uuid but was rejected by the
@@ -600,6 +1015,7 @@ describe("Production PostgreSQL UUID identifiers render through page + hook path
             last_successful_sync_at: null,
             last_failed_sync_at: null,
             reconnect_required: false,
+            delivery_reconnect_required: false,
             is_enabled: false,
             ingestion_enabled: false,
             delivery_enabled: false,

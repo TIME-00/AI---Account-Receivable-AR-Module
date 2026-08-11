@@ -788,6 +788,10 @@ export function mailboxDto(row: AutomationRow): AutomationRow {
       row.reconnect_required,
       "mailbox.reconnect_required",
     ),
+    delivery_reconnect_required: boolean(
+      row.delivery_reconnect_required,
+      "mailbox.delivery_reconnect_required",
+    ),
     is_enabled: boolean(row.is_enabled, "mailbox.is_enabled"),
     ingestion_enabled: boolean(
       row.ingestion_enabled,

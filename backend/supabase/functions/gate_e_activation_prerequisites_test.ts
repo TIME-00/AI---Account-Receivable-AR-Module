@@ -100,6 +100,8 @@ class FixtureVaultRpcClient {
 class CallbackDatabase {
   consumed = false;
   mailboxPatch: Record<string, unknown> | null = null;
+  finalized = false;
+  failFinalize = false;
 
   constructor(
     readonly stateRow: Record<string, unknown>,
@@ -161,8 +163,28 @@ class CallbackDatabase {
         }
         return Promise.resolve({ data: null, error: null });
       },
+      then: (resolve: (result: unknown) => unknown) => {
+        if (table === "automation_mailboxes" && operation === "update") {
+          this.mailboxPatch = structuredClone(patch);
+        }
+        return Promise.resolve({ data: null, error: null }).then(resolve);
+      },
     };
     return query;
+  }
+
+  rpc(name: string, parameters: Record<string, unknown>) {
+    assertEquals(name, "automation_oauth_delivery_finalize");
+    if (this.failFinalize) {
+      return Promise.resolve({ data: null, error: { message: "private" } });
+    }
+    this.finalized = true;
+    this.mailboxPatch = {
+      delivery_enabled: true,
+      delivery_reconnect_required: false,
+      delivery_token_expires_at: parameters.p_token_expires_at,
+    };
+    return Promise.resolve({ data: null, error: null });
   }
 }
 
@@ -231,6 +253,84 @@ class MailboxActivationDatabase {
   }
 }
 
+class DeliveryOnboardingDatabase {
+  readonly mailbox: Record<string, unknown>;
+  readonly states: Record<string, unknown>[] = [];
+  readonly mailboxUpdates: Record<string, unknown>[] = [];
+
+  constructor(mailbox: Record<string, unknown>) {
+    this.mailbox = structuredClone(mailbox);
+  }
+
+  from(table: string) {
+    let operation: "select" | "update" | "insert" = "select";
+    let value: Record<string, unknown> = {};
+    const filters: Record<string, unknown> = {};
+    const nullFilters = new Set<string>();
+    const execute = () => {
+      if (table === "automation_mailboxes") {
+        if (operation === "update") {
+          if (
+            nullFilters.has("delivery_secret_ref") &&
+            this.mailbox.delivery_secret_ref !== null
+          ) return { data: null, error: null };
+          this.mailboxUpdates.push(structuredClone(value));
+          Object.assign(this.mailbox, value);
+        }
+        return { data: structuredClone(this.mailbox), error: null };
+      }
+      if (table === "automation_oauth_states") {
+        if (operation === "insert") {
+          this.states.push({
+            id: crypto.randomUUID(),
+            ...structuredClone(value),
+          });
+          return { data: null, error: null };
+        }
+        if (operation === "update") {
+          for (const state of this.states) {
+            if (
+              Object.entries(filters).every(([key, expected]) =>
+                state[key] === expected
+              ) &&
+              [...nullFilters].every((key) => state[key] === null)
+            ) Object.assign(state, value);
+          }
+        }
+        return { data: null, error: null };
+      }
+      return { data: null, error: { message: "unexpected table" } };
+    };
+    const query = {
+      select: (_columns?: string) => query,
+      update: (patch: Record<string, unknown>) => {
+        operation = "update";
+        value = structuredClone(patch);
+        return query;
+      },
+      insert: (record: Record<string, unknown>) => {
+        operation = "insert";
+        value = structuredClone(record);
+        return query;
+      },
+      eq: (field: string, expected: unknown) => {
+        filters[field] = expected;
+        return query;
+      },
+      is: (field: string, expected: unknown) => {
+        if (expected === null) nullFilters.add(field);
+        return query;
+      },
+      in: (_field: string, _values: unknown[]) => query,
+      maybeSingle: () => Promise.resolve(execute()),
+      single: () => Promise.resolve(execute()),
+      then: (resolve: (result: unknown) => unknown) =>
+        Promise.resolve(execute()).then(resolve),
+    };
+    return query;
+  }
+}
+
 const activationAuth: AuthContext = {
   userId: "10000000-0000-4000-8000-000000000006",
   companyId: context.company_id,
@@ -256,6 +356,7 @@ function activationMailbox(overrides: Record<string, unknown> = {}) {
     last_successful_sync_at: null,
     last_failed_sync_at: null,
     reconnect_required: false,
+    delivery_reconnect_required: false,
     is_enabled: false,
     ingestion_enabled: false,
     delivery_enabled: false,
@@ -883,6 +984,185 @@ Deno.test("Gate E mailbox atomic ingestion disable never resolves or refreshes O
   assertEquals(database.updates.length, 1);
 });
 
+Deno.test("Post-Gate-E Enable delivery provisions an opaque reference and records server intent", async () => {
+  await withOAuthEnvironment(async () => {
+    const database = new DeliveryOnboardingDatabase(activationMailbox({
+      is_enabled: true,
+      ingestion_enabled: true,
+    }));
+    const service = new AutomationService({
+      client: database as never,
+      oauthSecretStore: failingOAuthStore("OAUTH_SECRET_UNAVAILABLE"),
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+    });
+    const result = await service.enableMailboxDelivery(
+      activationAuth,
+      context.mailbox_id,
+    );
+    assertEquals(result.outcome, "oauth_required");
+    assertEquals(result.intent, "enable_delivery");
+    assertEquals(result.capability, "delivery");
+    assertEquals(
+      database.mailbox.delivery_secret_ref,
+      "AR_DELIVERY_10000000000040008000000000000002",
+    );
+    assertEquals(database.states.length, 1);
+    assertEquals(database.states[0].company_id, context.company_id);
+    assertEquals(database.states[0].mailbox_id, context.mailbox_id);
+    assertEquals(database.states[0].created_by, activationAuth.userId);
+    assertEquals(database.states[0].oauth_intent, "enable_delivery");
+    assertEquals(database.mailbox.delivery_enabled, false);
+    assertEquals(database.mailbox.ingestion_enabled, true);
+    assertEquals(database.mailbox.incremental_cursor, null);
+  });
+});
+
+Deno.test("Post-Gate-E Enable delivery uses a current credential without OAuth", async () => {
+  const secretReference = "POST_GATE_E_DELIVERY_TOKEN";
+  const deliveryContext: OAuthSecretContext = {
+    ...context,
+    capability: "delivery",
+    secret_reference: secretReference,
+  };
+  const store = new FixtureOAuthSecretWriter();
+  await store.writeTokenSet(deliveryContext, {
+    ...tokens,
+    scope: ["https://www.googleapis.com/auth/gmail.send"],
+  });
+  const database = new DeliveryOnboardingDatabase(activationMailbox({
+    is_enabled: true,
+    ingestion_enabled: true,
+    delivery_secret_ref: secretReference,
+    delivery_token_expires_at: tokens.expires_at,
+  }));
+  const service = new AutomationService({
+    client: database as never,
+    oauthSecretStore: store,
+    now: () => new Date("2026-08-08T00:00:00.000Z"),
+  });
+  const result = await service.enableMailboxDelivery(
+    activationAuth,
+    context.mailbox_id,
+  );
+  assertEquals(result.outcome, "enabled");
+  assertEquals(
+    (result.mailbox as Record<string, unknown>).delivery_enabled,
+    true,
+  );
+  assertEquals(database.states.length, 0);
+  assertEquals(database.mailbox.ingestion_enabled, true);
+  assertEquals(database.mailbox.reconnect_required, false);
+});
+
+Deno.test("Post-Gate-E Delivery disable invalidates pending activation without deleting credentials", async () => {
+  const database = new DeliveryOnboardingDatabase(activationMailbox({
+    is_enabled: true,
+    ingestion_enabled: true,
+    delivery_enabled: true,
+    delivery_secret_ref: "POST_GATE_E_DELIVERY_TOKEN",
+    delivery_token_expires_at: tokens.expires_at,
+  }));
+  database.states.push({
+    id: crypto.randomUUID(),
+    company_id: context.company_id,
+    mailbox_id: context.mailbox_id,
+    provider_type: "gmail",
+    oauth_intent: "reconnect_delivery",
+    consumed_at: null,
+  });
+  let deletes = 0;
+  const service = new AutomationService({
+    client: database as never,
+    oauthSecretStore: {
+      writeTokenSet: () => Promise.resolve(),
+      resolveTokenSet: () => Promise.reject(new Error("not used")),
+      deleteTokenSet: () => {
+        deletes += 1;
+        return Promise.resolve();
+      },
+    },
+    now: () => new Date("2026-08-08T00:00:00.000Z"),
+  });
+  const result = await service.disableMailboxDelivery(
+    activationAuth,
+    context.mailbox_id,
+  );
+  assertEquals(result.delivery_enabled, false);
+  assertEquals(database.states[0].consumed_at, "2026-08-08T00:00:00.000Z");
+  assertEquals(
+    database.mailbox.delivery_secret_ref,
+    "POST_GATE_E_DELIVERY_TOKEN",
+  );
+  assertEquals(database.mailbox.ingestion_enabled, true);
+  assertEquals(deletes, 0);
+});
+
+Deno.test("Post-Gate-E Delivery actions remain configuration-role bound", async () => {
+  const service = new AutomationService({
+    client: new DeliveryOnboardingDatabase(activationMailbox()) as never,
+  });
+  const auditor: AuthContext = {
+    ...activationAuth,
+    roles: ["Auditor"],
+    highestRole: "Auditor",
+  };
+  await rejects(
+    () => service.enableMailboxDelivery(auditor, context.mailbox_id),
+    "Authorization",
+  );
+  await rejects(
+    () => service.disableMailboxDelivery(auditor, context.mailbox_id),
+    "Authorization",
+  );
+  await rejects(
+    () => service.reconnectMailboxDelivery(auditor, context.mailbox_id),
+    "Authorization",
+  );
+});
+
+Deno.test("Post-Gate-E revoked Delivery credential does not poison ingestion state or cursor", async () => {
+  await withOAuthEnvironment(async () => {
+    const deliveryContext: OAuthSecretContext = {
+      ...context,
+      capability: "delivery",
+      secret_reference: "POST_GATE_E_REVOKED_DELIVERY",
+    };
+    const store = new FixtureOAuthSecretWriter();
+    await store.writeTokenSet(deliveryContext, {
+      ...tokens,
+      expires_at: "2026-08-08T00:01:00.000Z",
+      scope: ["https://www.googleapis.com/auth/gmail.send"],
+    });
+    const database = new RuntimeMailboxDatabase();
+    const service = new AutomationService({
+      client: database as never,
+      oauthSecretStore: store,
+      secretResolver: new FixtureSecretResolver({
+        GMAIL_OAUTH_CLIENT_SECRET: "fixture-client-secret",
+      }),
+      oauthFetcher: () => Promise.resolve(new Response("{}", { status: 401 })),
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+    });
+    await rejects(
+      () =>
+        service.resolveOAuthAccessTokenForRuntime({
+          id: context.mailbox_id,
+          company_id: context.company_id,
+          provider_type: "gmail",
+          delivery_secret_ref: deliveryContext.secret_reference,
+          incremental_cursor: "preserved-history-id",
+        }, "delivery"),
+      "OAUTH_RECONNECT_REQUIRED",
+    );
+    assertEquals(database.updates.length, 1);
+    assertEquals(database.updates[0].delivery_enabled, false);
+    assertEquals(database.updates[0].delivery_reconnect_required, true);
+    assertEquals("reconnect_required" in database.updates[0], false);
+    assertEquals("connection_status" in database.updates[0], false);
+    assertEquals("incremental_cursor" in database.updates[0], false);
+  });
+});
+
 Deno.test("Gate E runtime refresh marks revoked authorization reconnect-required", async () => {
   await withOAuthEnvironment(async () => {
     const store = new FixtureOAuthSecretWriter();
@@ -1021,6 +1301,96 @@ Deno.test("Gate E service callback atomically claims state and persists only saf
     assertEquals(database.mailboxPatch?.connection_status, "connected");
     assert(!JSON.stringify(result).includes("fixture-access"));
     assert(!JSON.stringify(database.mailboxPatch).includes("fixture-access"));
+  });
+});
+
+Deno.test("Post-Gate-E Delivery callback atomically stores the token and enables from server intent", async () => {
+  await withOAuthEnvironment(async () => {
+    const database = oauthCallbackFixture({
+      requested_scopes: ["https://www.googleapis.com/auth/gmail.send"],
+      oauth_intent: "enable_delivery",
+    });
+    const fallbackStore = new FixtureOAuthSecretWriter();
+    const service = new AutomationService({
+      client: database as never,
+      oauthSecretStore: fallbackStore,
+      secretResolver: new FixtureSecretResolver({
+        GMAIL_OAUTH_CLIENT_SECRET: "fixture-client-secret",
+      }),
+      oauthFetcher: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: "fixture-delivery-access-token",
+              refresh_token: "fixture-delivery-refresh-token",
+              expires_in: 3600,
+              token_type: "Bearer",
+              scope: "https://www.googleapis.com/auth/gmail.send",
+            }),
+            { status: 200 },
+          ),
+        ),
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+    });
+    const result = await service.completeOAuth(
+      "gmail",
+      "l".repeat(64),
+      "fixture-authorization-code",
+    );
+    assertEquals(database.consumed, true);
+    assertEquals(database.finalized, true);
+    assertEquals(fallbackStore.writes.length, 0);
+    assertEquals(result.intent, "enable_delivery");
+    assertEquals(result.delivery_enabled, true);
+    assert(!JSON.stringify(result).includes("fixture-delivery-access-token"));
+  });
+});
+
+Deno.test("Post-Gate-E Delivery callback never enables when scope or atomic Vault finalization fails", async () => {
+  await withOAuthEnvironment(async () => {
+    for (const failure of ["scope", "vault"] as const) {
+      const database = oauthCallbackFixture({
+        requested_scopes: ["https://www.googleapis.com/auth/gmail.send"],
+        oauth_intent: "enable_delivery",
+      });
+      database.failFinalize = failure === "vault";
+      const service = new AutomationService({
+        client: database as never,
+        oauthSecretStore: new FixtureOAuthSecretWriter(),
+        secretResolver: new FixtureSecretResolver({
+          GMAIL_OAUTH_CLIENT_SECRET: "fixture-client-secret",
+        }),
+        oauthFetcher: () =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                access_token: "fixture-delivery-access-token",
+                refresh_token: "fixture-delivery-refresh-token",
+                expires_in: 3600,
+                token_type: "Bearer",
+                scope: failure === "scope"
+                  ? "https://www.googleapis.com/auth/gmail.readonly"
+                  : "https://www.googleapis.com/auth/gmail.send",
+              }),
+              { status: 200 },
+            ),
+          ),
+        now: () => new Date("2026-08-08T00:00:00.000Z"),
+      });
+      await rejects(
+        () =>
+          service.completeOAuth(
+            "gmail",
+            `${failure === "scope" ? "m" : "n"}`.repeat(64),
+            "fixture-authorization-code",
+          ),
+        failure === "scope"
+          ? "OAUTH_SCOPE_INSUFFICIENT"
+          : "OAUTH_DELIVERY_FINALIZE_FAILED",
+      );
+      assertEquals(database.finalized, false);
+      assertEquals(database.mailboxPatch, null);
+    }
   });
 });
 
@@ -1235,6 +1605,46 @@ Deno.test("Gate E provider callback is state-authorized and does not require a b
   assert(!JSON.stringify(body).includes("refresh_token"));
 });
 
+Deno.test("Post-Gate-E browser callback returns to Mailboxes with display-only safe outcome", async () => {
+  const previous = Deno.env.get("AUTOMATION_FRONTEND_ORIGIN");
+  Deno.env.set("AUTOMATION_FRONTEND_ORIGIN", "https://app.example.test");
+  try {
+    const query = new URLSearchParams({
+      code: "fixture-code",
+      state: "o".repeat(64),
+      iss: "https://accounts.google.com",
+    });
+    const response = await handleAutomationRequest(
+      new Request(
+        `https://example.test/automation/oauth/gmail/callback?${query}`,
+        { headers: { Accept: "text/html,application/xhtml+xml" } },
+      ),
+      {
+        authenticate: () => Promise.reject(new Error("not used")),
+        createService: () => ({
+          completeOAuth: () =>
+            Promise.resolve({
+              mailbox_id: context.mailbox_id,
+              provider: "gmail",
+              capability: "delivery",
+              intent: "enable_delivery",
+              delivery_enabled: true,
+            }),
+        } as unknown as AutomationService),
+      },
+    );
+    assertEquals(response.status, 303);
+    assertEquals(
+      response.headers.get("location"),
+      "https://app.example.test/automation/mailboxes?delivery_oauth=success",
+    );
+    assertEquals(response.headers.get("cache-control"), "no-store");
+  } finally {
+    if (previous === undefined) Deno.env.delete("AUTOMATION_FRONTEND_ORIGIN");
+    else Deno.env.set("AUTOMATION_FRONTEND_ORIGIN", previous);
+  }
+});
+
 Deno.test("Gate E Gmail callback validates issuer and hosted-domain metadata before exchange", async () => {
   const state = "j".repeat(64);
   const cases = [
@@ -1379,6 +1789,26 @@ Deno.test("Gate E provider denial consumes the state through the bounded rejecti
   assert(!JSON.stringify(body).includes("private"));
 });
 
+Deno.test("Post-Gate-E denied Delivery consent fails closed without changing ingestion health", async () => {
+  const database = oauthCallbackFixture({
+    requested_scopes: ["https://www.googleapis.com/auth/gmail.send"],
+    oauth_intent: "enable_delivery",
+  });
+  const service = new AutomationService({
+    client: database as never,
+    now: () => new Date("2026-08-08T00:00:00.000Z"),
+  });
+  await rejects(
+    () => service.rejectOAuth("gmail", "p".repeat(64)),
+    "OAUTH_PROVIDER_DENIED",
+  );
+  assertEquals(database.consumed, true);
+  assertEquals(database.mailboxPatch?.delivery_enabled, false);
+  assertEquals(database.mailboxPatch?.delivery_reconnect_required, true);
+  assertEquals("reconnect_required" in (database.mailboxPatch ?? {}), false);
+  assertEquals("connection_status" in (database.mailboxPatch ?? {}), false);
+});
+
 Deno.test("Gate E callback rejects missing or malformed code/state without exchange", async () => {
   let invoked = false;
   for (
@@ -1448,6 +1878,53 @@ Deno.test("Migration 035 installs only Vault boundaries and no scheduler or fina
   assert(sql.includes("TO service_role"));
   assert(!sql.includes("cron.schedule"));
   assert(!sql.match(/INSERT INTO public\.(invoices|receipts|allocations)/i));
+});
+
+Deno.test("Migration 042 binds Delivery activation to single-use server intent and atomic Vault persistence", async () => {
+  const [migration, smoke] = await Promise.all([
+    Deno.readTextFile(
+      new URL(
+        "../../../database/042_post_gate_e_mailbox_delivery_onboarding.sql",
+        import.meta.url,
+      ),
+    ),
+    Deno.readTextFile(
+      new URL(
+        "../../../database/042b_post_gate_e_mailbox_delivery_onboarding_smoke_tests.sql",
+        import.meta.url,
+      ),
+    ),
+  ]);
+  for (
+    const value of [
+      "oauth_intent",
+      "delivery_reconnect_required",
+      "automation_oauth_delivery_finalize",
+      "vault.create_secret",
+      "vault.update_secret",
+      "ARRAY['Finance Manager', 'System Admin']",
+      "state.company_id = p_company_id",
+      "state.mailbox_id = p_mailbox_id",
+      "state.created_by = p_actor_user_id",
+      "state.oauth_intent = p_oauth_intent",
+      "v_state.completed_at IS NOT NULL",
+      "delivery_enabled = true",
+      "completed_at = pg_catalog.clock_timestamp()",
+    ]
+  ) assert(migration.includes(value), value);
+  assert(migration.includes("SECURITY DEFINER"));
+  assert(migration.includes("SET search_path = ''"));
+  assert(migration.includes("TO service_role"));
+  assert(migration.includes("FROM PUBLIC, anon, authenticated"));
+  assert(
+    !migration.match(/INSERT INTO public\.(invoices|receipts|allocations)/i),
+  );
+  assert(!migration.includes("incremental_cursor ="));
+  assert(!migration.includes("ingestion_secret_ref ="));
+  assert(smoke.trimStart().startsWith("-- ROLLBACK-ONLY"));
+  assert(smoke.includes("BEGIN;"));
+  assert(smoke.trimEnd().endsWith("ROLLBACK;"));
+  assert(!smoke.includes("COMMIT;"));
 });
 
 Deno.test("Gate E OpenAI document intelligence remains disabled until server configuration is valid", async () => {

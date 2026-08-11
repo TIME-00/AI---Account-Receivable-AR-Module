@@ -257,6 +257,21 @@ export const ASSIGNMENT_SOURCES = [
 /** Backend-normalized audit actor types (dto.ts collapses worker/fixture). */
 export const AUDIT_ACTOR_TYPES = ["user", "system", "provider"] as const;
 export const OAUTH_CAPABILITIES = ["ingestion", "delivery"] as const;
+/**
+ * Server-authored OAuth intents (post-Gate-E Migration 042). The browser never
+ * chooses one: `/oauth/start` and the governed Delivery actions echo back the
+ * intent the backend recorded on the single-use state row.
+ */
+export const OAUTH_INTENTS = [
+  "connect_capability",
+  "enable_delivery",
+  "reconnect_delivery",
+] as const;
+/** The two intents that the governed Delivery endpoints may return. */
+export const DELIVERY_OAUTH_INTENTS = [
+  "enable_delivery",
+  "reconnect_delivery",
+] as const;
 
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export type OperatingMode = (typeof OPERATING_MODES)[number];
@@ -276,6 +291,8 @@ export type ReminderAttemptStatus = (typeof REMINDER_ATTEMPT_STATUSES)[number];
 export type AssignmentSource = (typeof ASSIGNMENT_SOURCES)[number];
 export type AuditActorType = (typeof AUDIT_ACTOR_TYPES)[number];
 export type OAuthCapability = (typeof OAUTH_CAPABILITIES)[number];
+export type OAuthIntent = (typeof OAUTH_INTENTS)[number];
+export type DeliveryOAuthIntent = (typeof DELIVERY_OAUTH_INTENTS)[number];
 
 const providerType = z.enum(PROVIDER_TYPES);
 const operatingMode = z.enum(OPERATING_MODES);
@@ -577,6 +594,9 @@ export const mailboxSchema = z.object({
   last_successful_sync_at: isoTimestamp.nullable(),
   last_failed_sync_at: isoTimestamp.nullable(),
   reconnect_required: z.boolean(),
+  // Delivery reconnect health is tracked independently of ingestion health, so
+  // a revoked send credential never implies the mailbox stopped ingesting.
+  delivery_reconnect_required: z.boolean(),
   is_enabled: z.boolean(),
   ingestion_enabled: z.boolean(),
   delivery_enabled: z.boolean(),
@@ -899,8 +919,34 @@ export const oauthStartSchema = z.object({
   authorization_url: z.string().url(),
   expires_at: isoTimestamp,
   capability: z.enum(OAUTH_CAPABILITIES),
+  // Recorded by the backend on the single-use state row; display/telemetry only.
+  intent: z.enum(OAUTH_INTENTS),
 }).strict();
 export type OAuthStart = z.infer<typeof oauthStartSchema>;
+
+/**
+ * Strict result of the governed Delivery actions
+ * (`POST /mailboxes/:id/delivery/enable|reconnect`).
+ *
+ * The server — never the browser — decides whether an existing valid credential
+ * can be enabled directly (`enabled`) or fresh provider consent is required
+ * (`oauth_required`). Any other shape fails closed at this boundary.
+ */
+export const deliveryActionResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("enabled"),
+    mailbox: mailboxSchema,
+  }).strict(),
+  z.object({
+    outcome: z.literal("oauth_required"),
+    provider: providerType,
+    authorization_url: z.string().url(),
+    expires_at: isoTimestamp,
+    capability: z.literal("delivery"),
+    intent: z.enum(DELIVERY_OAUTH_INTENTS),
+  }).strict(),
+]);
+export type DeliveryActionResult = z.infer<typeof deliveryActionResultSchema>;
 
 export const assignmentResultSchema = z.object({
   changed: z.boolean(),

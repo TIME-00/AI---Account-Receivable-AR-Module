@@ -20,6 +20,7 @@ import {
   AUTOMATION_CONTRACT_VERSION,
   automationSuccess,
   parsePage,
+  safeErrorCode,
 } from "./contract.ts";
 import { AutomationService } from "./service.ts";
 import {
@@ -42,6 +43,42 @@ const COLLECTIONS: Record<string, string> = {
 
 const GOOGLE_OAUTH_CALLBACK_ISSUER = "https://accounts.google.com";
 const GOOGLE_HOSTED_DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+
+function oauthBrowserReturn(
+  req: Request,
+  outcome: "success" | "error",
+  code?: string,
+  capability?: "ingestion" | "delivery",
+): Response | null {
+  if (!req.headers.get("accept")?.toLowerCase().includes("text/html")) {
+    return null;
+  }
+  const configured = Deno.env.get("AUTOMATION_FRONTEND_ORIGIN");
+  if (!configured) return null;
+  let origin: URL;
+  try {
+    origin = new URL(configured);
+  } catch {
+    return null;
+  }
+  if (
+    origin.protocol !== "https:" || origin.origin !== configured ||
+    origin.username || origin.password || origin.pathname !== "/" ||
+    origin.search || origin.hash
+  ) return null;
+  const target = new URL("/automation/mailboxes", origin);
+  target.searchParams.set(
+    capability === "delivery" ? "delivery_oauth" : "oauth",
+    outcome,
+  );
+  if (outcome === "error") {
+    target.searchParams.set("code", safeErrorCode(code));
+  }
+  return new Response(null, {
+    status: 303,
+    headers: { Location: target.toString(), "Cache-Control": "no-store" },
+  });
+}
 
 function isGoogleHostedDomain(value: string): boolean {
   if (value.length === 0 || value.length > 253) return false;
@@ -251,6 +288,18 @@ const ROUTES: Route[] = [
     pattern: /^\/mailboxes\/([0-9a-f-]{36})\/oauth\/disconnect\/?$/i,
   },
   {
+    name: "delivery-enable",
+    pattern: /^\/mailboxes\/([0-9a-f-]{36})\/delivery\/enable\/?$/i,
+  },
+  {
+    name: "delivery-disable",
+    pattern: /^\/mailboxes\/([0-9a-f-]{36})\/delivery\/disable\/?$/i,
+  },
+  {
+    name: "delivery-reconnect",
+    pattern: /^\/mailboxes\/([0-9a-f-]{36})\/delivery\/reconnect\/?$/i,
+  },
+  {
     name: "oauth-callback",
     pattern: /^\/oauth\/(gmail|microsoft)\/callback\/?$/,
   },
@@ -427,13 +476,28 @@ export async function handleAutomationRequest(
         throw new ValidationError("OAuth callback is invalid.");
       }
       const service = dependencies.createService();
-      if (providerError !== null) {
-        await service.rejectOAuth(provider, state);
+      try {
+        if (providerError !== null) {
+          await service.rejectOAuth(provider, state);
+        }
+        if (!code) throw new ValidationError("OAuth callback is invalid.");
+        const result = await service.completeOAuth(provider, state, code);
+        return oauthBrowserReturn(
+          req,
+          "success",
+          undefined,
+          result.capability === "delivery" ? "delivery" : "ingestion",
+        ) ??
+          jsonResponse(automationSuccess(result));
+      } catch (callbackError) {
+        const code = callbackError && typeof callbackError === "object" &&
+            "code" in callbackError
+          ? String(callbackError.code)
+          : "OAUTH_CALLBACK_FAILED";
+        const redirect = oauthBrowserReturn(req, "error", code);
+        if (redirect) return redirect;
+        throw callbackError;
       }
-      if (!code) throw new ValidationError("OAuth callback is invalid.");
-      return jsonResponse(automationSuccess(
-        await service.completeOAuth(provider, state, code),
-      ));
     }
     const companyId = extractCompanyId(req);
     const auth = await dependencies.authenticate(req, companyId);
@@ -606,6 +670,24 @@ export async function handleAutomationRequest(
           route.params.id,
           request.capability,
         ),
+      ));
+    }
+    if (route.name === "delivery-enable" && req.method === "POST") {
+      assertExactKeys(await body(req), []);
+      return jsonResponse(automationSuccess(
+        await service.enableMailboxDelivery(auth, route.params.id),
+      ));
+    }
+    if (route.name === "delivery-disable" && req.method === "POST") {
+      assertExactKeys(await body(req), []);
+      return jsonResponse(automationSuccess(
+        await service.disableMailboxDelivery(auth, route.params.id),
+      ));
+    }
+    if (route.name === "delivery-reconnect" && req.method === "POST") {
+      assertExactKeys(await body(req), []);
+      return jsonResponse(automationSuccess(
+        await service.reconnectMailboxDelivery(auth, route.params.id),
       ));
     }
     if (route.name === "document-process" && req.method === "POST") {

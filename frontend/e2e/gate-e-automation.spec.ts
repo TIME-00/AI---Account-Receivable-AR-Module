@@ -51,6 +51,8 @@ const REP = "10000000-0000-4000-8000-000000000002";
 const CUST = "10000000-0000-4000-8000-000000000005";
 const MB_GMAIL = "10000000-0000-4000-8000-000000000006";
 const MB_MS = "10000000-0000-4000-8000-000000000026";
+/** Third mailbox: Delivery already enabled and healthy (post-Gate-E state). */
+const MB_DELIVERY = "10000000-0000-4000-8000-000000000046";
 const RUN = "10000000-0000-4000-8000-000000000007";
 const ATT_INV = "10000000-0000-4000-8000-000000000091";
 const ATT_RCP = "10000000-0000-4000-8000-000000000092";
@@ -184,6 +186,7 @@ function mailbox(
     last_successful_sync_at: null,
     last_failed_sync_at: null,
     reconnect_required: false,
+    delivery_reconnect_required: false,
     is_enabled: false,
     ingestion_enabled: false,
     delivery_enabled: false,
@@ -211,7 +214,22 @@ const MAILBOXES = [
     cursor_kind: "delta_link",
     last_failed_sync_at: "2026-07-29T00:00:00Z",
     reconnect_required: true,
+    // Delivery send authority was revoked independently of ingestion health.
+    delivery_secret_configured: true,
+    delivery_reconnect_required: true,
     redacted_error_code: "AUTH_REVOKED",
+  }),
+  // Delivery already enabled and healthy: the steady post-Gate-E state, where
+  // the ONLY delivery control offered is "Disable delivery".
+  mailbox(MB_DELIVERY, "gmail", "ar-delivery@example.com", {
+    connection_status: "connected",
+    ingestion_secret_configured: true,
+    ingestion_token_expires_at: "2026-09-01T00:00:00Z",
+    delivery_secret_configured: true,
+    delivery_token_expires_at: "2026-09-01T00:00:00Z",
+    is_enabled: true,
+    ingestion_enabled: true,
+    delivery_enabled: true,
   }),
 ];
 
@@ -529,7 +547,16 @@ const OAUTH_START_INVALID = {
   authorization_url: "https://evil.example.test/o/oauth2/v2/auth?client_id=x",
   expires_at: "2026-07-30T00:10:00Z",
   capability: "ingestion",
+  intent: "connect_capability",
 };
+
+/**
+ * An ALLOWLISTED Google consent URL. The deterministic provider-origin guard
+ * aborts any request to it, so the delivery flow proves it attempted exactly
+ * this navigation without ever contacting a real provider.
+ */
+const DELIVERY_AUTHORIZATION_URL =
+  "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&scope=gmail.send";
 
 const INVOICE = {
   id: INV,
@@ -635,6 +662,8 @@ interface Recorder {
   allocateBodies: string[];
   settingsPatches: unknown[];
   mailboxPatches: Array<{ id: string; body: unknown }>;
+  /** Governed Delivery actions: endpoint identity + exact request body. */
+  deliveryActions: Array<{ id: string; action: string; body: unknown }>;
   repPatches: Array<{ id: string; body: unknown }>;
   oauthStarts: number;
   exceptionResolveCalls: number;
@@ -671,6 +700,7 @@ async function boot(page: Page, role: RoleName): Promise<Recorder> {
     allocateBodies: [],
     settingsPatches: [],
     mailboxPatches: [],
+    deliveryActions: [],
     repPatches: [],
     oauthStarts: 0,
     exceptionResolveCalls: 0,
@@ -751,9 +781,12 @@ async function boot(page: Page, role: RoleName): Promise<Recorder> {
   page.on("popup", (popup) => rec.externalNavigations.push(popup.url()));
 
   // Belt-and-suspenders: a mocked-OAuth regression can never actually reach a
-  // real provider. Abort any request to an OAuth provider origin.
+  // real provider. Abort any request to an OAuth provider origin with an
+  // explicit ERR_ABORTED so a current-tab Delivery consent navigation is
+  // classified as the deterministic OAuth abort (not an unexpected failure),
+  // exactly like the popup-based ingestion consent flow.
   await page.route(/accounts\.google\.com|login\.microsoftonline\.com/, (r) =>
-    r.abort(),
+    r.abort("aborted"),
   );
 
   await installSyntheticLocalSession(page);
@@ -844,6 +877,36 @@ async function boot(page: Page, role: RoleName): Promise<Recorder> {
     if (/\/automation\/mailboxes\/[^/]+\/oauth\/start$/.test(path) && method === "POST") {
       rec.oauthStarts += 1;
       return send(OAUTH_START_INVALID);
+    }
+    // Governed one-action Delivery onboarding. The SERVER decides the outcome:
+    // a mailbox with a current credential is enabled directly, anything else
+    // returns a consent start. The browser never PATCHes `delivery_enabled`.
+    const delivery = path.match(
+      /\/automation\/mailboxes\/([^/]+)\/delivery\/(enable|disable|reconnect)$/,
+    );
+    if (delivery && method === "POST") {
+      const [, id, action] = delivery;
+      rec.deliveryActions.push({ id, action, body: request.postDataJSON() });
+      if (action === "disable") {
+        return send(
+          mailbox(id, "gmail", "ar-delivery@example.com", {
+            connection_status: "connected",
+            delivery_secret_configured: true,
+            delivery_token_expires_at: "2026-09-01T00:00:00Z",
+            is_enabled: true,
+            ingestion_enabled: true,
+            delivery_enabled: false,
+          }),
+        );
+      }
+      return send({
+        outcome: "oauth_required",
+        provider: "gmail",
+        authorization_url: DELIVERY_AUTHORIZATION_URL,
+        expires_at: "2026-07-30T00:10:00Z",
+        capability: "delivery",
+        intent: action === "reconnect" ? "reconnect_delivery" : "enable_delivery",
+      });
     }
     if (/\/automation\/mailboxes\/[^/]+$/.test(path) && method === "PATCH") {
       const id = path.split("/").pop() ?? "";
@@ -1239,6 +1302,133 @@ test.describe("Gate E automation (desktop + mobile)", () => {
     await page.getByRole("button", { name: "Connect ingestion" }).first().click();
     await expect(page.getByText(/unrecognized provider|refused/i)).toBeVisible();
     expect(rec.oauthStarts).toBeGreaterThan(0);
+    expectClean(rec);
+  });
+
+  // ── Post-Gate-E: governed one-action Delivery onboarding ────────────────────
+
+  test("Mailboxes: exactly one Delivery control per mailbox state; no Connect delivery anywhere", async ({
+    page,
+  }) => {
+    const rec = await bootAndTrack(page, "Finance Manager");
+    await page.goto("/automation/mailboxes", { waitUntil: "domcontentloaded" });
+    await expect(page.getByText("ar-delivery@example.com")).toBeVisible();
+
+    // The separate "Connect delivery" step no longer exists on ANY card.
+    // Exact match: a substring match would falsely hit "Reconnect delivery".
+    await expect(
+      page.getByRole("button", { name: "Connect delivery", exact: true }),
+    ).toHaveCount(0);
+    // Ingestion connect is untouched — one per mailbox card.
+    await expect(page.getByRole("button", { name: "Connect ingestion" })).toHaveCount(3);
+
+    // Disabled + no credential → Enable. Reconnect required → Reconnect.
+    // Enabled + healthy → Disable, and never an Enable/Connect control.
+    await expect(page.getByRole("button", { name: "Enable delivery" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Reconnect delivery" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Disable delivery" })).toHaveCount(1);
+
+    // Delivery reconnect health is reported independently of ingestion health.
+    await expect(page.getByText("Delivery reconnect").first()).toBeVisible();
+    await expect(page.getByText("Ingestion reconnect").first()).toBeVisible();
+    // Vault names / token material are never rendered for delivery either.
+    await expect(page.getByText(/AR_DELIVERY|vault|access_token|refresh_token/i))
+      .toHaveCount(0);
+    expectClean(rec);
+  });
+
+  test("Mailboxes: Disable delivery posts the governed endpoint with an exact {} body", async ({
+    page,
+  }) => {
+    const rec = await bootAndTrack(page, "Finance Manager");
+    await page.goto("/automation/mailboxes", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Disable delivery" }).click();
+
+    await expect.poll(() => rec.deliveryActions.length).toBe(1);
+    expect(rec.deliveryActions[0]).toEqual({
+      id: MB_DELIVERY,
+      action: "disable",
+      body: {},
+    });
+    // Delivery never rides on a mailbox PATCH, and never touches ingestion.
+    expect(rec.mailboxPatches).toEqual([]);
+    expectClean(rec);
+  });
+
+  test("Mailboxes: Enable delivery navigates only to the validated provider URL", async ({
+    page,
+  }) => {
+    const rec = await bootAndTrack(page, "Finance Manager");
+    await page.goto("/automation/mailboxes", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Enable delivery" }).click();
+
+    await expect.poll(() => rec.deliveryActions.length).toBe(1);
+    expect(rec.deliveryActions[0]).toEqual({
+      id: MB_GMAIL,
+      action: "enable",
+      body: {},
+    });
+    // The consent navigation is attempted in THIS tab (never a popup) and is
+    // deterministically aborted by the provider-origin guard, so no real
+    // provider is contacted.
+    await expect
+      .poll(() =>
+        rec.expectedAborts.some((entry) => entry.includes("accounts.google.com"))
+      )
+      .toBe(true);
+    expect(rec.mailboxPatches).toEqual([]);
+    expectClean(rec);
+  });
+
+  test("Mailboxes: the callback query is display-only — it enables nothing and does not survive a refresh", async ({
+    page,
+  }) => {
+    const rec = await bootAndTrack(page, "Finance Manager");
+    await page.goto("/automation/mailboxes?delivery_oauth=success", {
+      waitUntil: "domcontentloaded",
+    });
+
+    await expect(page.getByText("Delivery enabled successfully.")).toBeVisible();
+    // Presentation only: no activation call is made from the query, ever.
+    expect(rec.deliveryActions).toEqual([]);
+    expect(rec.mailboxPatches).toEqual([]);
+    // Raw callback JSON never reaches the browser in the normal flow.
+    await expect(page.getByText(/"mailbox_id"|"granted_scopes"|"token_expires_at"/))
+      .toHaveCount(0);
+    // The query is stripped, so reloading cannot repeat the message.
+    await expect.poll(() => new URL(page.url()).search).toBe("");
+    expectClean(rec);
+  });
+
+  test("Mailboxes: a callback failure code shows a safe message and changes nothing", async ({
+    page,
+  }) => {
+    const rec = await bootAndTrack(page, "Finance Manager");
+    await page.goto("/automation/mailboxes?oauth=error&code=OAUTH_PROVIDER_DENIED", {
+      waitUntil: "domcontentloaded",
+    });
+
+    await expect(page.getByText(/authorization was cancelled/i)).toBeVisible();
+    expect(rec.deliveryActions).toEqual([]);
+    expect(rec.mailboxPatches).toEqual([]);
+    await expect.poll(() => new URL(page.url()).search).toBe("");
+    // The reconnect affordance is still offered — nothing was activated.
+    await expect(page.getByRole("button", { name: "Reconnect delivery" })).toHaveCount(1);
+    expectClean(rec);
+  });
+
+  test("Mailboxes: delivery controls are hidden from a role without configuration rights", async ({
+    page,
+  }) => {
+    const rec = await bootAndTrack(page, "Auditor");
+    await page.goto("/automation/mailboxes", { waitUntil: "domcontentloaded" });
+    await expect(page.getByText("ar-delivery@example.com")).toBeVisible();
+
+    for (const name of ["Enable delivery", "Disable delivery", "Reconnect delivery"]) {
+      await expect(page.getByRole("button", { name })).toHaveCount(0);
+    }
+    // Safe read-only readiness facts remain visible.
+    await expect(page.getByText("Delivery reconnect").first()).toBeVisible();
     expectClean(rec);
   });
 

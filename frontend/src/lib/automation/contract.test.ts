@@ -9,6 +9,7 @@ import {
   auditEventSchema,
   collectionMetaSchema,
   commandSchema,
+  deliveryActionResultSchema,
   documentDecisionSchema,
   errorEnvelopeSchema,
   exceptionSchema,
@@ -17,6 +18,7 @@ import {
   GATE_E_CONTRACT_VERSION,
   GateEContractError,
   mailboxSchema,
+  oauthStartSchema,
   overviewSchema,
   parseGateEData,
   recoveryContextSchema,
@@ -264,6 +266,7 @@ describe("mailbox contract never surfaces secret names or tokens", () => {
     last_successful_sync_at: null,
     last_failed_sync_at: null,
     reconnect_required: false,
+    delivery_reconnect_required: false,
     is_enabled: false,
     ingestion_enabled: false,
     delivery_enabled: false,
@@ -292,6 +295,136 @@ describe("mailbox contract never surfaces secret names or tokens", () => {
 
   it("rejects an unknown provider type", () => {
     expect(mailboxSchema.safeParse({ ...mailbox, provider_type: "yahoo" }).success).toBe(false);
+  });
+
+  it("REQUIRES the independent delivery reconnect flag", () => {
+    const { delivery_reconnect_required: _omitted, ...withoutFlag } = mailbox;
+    expect(mailboxSchema.safeParse(withoutFlag).success).toBe(false);
+    expect(
+      mailboxSchema.safeParse({ ...mailbox, delivery_reconnect_required: "no" })
+        .success,
+    ).toBe(false);
+    const parsed = parseGateEData(mailboxSchema, {
+      ...mailbox,
+      reconnect_required: false,
+      delivery_reconnect_required: true,
+    });
+    // Delivery health is carried separately from ingestion health.
+    expect(parsed.delivery_reconnect_required).toBe(true);
+    expect(parsed.reconnect_required).toBe(false);
+  });
+});
+
+describe("governed Delivery action contract (post-Gate-E)", () => {
+  const mailbox = {
+    id: UUID,
+    company_id: UUID,
+    provider_type: "gmail",
+    mailbox_address: "ar@example.com",
+    default_bank_account_id: null,
+    connection_status: "connected",
+    ingestion_secret_configured: true,
+    delivery_secret_configured: true,
+    ingestion_token_expires_at: TS,
+    delivery_token_expires_at: TS,
+    cursor_kind: null,
+    cursor_present: false,
+    last_successful_sync_at: null,
+    last_failed_sync_at: null,
+    reconnect_required: false,
+    delivery_reconnect_required: false,
+    is_enabled: true,
+    ingestion_enabled: true,
+    delivery_enabled: true,
+    redacted_error_code: null,
+    created_at: TS,
+    updated_at: TS,
+  };
+
+  const oauthRequired = {
+    outcome: "oauth_required",
+    provider: "gmail",
+    authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=x",
+    expires_at: TS,
+    capability: "delivery",
+    intent: "enable_delivery",
+  };
+
+  it("parses the enabled branch with a full strict mailbox", () => {
+    const parsed = parseGateEData(deliveryActionResultSchema, {
+      outcome: "enabled",
+      mailbox,
+    });
+    expect(parsed.outcome).toBe("enabled");
+    if (parsed.outcome === "enabled") {
+      expect(parsed.mailbox.delivery_enabled).toBe(true);
+    }
+  });
+
+  it("parses both delivery oauth intents on the oauth_required branch", () => {
+    for (const intent of ["enable_delivery", "reconnect_delivery"]) {
+      const parsed = parseGateEData(deliveryActionResultSchema, {
+        ...oauthRequired,
+        intent,
+      });
+      expect(parsed.outcome).toBe("oauth_required");
+      if (parsed.outcome === "oauth_required") {
+        expect(parsed.intent).toBe(intent);
+        expect(parsed.capability).toBe("delivery");
+      }
+    }
+  });
+
+  it("REJECTS an enabled branch whose mailbox is partial or leaks a credential", () => {
+    expect(
+      deliveryActionResultSchema.safeParse({ outcome: "enabled", delivery_enabled: true })
+        .success,
+    ).toBe(false);
+    expect(
+      deliveryActionResultSchema.safeParse({
+        outcome: "enabled",
+        mailbox: { ...mailbox, delivery_secret_ref: "AR_DELIVERY_1" },
+      }).success,
+    ).toBe(false);
+    expect(
+      deliveryActionResultSchema.safeParse({
+        outcome: "enabled",
+        mailbox,
+        access_token: "ya29.SECRET",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("REJECTS a consent start that is not an exact delivery capability/intent", () => {
+    for (
+      const drift of [
+        { capability: "ingestion" },
+        { intent: "connect_capability" },
+        { intent: "enable_ingestion" },
+        { outcome: "ok" },
+        { authorization_url: "not-a-url" },
+      ]
+    ) {
+      expect(
+        deliveryActionResultSchema.safeParse({ ...oauthRequired, ...drift }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("REQUIRES the server-authored intent on every OAuth start", () => {
+    const start = {
+      provider: "gmail",
+      authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=x",
+      expires_at: TS,
+      capability: "ingestion",
+    };
+    expect(oauthStartSchema.safeParse(start).success).toBe(false);
+    expect(
+      oauthStartSchema.safeParse({ ...start, intent: "connect_capability" }).success,
+    ).toBe(true);
+    expect(oauthStartSchema.safeParse({ ...start, intent: "whatever" }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -814,6 +947,7 @@ describe("canonical PostgreSQL UUID identifier contract (mirrors backend)", () =
     last_successful_sync_at: null,
     last_failed_sync_at: null,
     reconnect_required: false,
+    delivery_reconnect_required: false,
     is_enabled: false,
     ingestion_enabled: false,
     delivery_enabled: false,

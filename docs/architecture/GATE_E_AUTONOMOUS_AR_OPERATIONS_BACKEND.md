@@ -268,8 +268,10 @@ Provisioning dependencies:
 - secret reference `GMAIL_OAUTH_CLIENT_SECRET`
 - `GMAIL_OAUTH_REDIRECT_URI`, exactly the Gmail callback path
 - runtime `SUPABASE_URL`; the redirect origin must match it exactly
+- fixed HTTPS `AUTOMATION_FRONTEND_ORIGIN` for browser callback return
 - deployed Migration 035 Vault RPCs
-- per-mailbox ingestion and delivery token secret-reference names
+- a per-mailbox ingestion token reference; Delivery setup provisions its own
+  collision-safe opaque reference when absent
 
 The Production Gmail value must be exactly
 `https://kusseuycqgdilychphpq.supabase.co/functions/v1/automation/oauth/gmail/callback`.
@@ -316,6 +318,17 @@ the Vault bundle, and updates only safe expiry metadata. A revoked credential
 sets reconnect-required; a transient provider/Vault outage does not expose or
 erase token material. Disconnect deletes the Vault value before disabling and
 clearing expiry metadata.
+
+Post-Gate-E Delivery onboarding adds a server-authored OAuth intent. The single
+`Enable delivery` business action resolves an existing valid token directly or
+starts consent with `enable_delivery`; `Reconnect delivery` uses the distinct
+`reconnect_delivery` intent. Both remain actor-, company-, mailbox-, provider-,
+capability-, scope-, expiry-, and single-use-bound. After token exchange, the
+service-only Migration 042 finalizer atomically writes the versioned Vault
+bundle and enables Delivery. The browser callback redirects only to the fixed
+Mailboxes page. Delivery reconnect health is separate from ingestion reconnect
+health, so a revoked send credential fails Reminder Delivery closed without
+resetting Gmail history or disabling mailbox ingestion.
 
 Microsoft consent requests `offline_access`, while the returned access-token
 scope is checked independently for `Mail.Read` or `Mail.Send`. Initial
