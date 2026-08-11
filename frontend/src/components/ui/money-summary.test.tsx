@@ -75,7 +75,7 @@ describe("MoneySummary", () => {
         "Company-base total excludes 2 documents without verified booked FX.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Base not available")).toBeInTheDocument();
+    expect(screen.getByText("Base amount unavailable")).toBeInTheDocument();
   });
 
   it("renders all-unavailable and empty v2 summaries with distinct semantics", () => {

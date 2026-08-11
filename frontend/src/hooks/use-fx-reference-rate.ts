@@ -194,7 +194,17 @@ export function useFxReferenceRate({
   }
 
   const data = query.data;
-  if (!isFxLookupFound(data)) {
+  // Fail closed on a forward-dated reference. The backend already selects the
+  // latest Active rate with effective_date <= transaction_date, so this is
+  // defence in depth: a rate that becomes effective AFTER the transaction date
+  // is never bookable authority for that date and must not be offered as one.
+  const forwardDated =
+    isFxLookupFound(data) &&
+    date !== null &&
+    typeof data.actual_effective_date === "string" &&
+    data.actual_effective_date > date;
+
+  if (!isFxLookupFound(data) || forwardDated) {
     return {
       mode: "missing",
       referenceRateId: null,

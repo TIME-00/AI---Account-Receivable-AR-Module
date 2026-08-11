@@ -495,9 +495,10 @@ describe("exception reason codes + normalized lifecycle fields", () => {
     updated_at: TS,
   };
 
-  it("exposes exactly the 28 frozen reason codes", () => {
-    expect(EXCEPTION_REASON_CODES).toHaveLength(28);
+  it("exposes exactly the 29 bounded reason codes", () => {
+    expect(EXCEPTION_REASON_CODES).toHaveLength(29);
     expect(EXCEPTION_REASON_CODES).toContain("missing_salesman");
+    expect(EXCEPTION_REASON_CODES).toContain("fx_reference_unavailable");
   });
 
   it("accepts an exception and its lifecycle timestamps", () => {

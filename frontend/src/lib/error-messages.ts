@@ -3,6 +3,8 @@
 // Maps backend business rule error codes to human-friendly English messages
 // ============================================================================
 
+import { SUPPORTED_TRANSACTION_CURRENCIES } from "@/lib/currency";
+
 export const BR_ERROR_MAP: Record<string, string> = {
   // ── Customer (Part 1) ──
   "BR-CUS-001": "Customer is Inactive. New invoices or sales orders are not permitted.",
@@ -45,6 +47,15 @@ export const BR_ERROR_MAP: Record<string, string> = {
 
   // ── Journal Entry (Part 5) ──
   "BR-JE-007": "Fiscal period is not open. Cannot post. Please contact Finance Manager to open the period.",
+
+  // ── Currency & FX (Post-Gate-E) ──
+  // Codes are read from the currency-policy module so this message can never
+  // disagree with the allow-list the selectors and the backend enforce.
+  "UNSUPPORTED_TRANSACTION_CURRENCY":
+    `New AR documents can only be created in ${SUPPORTED_TRANSACTION_CURRENCIES.join(" or ")}. ` +
+    "Existing records in other currencies remain viewable and reportable.",
+  "FX_REFERENCE_UNAVAILABLE":
+    "An authoritative reference exchange rate is not available for this transaction date. Try a different date, or use a governed manual override if permitted.",
 
   // ── Generic ──
   "VALIDATION_ERROR": "Request validation failed. Please check your input.",

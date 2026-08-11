@@ -24,6 +24,7 @@ import { ReviewActions } from "@/components/features/imports/review-actions";
 import { OcrImportFlow } from "@/components/features/imports/ocr-import-flow";
 import { ImportGovernanceCell } from "@/components/features/imports/import-governance-cell";
 import { cn, formatDate } from "@/lib/utils";
+import { SUPPORTED_TRANSACTION_CURRENCIES } from "@/lib/currency";
 import {
   Upload, FileText, ChevronRight, CheckCircle2,
   XCircle, AlertTriangle, Loader2, ArrowLeft, RotateCcw,
@@ -49,7 +50,17 @@ const CSV_COLUMNS = [
   { name: "contact_phone", required: false, description: "Required when creating a new customer." },
   { name: "contact_email", required: false, description: "Required when creating a new customer." },
   { name: "invoice_date", required: true, description: "Date format: YYYY-MM-DD" },
-  { name: "currency", required: false, description: "3-letter ISO code (default: MYR)" },
+  {
+    name: "currency",
+    required: false,
+    // The default is documented verbatim because imports/service.ts really does
+    // default an imported document's currency. The scope sentence is derived
+    // from the currency-policy module so it cannot drift from the allow-list.
+    description:
+      "3-letter ISO code (default: MYR)" +
+      ` — new documents accept only ${SUPPORTED_TRANSACTION_CURRENCIES.join(" or ")}; ` +
+      "rows in other currencies are rejected.",
+  },
   { name: "description", required: true, description: "Line item description" },
   { name: "quantity", required: true, description: "Positive integer or decimal" },
   { name: "unit_price", required: true, description: "Positive number, max 2 decimals" },

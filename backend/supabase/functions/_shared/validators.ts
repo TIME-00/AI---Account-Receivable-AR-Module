@@ -4,7 +4,7 @@
 // Implements field-level validation rules from PRD Part 1-5
 // ============================================================================
 
-import { ValidationError } from './errors.ts';
+import { BusinessError, ValidationError } from './errors.ts';
 import { CUSTOMER_NAME_ALLOWED_SPECIAL, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './constants.ts';
 import type { PaginationParams } from './types.ts';
 
@@ -157,6 +157,16 @@ export const SUPPORTED_OPERATIONAL_CURRENCIES = ['MYR', 'SGD', 'USD', 'EUR', 'GB
 export type SupportedOperationalCurrency = typeof SUPPORTED_OPERATIONAL_CURRENCIES[number];
 
 /**
+ * Currencies authorised for NEW AR Invoice-family and Receipt creation.
+ *
+ * Keep this narrower than SUPPORTED_OPERATIONAL_CURRENCIES: the latter is a
+ * historical read/report vocabulary and must continue to represent retained
+ * legacy USD/EUR/GBP/CNY documents.
+ */
+export const SUPPORTED_TRANSACTION_CURRENCIES = ['MYR', 'SGD'] as const;
+export type SupportedTransactionCurrency = typeof SUPPORTED_TRANSACTION_CURRENCIES[number];
+
+/**
  * Validate ISO 4217-style currency code shape (3 uppercase letters).
  */
 export function validateCurrency(code: string, fieldName: string = 'currency'): void {
@@ -175,10 +185,16 @@ export function validateCurrency(code: string, fieldName: string = 'currency'): 
  */
 export function validateOperationalCurrencyForWrite(code: string, fieldName: string = 'currency'): void {
   validateCurrency(code, fieldName);
-  if (!SUPPORTED_OPERATIONAL_CURRENCIES.includes(code as SupportedOperationalCurrency)) {
-    throw new ValidationError(
-      `Field "${fieldName}" currency "${code}" is not supported for new Batch 9D-D transactions. Supported currencies: ${SUPPORTED_OPERATIONAL_CURRENCIES.join(', ')}.`,
-      { field: fieldName, value: code, supported_currencies: SUPPORTED_OPERATIONAL_CURRENCIES },
+  if (!SUPPORTED_TRANSACTION_CURRENCIES.includes(code as SupportedTransactionCurrency)) {
+    throw new BusinessError(
+      'UNSUPPORTED_TRANSACTION_CURRENCY',
+      `Field "${fieldName}" currency "${code}" is not supported for new AR transactions. Supported currencies: ${SUPPORTED_TRANSACTION_CURRENCIES.join(', ')}.`,
+      400,
+      {
+        field: fieldName,
+        value: code,
+        supported_currencies: SUPPORTED_TRANSACTION_CURRENCIES,
+      },
     );
   }
 }

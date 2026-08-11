@@ -41,6 +41,7 @@ import { ReviewActions } from "@/components/features/imports/review-actions";
 import { OcrImportFlow } from "@/components/features/imports/ocr-import-flow";
 import { ImportGovernanceCell } from "@/components/features/imports/import-governance-cell";
 import { cn, formatDate } from "@/lib/utils";
+import { SUPPORTED_TRANSACTION_CURRENCIES } from "@/lib/currency";
 
 // Import channel: existing CSV/Excel wizard vs. Batch 9C PDF/Image intake.
 type ImportMode = "csv" | "ocr";
@@ -58,7 +59,14 @@ const RECEIPT_COLUMNS = [
   { name: "contact_phone", required: false, description: "Required when creating a new customer." },
   { name: "contact_email", required: false, description: "Required when creating a new customer." },
   { name: "receipt_date", required: true, description: "Date format: YYYY-MM-DD." },
-  { name: "currency", required: false, description: "3-letter ISO code. Defaults from customer/country where possible." },
+  {
+    name: "currency",
+    required: false,
+    description:
+      "3-letter ISO code. Defaults from customer/country where possible. " +
+      `New receipts accept only ${SUPPORTED_TRANSACTION_CURRENCIES.join(" or ")}; ` +
+      "rows in other currencies are rejected.",
+  },
   { name: "receipt_reference", required: false, description: "Bank transfer reference or cheque number. Required for CHQ." },
   { name: "payment_method", required: true, description: "Existing method code: CHQ, TT, CASH, CC, GIRO, OFST, or ONLN." },
   { name: "bank_account_code", required: false, description: "Bank account number from bank_accounts.account_no." },

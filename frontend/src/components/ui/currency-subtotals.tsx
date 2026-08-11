@@ -51,7 +51,14 @@ function BaseContribution({
 }) {
   if (!isV2Group(group) || !baseCurrency) return null;
   if (group.authoritativeDocumentCount === 0) {
-    return <span className="text-xs font-medium text-amber-700">Base not available</span>;
+    return (
+      <span
+        className="text-xs font-medium text-amber-700"
+        title={`No document in this currency has a verified booked FX rate, so none contributes to the authoritative company-base (${baseCurrency}) total. Historical amounts are never re-valued at current rates.`}
+      >
+        Base amount unavailable
+      </span>
+    );
   }
   const partial = group.unavailableCount > 0;
   return (

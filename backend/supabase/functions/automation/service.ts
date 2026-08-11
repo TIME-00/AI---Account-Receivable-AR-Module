@@ -289,6 +289,8 @@ function documentExceptionReason(error: unknown): string {
       CUSTOMER_UNRESOLVED: "customer_unresolved",
       CUSTOMER_AMBIGUOUS: "customer_ambiguous",
       PROVIDER_UNAVAILABLE: "provider_unavailable",
+      FX_REFERENCE_UNAVAILABLE: "fx_reference_unavailable",
+      UNSUPPORTED_TRANSACTION_CURRENCY: "currency_unsupported",
     };
     return mapping[error.code] ?? "internal_processing_failure";
   }

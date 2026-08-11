@@ -1,7 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { formatMoneySafe } from "@/lib/currency";
+import { clampToSupportedTransactionCurrency, formatMoneySafe } from "@/lib/currency";
+import { useBaseCurrency } from "@/hooks/use-base-currency";
 import type { UseFormReturn } from "react-hook-form";
 import type { ReceiptFormValues } from "@/lib/receipt-schema";
 import type { Customer } from "@/types";
@@ -33,6 +34,7 @@ interface ReceiptFormCustomerProps {
 export function ReceiptFormCustomer({
   form, customers, exposure, exposureLoading, exposureError, selectedCustomer, watchCustomerId,
 }: ReceiptFormCustomerProps) {
+  const { baseCurrency } = useBaseCurrency();
   return (
     <div className="glass-card overflow-hidden">
       <div className="border-b border-slate-200 px-5 py-3">
@@ -53,7 +55,13 @@ export function ReceiptFormCustomer({
             }}
             onSelect={(customer) => {
               form.setValue("customer_id", customer.id, { shouldValidate: true });
-              form.setValue("currency", customer.default_currency, { shouldValidate: true });
+              // Clamp a retained legacy customer default (e.g. USD) to a
+              // supported new-transaction currency the backend will accept.
+              form.setValue(
+                "currency",
+                clampToSupportedTransactionCurrency(customer.default_currency, baseCurrency),
+                { shouldValidate: true },
+              );
             }}
             error={form.formState.errors.customer_id?.message}
           />

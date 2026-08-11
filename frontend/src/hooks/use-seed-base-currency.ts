@@ -19,7 +19,7 @@
 
 import { useEffect, useRef } from "react";
 import { useBaseCurrency } from "@/hooks/use-base-currency";
-import { isSupportedCurrency, normalizeCurrency } from "@/lib/currency";
+import { isSupportedTransactionCurrency, normalizeCurrency } from "@/lib/currency";
 
 export interface SeedBaseCurrencyForm {
   getCurrency: () => string;
@@ -42,8 +42,12 @@ export function useSeedBaseCurrency(form: SeedBaseCurrencyForm) {
 
     const normalized = normalizeCurrency(baseCurrency);
     // A historical/unsupported base currency must not be seeded into a NEW
-    // document: creation is restricted to the supported allow-list.
-    if (!normalized || !isSupportedCurrency(normalized)) return;
+    // document: creation is restricted to the NEW-transaction allow-list
+    // (MYR/SGD), which is narrower than the read/report vocabulary. Seeding a
+    // retained legacy base (e.g. USD) would both fail the backend
+    // UNSUPPORTED_TRANSACTION_CURRENCY check and desynchronise the form value
+    // from a selector that no longer offers that option.
+    if (!normalized || !isSupportedTransactionCurrency(normalized)) return;
 
     // Never overwrite a selection the user already made while we were loading.
     if (form.getCurrency()) {

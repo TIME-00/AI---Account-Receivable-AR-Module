@@ -17,6 +17,20 @@ Status: active in Production from 2026-07-23.
 The job body and caller cannot override company, provider, pairs or route. The Edge function validates the
 scheduler secret and fails closed. A user JWT and the database admin key are not scheduler credentials.
 
+## Post-Gate-E freshness remediation (local, not deployed)
+
+Read-only Production evidence showed that the single `07:30 UTC` attempt can
+run before the MAS-backed business-date publication is available. Migration 043
+therefore proposes `30 7,12,17 * * *` UTC for the same named job. It preserves
+the existing command and Vault secret, installs no competing job, and fails if
+the canonical name is duplicated. Until Migration 043 is independently reviewed
+and deployed, the installed Production schedule above remains authoritative.
+
+Reference usability is measured using a three-business-day window rather than
+raw calendar age. The provider effective date must still be on or before the
+transaction date; weekends are excluded, while genuinely stale data continues
+to fail closed.
+
 ## Health checks
 
 1. Confirm exactly one active job with the installed name and cadence.

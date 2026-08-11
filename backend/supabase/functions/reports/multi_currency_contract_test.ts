@@ -27,6 +27,7 @@ import {
 } from '../_shared/fx-read-contracts.ts';
 import {
   SUPPORTED_OPERATIONAL_CURRENCIES,
+  SUPPORTED_TRANSACTION_CURRENCIES,
   validateCurrency,
   validateOperationalCurrencyForWrite,
 } from '../_shared/validators.ts';
@@ -1002,15 +1003,18 @@ Deno.test('Batch 9D-D monetary rounding is backend-defined at two decimals inclu
 });
 
 Deno.test('Batch 9D-D operational currency validation accepts only the approved new-write set', () => {
-  for (const currency of SUPPORTED_OPERATIONAL_CURRENCIES) {
+  for (const currency of SUPPORTED_TRANSACTION_CURRENCIES) {
     validateOperationalCurrencyForWrite(currency);
   }
 
-  for (const currency of ['AUD', 'JPY', 'HKD']) {
+  for (const currency of ['USD', 'EUR', 'GBP', 'CNY', 'AUD', 'JPY', 'HKD']) {
     try {
       validateOperationalCurrencyForWrite(currency);
     } catch (error) {
-      assert(error instanceof ValidationError, `Expected ValidationError for ${currency}`);
+      assert(
+        error instanceof BusinessError && error.code === 'UNSUPPORTED_TRANSACTION_CURRENCY',
+        `Expected UNSUPPORTED_TRANSACTION_CURRENCY for ${currency}`,
+      );
       continue;
     }
     throw new Error(`Expected unsupported currency ${currency} to fail closed for new writes`);
@@ -1018,7 +1022,7 @@ Deno.test('Batch 9D-D operational currency validation accepts only the approved 
 });
 
 Deno.test('Batch 9D-D generic currency validation keeps legacy three-letter reads valid', () => {
-  for (const legacyCurrency of ['AUD', 'JPY', 'HKD']) {
+  for (const legacyCurrency of [...SUPPORTED_OPERATIONAL_CURRENCIES, 'AUD', 'JPY', 'HKD']) {
     validateCurrency(legacyCurrency);
   }
 });
@@ -1603,14 +1607,14 @@ Deno.test('Gate A reference-selected Invoice and Receipt creation use the exact 
     doc_type: 'Invoice',
     customer_id: 'cust-a',
     invoice_date: '2026-07-24',
-    currency: 'USD',
+    currency: 'SGD',
     fx_reference_rate_id: fxReferenceId,
   });
   const receipt = await new ReceiptService(client as never).createReceipt(clerkAuth, {
     customer_id: 'cust-a',
     receipt_date: '2026-07-24',
     payment_method: 'TT',
-    currency: 'USD',
+    currency: 'SGD',
     fx_reference_rate_id: fxReferenceId,
     receipt_amount: 10,
     bank_account_id: 'bank-1',
@@ -1646,13 +1650,13 @@ Deno.test('Gate A request validators reject client base authority and mixed refe
     doc_type: 'Invoice',
     customer_id: '22222222-2222-4222-8222-222222222222',
     invoice_date: '2026-07-24',
-    currency: 'USD',
+    currency: 'SGD',
   };
   const baseReceipt = {
     customer_id: '22222222-2222-4222-8222-222222222222',
     receipt_date: '2026-07-24',
     payment_method: 'TT',
-    currency: 'USD',
+    currency: 'SGD',
     receipt_amount: 10,
     bank_account_id: '33333333-3333-4333-8333-333333333333',
   };
@@ -3913,7 +3917,7 @@ function receiptFxRouteTables(
       receipt_no: 'RCT-GATE-A-ROUTE',
       status: 'Draft',
       receipt_date: '2026-07-20',
-      currency: 'USD',
+      currency: 'SGD',
       base_currency: 'MYR',
       exchange_rate: 4.25,
       receipt_amount: 100,
@@ -3943,7 +3947,7 @@ function receiptFxHandler(
 Deno.test('Gate A PATCH Receipt route reaches the governed Draft FX update with authenticated tenant authority', async () => {
   const client = new MockSupabaseClient(receiptFxRouteTables(), 'service_role');
   const response = await receiptFxHandler(client)(receiptFxRequest({
-    currency: 'USD',
+    currency: 'SGD',
     receipt_date: '2026-07-24',
     fx_reference_rate_id: receiptFxRouteReferenceId,
   }));
@@ -3957,7 +3961,7 @@ Deno.test('Gate A PATCH Receipt route reaches the governed Draft FX update with 
   assertEquals(params.p_company_id, receiptFxRouteCompanyId);
   assertEquals(params.p_actor_user_id, receiptFxRouteUserId);
   assertEquals(params.p_receipt_id, receiptFxRouteReceiptId);
-  assertEquals(params.p_currency, 'USD');
+  assertEquals(params.p_currency, 'SGD');
   assertEquals(params.p_receipt_date, '2026-07-24');
   assertEquals(params.p_fx_reference_rate_id, receiptFxRouteReferenceId);
   assertEquals(params.p_explicit_rate_supplied, false);
@@ -3982,22 +3986,22 @@ Deno.test('Gate A PATCH Receipt route reaches the governed Draft FX update with 
 Deno.test('Gate A PATCH Receipt route rejects mixed authority, cross-company, unauthorized, and non-Draft requests before RPC', async () => {
   for (const invalidBody of [
     {
-      currency: 'USD',
+      currency: 'SGD',
       fx_reference_rate_id: receiptFxRouteReferenceId,
       exchange_rate: 4.25,
     },
     {
-      currency: 'USD',
+      currency: 'SGD',
       fx_reference_rate_id: receiptFxRouteReferenceId,
       fx_override_reason: 'manual override',
     },
     {
-      currency: 'USD',
+      currency: 'SGD',
       fx_reference_rate_id: receiptFxRouteReferenceId,
       base_amount: 425,
     },
     {
-      currency: 'USD',
+      currency: 'SGD',
       fx_reference_rate_id: receiptFxRouteReferenceId,
       company_id: 'attacker-company',
     },
@@ -4014,7 +4018,7 @@ Deno.test('Gate A PATCH Receipt route rejects mixed authority, cross-company, un
     'service_role',
   );
   const crossCompanyResponse = await receiptFxHandler(crossCompanyClient)(receiptFxRequest({
-    currency: 'USD',
+    currency: 'SGD',
     fx_reference_rate_id: receiptFxRouteReferenceId,
   }));
   assertEquals(crossCompanyResponse.status, 404);
@@ -4026,7 +4030,7 @@ Deno.test('Gate A PATCH Receipt route rejects mixed authority, cross-company, un
     roles: ['System Admin'],
     highestRole: 'System Admin',
   })(receiptFxRequest({
-    currency: 'USD',
+    currency: 'SGD',
     fx_reference_rate_id: receiptFxRouteReferenceId,
   }));
   assertEquals(unauthorizedResponse.status, 403);
@@ -4037,7 +4041,7 @@ Deno.test('Gate A PATCH Receipt route rejects mixed authority, cross-company, un
     'service_role',
   );
   const postedResponse = await receiptFxHandler(postedClient)(receiptFxRequest({
-    currency: 'USD',
+    currency: 'SGD',
     fx_reference_rate_id: receiptFxRouteReferenceId,
   }));
   assertEquals(postedResponse.status, 400);

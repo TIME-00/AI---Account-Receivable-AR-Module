@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { cn, formatDate } from "@/lib/utils";
-import { SUPPORTED_CURRENCY_OPTIONS } from "@/lib/currency";
+import {
+  clampToSupportedTransactionCurrency,
+  SUPPORTED_TRANSACTION_CURRENCY_OPTIONS,
+  transactionCurrencyScopeNote,
+} from "@/lib/currency";
 import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { FxRateField } from "@/components/features/fx/fx-rate-field";
 import { CustomerComboboxWithCreate } from "@/components/features/customers/customer-combobox-with-create";
@@ -128,7 +132,14 @@ export function InvoiceHeaderForm({
           }}
           onSelect={(c) => {
             form.setValue("customer_id", c.id, { shouldValidate: true });
-            form.setValue("currency", c.default_currency, { shouldValidate: true });
+            // A customer's default may be a retained legacy currency (e.g. USD).
+            // New documents may only be MYR/SGD, so clamp to a supported code
+            // rather than pre-selecting a currency the backend would reject.
+            form.setValue(
+              "currency",
+              clampToSupportedTransactionCurrency(c.default_currency, baseCurrency),
+              { shouldValidate: true },
+            );
             setSelectedCustomerName(c.customer_name);
             if (c.payment_term_id) {
               setSelectedTermId(c.payment_term_id);
@@ -143,10 +154,13 @@ export function InvoiceHeaderForm({
             Currency <span className="text-red-400">*</span>
           </label>
           <select {...form.register("currency")} className="input-premium w-full">
-            {SUPPORTED_CURRENCY_OPTIONS.map((opt) => (
+            {SUPPORTED_TRANSACTION_CURRENCY_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
+          <p className="mt-1 text-[11px] text-slate-400">
+            {transactionCurrencyScopeNote("documents")}
+          </p>
         </div>
 
         {/* Exchange Rate — governed shared FX field (Gate A) */}

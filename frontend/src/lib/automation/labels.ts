@@ -254,6 +254,7 @@ export const EXCEPTION_REASON_LABEL: Record<ExceptionReasonCode, string> = {
   extraction_schema_invalid: "Extraction Schema Invalid",
   arithmetic_mismatch: "Arithmetic Mismatch",
   currency_unsupported: "Unsupported Currency",
+  fx_reference_unavailable: "FX Reference Unavailable",
   customer_unresolved: "Customer Unresolved",
   customer_ambiguous: "Customer Ambiguous",
   invoice_conflict: "Invoice Conflict",

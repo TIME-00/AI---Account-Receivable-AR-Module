@@ -280,6 +280,7 @@ const REASON_CODE_VALUES = new Set([
   "extraction_schema_invalid",
   "arithmetic_mismatch",
   "currency_unsupported",
+  "fx_reference_unavailable",
   "customer_unresolved",
   "customer_ambiguous",
   "invoice_conflict",

@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { SUPPORTED_CURRENCY_OPTIONS } from "@/lib/currency";
+import {
+  SUPPORTED_TRANSACTION_CURRENCY_OPTIONS,
+  transactionCurrencyScopeNote,
+} from "@/lib/currency";
 import { useBaseCurrency } from "@/hooks/use-base-currency";
 import { FxRateField } from "@/components/features/fx/fx-rate-field";
 import { Controller, type UseFormReturn } from "react-hook-form";
@@ -104,12 +107,15 @@ export function ReceiptFormAmount({
                 {...field}
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
-                {SUPPORTED_CURRENCY_OPTIONS.map((opt) => (
+                {SUPPORTED_TRANSACTION_CURRENCY_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
             )}
           />
+          <p className="mt-1 text-[11px] text-slate-400">
+            {transactionCurrencyScopeNote("receipts")}
+          </p>
         </div>
 
         {/* Exchange Rate — governed shared FX field (Gate A) */}

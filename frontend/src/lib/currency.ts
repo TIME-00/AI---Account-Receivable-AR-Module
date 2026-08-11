@@ -16,7 +16,7 @@ import type { CurrencyTotal } from "@/types/monetary";
 export const SUPPORTED_CURRENCIES = ["MYR", "SGD", "USD", "EUR", "GBP", "CNY"] as const;
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
 
-/** Display names for the creation allow-list (B9DD-FEIR-006 §8). */
+/** Display names for the full read/report vocabulary. */
 export const CURRENCY_LABELS: Record<SupportedCurrency, string> = {
   MYR: "Malaysian Ringgit",
   SGD: "Singapore Dollar",
@@ -27,12 +27,70 @@ export const CURRENCY_LABELS: Record<SupportedCurrency, string> = {
 };
 
 /**
- * Canonical option list for Invoice and Receipt creation currency selectors.
- * Both document families must offer the SAME operational currencies — deriving
- * both selectors from this single list is what keeps them consistent.
+ * Full supported-currency vocabulary for READING/REPORTING historical records.
+ * Retained USD/EUR/GBP/CNY documents must continue to render — this list is NOT
+ * the new-creation allow-list (see {@link SUPPORTED_TRANSACTION_CURRENCIES}).
  */
 export const SUPPORTED_CURRENCY_OPTIONS: ReadonlyArray<{ value: SupportedCurrency; label: string }> =
   SUPPORTED_CURRENCIES.map((code) => ({ value: code, label: `${code} — ${CURRENCY_LABELS[code]}` }));
+
+/**
+ * Currencies authorised for NEW AR Invoice-family and Receipt creation
+ * (Post-Gate-E FX/currency policy). Mirrors the backend
+ * `SUPPORTED_TRANSACTION_CURRENCIES` and the database
+ * `ar_require_supported_transaction_currency` trigger. Kept deliberately
+ * narrower than {@link SUPPORTED_CURRENCIES}: the backend rejects any other
+ * currency with `UNSUPPORTED_TRANSACTION_CURRENCY`, so new-document selectors
+ * must offer only these. Historical foreign-currency records are unaffected.
+ */
+export const SUPPORTED_TRANSACTION_CURRENCIES = ["MYR", "SGD"] as const;
+export type SupportedTransactionCurrency = (typeof SUPPORTED_TRANSACTION_CURRENCIES)[number];
+
+/** Canonical option list for NEW Invoice/CN-DN/Receipt currency selectors. */
+export const SUPPORTED_TRANSACTION_CURRENCY_OPTIONS: ReadonlyArray<
+  { value: SupportedTransactionCurrency; label: string }
+> = SUPPORTED_TRANSACTION_CURRENCIES.map((code) => ({
+  value: code,
+  label: `${code} — ${CURRENCY_LABELS[code]}`,
+}));
+
+/**
+ * Human-readable scope note for NEW-document currency selectors. Built FROM the
+ * allow-list rather than spelling the codes out, so the copy and the policy can
+ * never drift apart (and so no currency literal leaks outside this module).
+ */
+export function transactionCurrencyScopeNote(subject = "documents"): string {
+  return (
+    `New ${subject} use ${SUPPORTED_TRANSACTION_CURRENCIES.join(" or ")}. ` +
+    "Existing records in other currencies remain viewable and reportable."
+  );
+}
+
+/** True when `code` may be used for a NEW AR transaction (MYR or SGD). */
+export function isSupportedTransactionCurrency(
+  code: string | null | undefined,
+): code is SupportedTransactionCurrency {
+  return typeof code === "string" &&
+    (SUPPORTED_TRANSACTION_CURRENCIES as readonly string[]).includes(code.toUpperCase());
+}
+
+/**
+ * Clamp a proposed new-document currency (e.g. a customer's `default_currency`,
+ * which may be a retained legacy code) to a supported transaction currency.
+ * A supported code is returned unchanged; anything else falls back to the
+ * company base when it is itself supported, otherwise to MYR. This keeps a new
+ * document from starting on an unsupported currency the backend would reject.
+ */
+export function clampToSupportedTransactionCurrency(
+  code: string | null | undefined,
+  baseCurrency?: string | null,
+): SupportedTransactionCurrency {
+  if (isSupportedTransactionCurrency(code)) return code.toUpperCase() as SupportedTransactionCurrency;
+  if (isSupportedTransactionCurrency(baseCurrency)) {
+    return baseCurrency.toUpperCase() as SupportedTransactionCurrency;
+  }
+  return "MYR";
+}
 
 /** All Batch 9D-D supported currencies use 2 display decimals. */
 export const DISPLAY_DECIMALS = 2;

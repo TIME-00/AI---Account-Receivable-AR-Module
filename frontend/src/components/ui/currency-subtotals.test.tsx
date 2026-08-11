@@ -20,7 +20,13 @@ describe("CurrencyTotals authority states", () => {
 
     expect(screen.getAllByText("MYR 125.50").length).toBeGreaterThan(0);
     expect(screen.getByText("USD 100.00")).toBeInTheDocument();
-    expect(screen.getByText("Base not available")).toBeInTheDocument();
+    expect(screen.getByText("Base amount unavailable")).toBeInTheDocument();
+    // The exclusion is explained in terms of missing BOOKED FX, and must never
+    // hint that a current market rate could substitute for it.
+    expect(
+      screen.getByTitle(/verified booked FX rate/i).textContent,
+    ).toContain("Base amount unavailable");
+    expect(screen.getByTitle(/never re-valued at current rates/i)).toBeInTheDocument();
   });
 
   it("does not expose a legacy base contribution", () => {

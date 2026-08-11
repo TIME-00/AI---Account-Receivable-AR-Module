@@ -24,7 +24,11 @@ import {
   requireOperationalReadRole,
   requireCustomerAccess,
 } from '../_shared/auth.ts';
-import { validateMaxLength, validateUUID } from '../_shared/validators.ts';
+import {
+  validateMaxLength,
+  validateOperationalCurrencyForWrite,
+  validateUUID,
+} from '../_shared/validators.ts';
 import type {
   Invoice,
   InvoiceLine,
@@ -46,6 +50,7 @@ import {
   parseMonetaryCollectionSummary,
 } from '../reports/monetary-contracts.ts';
 import type { MonetaryCollectionSummary } from '../reports/monetary-contracts.ts';
+import { resolveBookableReferenceRate } from '../_shared/fx-reference.ts';
 
 export interface CreateInvoiceOptions {
   importOrigin?: Record<string, unknown>;
@@ -487,18 +492,27 @@ export class InvoiceService {
       );
     }
 
+    const automaticReference = !isBaseParity
+      && data.fx_reference_rate_id === undefined
+      && data.exchange_rate === undefined
+      ? await resolveBookableReferenceRate(
+        this.client,
+        auth.companyId,
+        data.currency,
+        company.base_currency,
+        data.invoice_date,
+      )
+      : null;
+    const selectedReferenceRateId = data.fx_reference_rate_id ?? automaticReference?.id ?? null;
+
     // Reference-selected booking is resolved and snapshotted atomically by the
     // database wrapper. Rate 1 is only a transient payload placeholder and is
     // never committed for a valid foreign reference selection.
     const exchangeRate = isBaseParity
       ? 1
-      : data.fx_reference_rate_id !== undefined
+      : selectedReferenceRateId !== null
       ? 1
-      : data.exchange_rate ?? await this.resolveExchangeRate(
-        auth.companyId,
-        data.currency,
-        data.invoice_date,
-      );
+      : data.exchange_rate!;
 
     // Consume the governed sequence only after all request-side FX checks pass.
     const invoiceNo = await getNextSequence(this.client, auth.companyId, seqType);
@@ -586,7 +600,7 @@ export class InvoiceService {
         p_lines: lineRows,
         p_explicit_rate_supplied: data.exchange_rate !== undefined,
         p_override_reason: data.fx_override_reason ?? null,
-        p_fx_reference_rate_id: data.fx_reference_rate_id ?? null,
+        p_fx_reference_rate_id: selectedReferenceRateId,
       };
       if (options.postAtomically && !options.automationCommandId) {
         throw new BusinessError(
@@ -986,6 +1000,9 @@ export class InvoiceService {
     if (data.invoice_remarks !== undefined) updatePayload.invoice_remarks = data.invoice_remarks;
     const nextCurrency = data.currency ?? invoice.currency;
     const nextDate = data.invoice_date ?? invoice.invoice_date;
+    if (data.currency !== undefined && data.currency !== invoice.currency) {
+      validateOperationalCurrencyForWrite(nextCurrency);
+    }
     const isBaseParity = nextCurrency === invoice.base_currency;
     const fxMaterialChange = data.currency !== undefined
       || data.invoice_date !== undefined
@@ -1016,7 +1033,18 @@ export class InvoiceService {
       data.fx_reference_rate_id === undefined
       && (data.currency !== undefined || data.invoice_date !== undefined)
     ) {
-      updatePayload.exchange_rate = await this.resolveExchangeRate(auth.companyId, nextCurrency, nextDate);
+      if (isBaseParity) {
+        updatePayload.exchange_rate = 1;
+      } else {
+        const reference = await resolveBookableReferenceRate(
+          this.client,
+          auth.companyId,
+          nextCurrency,
+          invoice.base_currency,
+          nextDate,
+        );
+        updatePayload.fx_reference_rate_id = reference.id;
+      }
     }
     if (data.fx_reference_rate_id !== undefined) {
       updatePayload.fx_reference_rate_id = data.fx_reference_rate_id;
@@ -1151,45 +1179,6 @@ export class InvoiceService {
     }
 
     return data as InvoiceLine;
-  }
-
-  /**
-   * Resolve exchange rate from the exchange_rates table.
-   * Uses the most recent rate <= invoice_date (BR-INV-007).
-   */
-  private async resolveExchangeRate(
-    companyId: string,
-    currency: string,
-    invoiceDate: string,
-  ): Promise<number> {
-    // Same currency = rate 1.0
-    const { data: company } = await this.client
-      .from('companies')
-      .select('base_currency')
-      .eq('id', companyId)
-      .single();
-
-    if (company?.base_currency === currency) return 1.0;
-
-    const { data: rate } = await this.client
-      .from('exchange_rates')
-      .select('rate')
-      .eq('company_id', companyId)
-      .eq('from_currency', currency)
-      .eq('to_currency', company?.base_currency ?? 'MYR')
-      .lte('effective_date', invoiceDate)
-      .order('effective_date', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (!rate) {
-      throw new ValidationError(
-        `Exchange rate not found for ${currency} → ${company?.base_currency} on ${invoiceDate}. Please maintain the exchange rate table.`,
-        { from_currency: currency, to_currency: company?.base_currency, date: invoiceDate },
-      );
-    }
-
-    return Number(rate.rate);
   }
 
   /**

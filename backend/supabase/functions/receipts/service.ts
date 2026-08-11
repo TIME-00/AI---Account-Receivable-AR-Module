@@ -24,7 +24,10 @@ import {
   requireOperationalReadRole,
   requireCustomerAccess,
 } from '../_shared/auth.ts';
-import { validateUUID } from '../_shared/validators.ts';
+import {
+  validateOperationalCurrencyForWrite,
+  validateUUID,
+} from '../_shared/validators.ts';
 import type {
   Receipt,
   Customer,
@@ -52,6 +55,7 @@ import {
   parseMonetaryCollectionSummary,
 } from '../reports/monetary-contracts.ts';
 import type { MonetaryCollectionSummary } from '../reports/monetary-contracts.ts';
+import { resolveBookableReferenceRate } from '../_shared/fx-reference.ts';
 
 export interface CreateReceiptOptions {
   importOrigin?: Record<string, unknown>;
@@ -329,15 +333,23 @@ export class ReceiptService {
       );
     }
 
-    const exchangeRate = isBaseParity
-      ? 1
-      : data.fx_reference_rate_id !== undefined
-      ? 1
-      : data.exchange_rate ?? await this.resolveExchangeRate(
+    const automaticReference = !isBaseParity
+      && data.fx_reference_rate_id === undefined
+      && data.exchange_rate === undefined
+      ? await resolveBookableReferenceRate(
+        this.client,
         auth.companyId,
         data.currency,
+        company.base_currency,
         data.receipt_date,
-      );
+      )
+      : null;
+    const selectedReferenceRateId = data.fx_reference_rate_id ?? automaticReference?.id ?? null;
+    const exchangeRate = isBaseParity
+      ? 1
+      : selectedReferenceRateId !== null
+      ? 1
+      : data.exchange_rate!;
 
     // Generate receipt number
     const receiptNo = await getNextSequence(this.client, auth.companyId, 'RCT');
@@ -372,7 +384,7 @@ export class ReceiptService {
         p_import_origin: options.importOrigin ?? null,
         p_explicit_rate_supplied: data.exchange_rate !== undefined,
         p_override_reason: data.fx_override_reason ?? null,
-        p_fx_reference_rate_id: data.fx_reference_rate_id ?? null,
+        p_fx_reference_rate_id: selectedReferenceRateId,
       };
       if (options.postAtomically && !options.automationCommandId) {
         throw new BusinessError(
@@ -662,41 +674,7 @@ export class ReceiptService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // PRIVATE: Exchange rate resolution
   // ════════════════════════════════════════════════════════════════════════
-
-  private async resolveExchangeRate(
-    companyId: string,
-    currency: string,
-    receiptDate: string,
-  ): Promise<number> {
-    const { data: company } = await this.client
-      .from('companies')
-      .select('base_currency')
-      .eq('id', companyId)
-      .single();
-
-    if (company?.base_currency === currency) return 1.0;
-
-    const { data: rate } = await this.client
-      .from('exchange_rates')
-      .select('rate')
-      .eq('company_id', companyId)
-      .eq('from_currency', currency)
-      .eq('to_currency', company?.base_currency ?? 'MYR')
-      .lte('effective_date', receiptDate)
-      .order('effective_date', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (!rate) {
-      throw new ValidationError(
-        `Exchange rate not found for ${currency} → ${company?.base_currency} on ${receiptDate}.`,
-        { from: currency, to: company?.base_currency, date: receiptDate },
-      );
-    }
-    return Number(rate.rate);
-  }
 
   async updateDraftReceiptFx(
     auth: AuthContext,
@@ -736,6 +714,9 @@ export class ReceiptService {
 
     const nextCurrency = input.currency ?? receipt.currency;
     const nextDate = input.receipt_date ?? receipt.receipt_date;
+    if (input.currency !== undefined && input.currency !== receipt.currency) {
+      validateOperationalCurrencyForWrite(nextCurrency);
+    }
     const isBaseParity = nextCurrency === receipt.base_currency;
     if (isBaseParity && input.fx_reference_rate_id !== undefined) {
       throw new ValidationError(
@@ -765,15 +746,23 @@ export class ReceiptService {
         },
       );
     }
-    const nextRate = isBaseParity
-      ? 1
-      : input.fx_reference_rate_id !== undefined
-      ? null
-      : input.exchange_rate ?? await this.resolveExchangeRate(
+    const automaticReference = !isBaseParity
+      && input.fx_reference_rate_id === undefined
+      && input.exchange_rate === undefined
+      ? await resolveBookableReferenceRate(
+        this.client,
         auth.companyId,
         nextCurrency,
+        receipt.base_currency,
         nextDate,
-      );
+      )
+      : null;
+    const selectedReferenceRateId = input.fx_reference_rate_id ?? automaticReference?.id ?? null;
+    const nextRate = isBaseParity
+      ? 1
+      : selectedReferenceRateId !== null
+      ? null
+      : input.exchange_rate!;
 
     await callRpc<string>(this.client, 'fx_update_governed_receipt_fx', {
       p_company_id: auth.companyId,
@@ -784,7 +773,7 @@ export class ReceiptService {
       p_exchange_rate: nextRate,
       p_explicit_rate_supplied: input.exchange_rate !== undefined,
       p_override_reason: input.fx_override_reason ?? null,
-      p_fx_reference_rate_id: input.fx_reference_rate_id ?? null,
+      p_fx_reference_rate_id: selectedReferenceRateId,
     });
 
     return await fetchById<Receipt>(this.client, 'receipts', receiptId);

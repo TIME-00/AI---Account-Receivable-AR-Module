@@ -39,7 +39,13 @@ describe("MoneyCell", () => {
     render(
       <MoneyCell amount={100} currency="USD" baseAmount={null} baseCurrency="MYR" baseAvailable={false} />,
     );
-    expect(screen.getByText(/Base not available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Base amount unavailable/i)).toBeInTheDocument();
+    // Fail-closed: no fabricated base figure, and the help text must state that
+    // historical amounts are not re-valued using a current rate.
+    expect(screen.queryByText(/Booked base/i)).toBeNull();
+    expect(
+      screen.getByTitle(/never re-valued at current rates/i),
+    ).toBeInTheDocument();
   });
 
   it("surfaces an exception decision chip in compact mode", () => {

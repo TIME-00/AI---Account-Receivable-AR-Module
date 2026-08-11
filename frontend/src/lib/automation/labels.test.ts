@@ -79,8 +79,8 @@ describe("label + tone completeness", () => {
     coverage(REMINDER_STATUSES, REMINDER_STATUS_LABEL, REMINDER_STATUS_TONE);
     coverage(REMINDER_ATTEMPT_STATUSES, REMINDER_ATTEMPT_STATUS_LABEL);
   });
-  it("labels all 28 exception reason codes", () => {
-    expect(Object.keys(EXCEPTION_REASON_LABEL)).toHaveLength(28);
+  it("labels all 29 exception reason codes", () => {
+    expect(Object.keys(EXCEPTION_REASON_LABEL)).toHaveLength(29);
   });
 });
 

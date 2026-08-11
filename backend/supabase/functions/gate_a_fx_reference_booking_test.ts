@@ -5,7 +5,7 @@ import {
 } from "./_shared/constants.ts";
 import {
   calculateStaleState,
-  FX_REFERENCE_STALE_AFTER_DAYS,
+  FX_REFERENCE_STALE_AFTER_BUSINESS_DAYS,
 } from "./fx-rate-sync/validation.ts";
 import { validateCreateInvoice } from "./invoices/validators.ts";
 import { validateCreateReceipt } from "./receipts/validators.ts";
@@ -195,7 +195,7 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
     doc_type: "Invoice",
     invoice_date: "2026-07-24",
     customer_id: customerId,
-    currency: "USD",
+    currency: "SGD",
     fx_reference_rate_id: referenceId,
   });
   assertEquals(invoice.fx_reference_rate_id, referenceId);
@@ -205,7 +205,7 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
     receipt_date: "2026-07-24",
     customer_id: customerId,
     payment_method: "TT",
-    currency: "USD",
+    currency: "SGD",
     fx_reference_rate_id: referenceId,
     receipt_amount: 12.34,
     bank_account_id: bankAccountId,
@@ -219,7 +219,7 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
         doc_type: "Invoice",
         invoice_date: "2026-07-24",
         customer_id: customerId,
-        currency: "USD",
+        currency: "SGD",
         fx_reference_rate_id: referenceId,
         exchange_rate: 4.5,
       }),
@@ -228,7 +228,7 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
         receipt_date: "2026-07-24",
         customer_id: customerId,
         payment_method: "TT",
-        currency: "USD",
+        currency: "SGD",
         fx_reference_rate_id: referenceId,
         fx_override_reason: "manual",
         receipt_amount: 12.34,
@@ -248,7 +248,7 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
         doc_type: "Invoice",
         invoice_date: "2026-07-24",
         customer_id: customerId,
-        currency: "USD",
+        currency: "SGD",
         base_total: 123,
       })
     ).message,
@@ -260,7 +260,7 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
         receipt_date: "2026-07-24",
         customer_id: customerId,
         payment_method: "TT",
-        currency: "USD",
+        currency: "SGD",
         receipt_amount: 12.34,
         base_amount: 99,
         bank_account_id: bankAccountId,
@@ -285,26 +285,26 @@ Deno.test("Gate A Edge services use the exact reference-aware RPC parameters", a
   for (const source of [invoiceValidator, receiptValidator]) {
     assertIncludes(source, "fx_reference_rate_id cannot be combined");
   }
-  assertIncludes(invoiceService, "updatePayload.fx_reference_rate_id = data.fx_reference_rate_id");
-  assertIncludes(receiptService, "p_fx_reference_rate_id: input.fx_reference_rate_id ?? null");
-  assertIncludes(invoiceService, "p_fx_reference_rate_id: data.fx_reference_rate_id ?? null");
-  assertIncludes(receiptService, "p_fx_reference_rate_id: data.fx_reference_rate_id ?? null");
+  assertIncludes(invoiceService, "updatePayload.fx_reference_rate_id = reference.id");
+  assertIncludes(receiptService, "p_fx_reference_rate_id: selectedReferenceRateId");
+  assertIncludes(invoiceService, "p_fx_reference_rate_id: selectedReferenceRateId");
 });
 
-Deno.test("Gate A lookup and booking use one three-day stale basis and deterministic latest ordering", async () => {
+Deno.test("Gate A lookup and booking use one three-business-day stale basis and deterministic latest ordering", async () => {
   const lookupService = await read("fx-rates/service.ts");
-  const migration = await read(
-    "../../../database/031_post_batch_9d_gate_a_governed_fx_reference_booking.sql",
+  const migration043 = await read(
+    "../../../database/043_post_gate_e_fx_currency_freshness_authority.sql",
   );
 
-  assertEquals(FX_REFERENCE_STALE_AFTER_DAYS, 3);
+  assertEquals(FX_REFERENCE_STALE_AFTER_BUSINESS_DAYS, 3);
   assertEquals(calculateStaleState("2026-07-21", "2026-07-24").is_stale, false);
   assertEquals(calculateStaleState("2026-07-20", "2026-07-24").is_stale, true);
   assertIncludes(lookupService, ".order('effective_date', { ascending: false })");
   assertIncludes(lookupService, ".order('fetched_at', { ascending: false })");
   assertIncludes(lookupService, ".order('created_at', { ascending: false })");
   assertIncludes(lookupService, ".order('id', { ascending: false })");
-  assertIncludes(migration, "(p_transaction_date - v_reference.effective_date) > 3");
+  assertIncludes(migration043, "public.fx_reference_business_day_age(");
+  assertIncludes(migration043, ") > 3 THEN");
 });
 
 Deno.test("Gate A pagination remains bounded at public 100 and internal RPC 200", async () => {

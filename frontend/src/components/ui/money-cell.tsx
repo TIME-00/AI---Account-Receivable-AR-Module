@@ -133,7 +133,12 @@ export function MoneyCell({
               {normalizeCurrency(baseCurrency)} {formatMoneyNumber(Number(baseAmount))}
             </>
           ) : (
-            <span className="italic text-slate-400">Base not available</span>
+            <span
+              className="italic text-slate-400"
+              title={`No verified booked FX rate exists for this document, so it is excluded from the authoritative company-base (${normalizeCurrency(baseCurrency)}) subtotal. Historical amounts are never re-valued at current rates.`}
+            >
+              Base amount unavailable
+            </span>
           )}
         </span>
       )}

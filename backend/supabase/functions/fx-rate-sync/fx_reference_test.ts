@@ -190,12 +190,17 @@ Deno.test('stale state separates requested date from actual effective date', () 
   assertEquals(calculateStaleState('2026-07-03', '2026-07-05', 3), {
     is_stale: false,
     stale_reason: null,
-    age_days: 2,
+    age_days: 0,
   });
   assertEquals(calculateStaleState('2026-07-01', '2026-07-06', 3), {
+    is_stale: false,
+    stale_reason: null,
+    age_days: 3,
+  });
+  assertEquals(calculateStaleState('2026-07-01', '2026-07-07', 3), {
     is_stale: true,
-    stale_reason: 'effective_date_older_than_threshold',
-    age_days: 5,
+    stale_reason: 'effective_date_older_than_business_day_threshold',
+    age_days: 4,
   });
 });
 

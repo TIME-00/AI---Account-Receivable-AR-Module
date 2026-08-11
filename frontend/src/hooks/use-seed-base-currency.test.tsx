@@ -105,6 +105,28 @@ describe("useSeedBaseCurrency", () => {
     await waitFor(() => expect(field.read()).toBe(""));
   });
 
+  it("does not seed a RETAINED LEGACY base currency into a new document", async () => {
+    // Post-Gate-E: USD stays readable/reportable but is no longer valid for a
+    // NEW AR transaction. Seeding it would desynchronise the form value from a
+    // selector that only offers MYR/SGD, and the backend would reject the
+    // create with UNSUPPORTED_TRANSACTION_CURRENCY.
+    for (const legacy of ["USD", "EUR", "GBP", "CNY"]) {
+      baseCurrencyState.baseCurrency = legacy;
+      const field = makeField();
+      renderHook(() => useSeedBaseCurrency(field), { wrapper: Providers });
+      await waitFor(() => expect(field.read()).toBe(""));
+    }
+  });
+
+  it("still seeds both supported transaction currencies", async () => {
+    for (const supported of ["MYR", "SGD"]) {
+      baseCurrencyState.baseCurrency = supported;
+      const field = makeField();
+      renderHook(() => useSeedBaseCurrency(field), { wrapper: Providers });
+      await waitFor(() => expect(field.read()).toBe(supported));
+    }
+  });
+
   it("never overwrites a currency the user already chose", async () => {
     baseCurrencyState.baseCurrency = "SGD";
     // The user picked USD before /auth/me resolved.

@@ -285,8 +285,10 @@ function FxReferenceReadout({
     return (
       <StateBox tone="warning" icon={<AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />} testid="fx-state-stale" live>
         <span>
-          Reference rate is stale{fx.ageDays !== null ? ` (${fx.ageDays} days old)` : ""}. It cannot be selected — use
-          Manual override if permitted.
+          Reference rate for this transaction date is stale
+          {fx.ageDays !== null
+            ? ` (latest is ${fx.ageDays} business day${fx.ageDays === 1 ? "" : "s"} old)`
+            : ""}. It cannot be selected — use Manual override if permitted.
         </span>
         {fx.directionLabel && <span className="block font-mono text-[11px] text-amber-800">{fx.directionLabel}</span>}
       </StateBox>
@@ -301,8 +303,10 @@ function FxReferenceReadout({
         {fx.directionLabel}
       </span>
       <span className="block text-[11px] text-slate-500">
-        Reference rate{fx.provider ? ` · ${fx.provider}` : ""}
-        {fx.effectiveDate ? ` · effective ${fx.effectiveDate}` : ""} — selected automatically (read-only).
+        Authoritative reference exchange rate for this transaction date
+        {fx.effectiveDate ? ` · effective ${fx.effectiveDate}` : ""}
+        {fx.provider ? ` · source: ${fx.provider}` : ""} — selected automatically
+        (read-only).
       </span>
       {estimatedBase !== null && baseCurrency && (
         <span className="block text-[10px] text-slate-500" data-testid="fx-estimated-base">

@@ -243,7 +243,9 @@ in four measurable ways:
   journal entries generated as separate balanced entries.
 - Double-entry journal entries and journal lines, with reversal support.
 - Multi-currency with a governed FX reference-rate service and booking-rate
-  provenance/override governance.
+  provenance/override governance. **New** AR financial transactions are scoped to
+  `MYR` and `SGD` (Post-Gate-E, local — see 11.23); historical `USD`/`EUR`/`GBP`/`CNY`
+  records remain readable, searchable and reportable.
 - Aging analysis, customer statements, AR summaries, dashboard metrics, credit
   rating drill-down, and PDF/XLSX report export.
 - CSV/Excel import and PDF/Image (OCR-intake) import with staged review.
@@ -1161,6 +1163,8 @@ Notable groupings:
 | 017–030 | FX reference foundation, concurrency hardening, booking-rate governance, monetary aggregation, allocation candidate snapshot |
 | 031–033 | Post-Batch-9D Gates A / B / D (governed FX booking, notifications + rating drill-down, dashboard authority) |
 | 034–041 | Gate E: autonomous operations, OAuth vault, secure scheduler, critical-identifier authority, receipt-reference authority, capability profiles, exception recovery, retry-matching compatibility |
+| 042 | Post-Gate-E mailbox delivery onboarding |
+| **043** | **Post-Gate-E FX/currency freshness authority — LOCAL ONLY, NOT APPLIED.** Transaction-currency triggers, business-day freshness, FX scheduler cadence. `043b` is rollback-only and must never be registered as a ledger entry |
 
 ---
 
@@ -1417,6 +1421,72 @@ lease and its own scheduler auth) back `fx-rate-field.tsx`, `fx-chip.tsx` and th
 governed booking-rate selection on invoice and receipt drafts
 (`fx_create_governed_invoice_draft`, `fx_select_reference_booking_rate`, and the
 decision/supersession tables from Migrations 017–026 and 031).
+
+#### Post-Gate-E transaction-currency and freshness authority (local, Migration 043 **not applied**)
+
+> Status during this checkpoint: **local implementation, pending Codex final review,
+> migration and deployment.** Production still runs the pre-043 state. Nothing below
+> is deployed, and no Production row has been changed.
+
+- **New-transaction currency scope.** `SUPPORTED_TRANSACTION_CURRENCIES = ['MYR','SGD']`
+  governs newly created Invoices, Credit Notes, Debit Notes (all via the Invoice-family
+  creation path) and Receipts. The backend rejects anything else with the sanitized
+  `UNSUPPORTED_TRANSACTION_CURRENCY`; Migration 043 adds a
+  `BEFORE INSERT OR UPDATE OF currency` trigger as database-side defence in depth.
+  The frontend mirrors the same constant in `lib/currency.ts`, so the
+  Invoice/CN/DN and Receipt selectors offer exactly `MYR` and `SGD`.
+- **Historical vocabulary is unchanged and deliberately broader.**
+  `SUPPORTED_CURRENCIES` (`MYR`, `SGD`, `USD`, `EUR`, `GBP`, `CNY`) remains the
+  read/report/parse vocabulary, and display never consults the narrower
+  creation allow-list. Retained `USD`/`EUR`/`GBP`/`CNY` documents still render and
+  still report. Because the trigger returns early when
+  `NEW.currency IS NOT DISTINCT FROM OLD.currency`, unrelated metadata updates on a
+  legacy foreign-currency row are **not** rejected.
+- **Customer defaults are clamped, never adopted.** A customer's retained
+  `default_currency` may be a legacy code. Selecting that customer clamps the *draft
+  document* to the company base when the base is itself supported, otherwise to `MYR`
+  (`clampToSupportedTransactionCurrency`). The customer master record is not mutated,
+  and `useSeedBaseCurrency` will not seed a legacy base into a new document.
+- **MYR base parity.** When the document currency equals the company base (`MYR`),
+  the rate is exactly `1` — `NUMERIC` parity, no provider lookup is issued at all, no
+  staleness warning is shown, and the manual-override affordance is not surfaced.
+- **SGD transaction-date reference.** SGD selects the latest Active SGD→MYR reference
+  whose effective date is on or before the **document transaction date**; a
+  future-effective rate is never bookable authority (the client fails closed on a
+  forward-dated response as well). Changing the Invoice Date or Receipt Date requeries
+  the reference for the new date, so a displayed rate cannot persist from the prior
+  date. The UI labels it an *authoritative reference exchange rate for this
+  transaction date* with its effective date and provider attribution — it is
+  MAS-backed **via Frankfurter**, which the copy does not overstate as direct
+  publication, and it is never described as real-time.
+- **Freshness is business-day, not calendar-day.** Age counts Monday–Friday strictly
+  after the effective date through the transaction date; more than three business days
+  is stale. Weekends therefore do not age a rate. This is **weekday-aware only — it is
+  not a jurisdictional public-holiday calendar**, and the UI wording says
+  "*n* business day(s) old" accordingly. A stale, missing, forward-dated or
+  provider-failed reference fails closed as `FX_REFERENCE_UNAVAILABLE`; no rate is
+  fabricated and no silent fallback to 1 occurs. A governed manual override remains
+  available only under its existing role and reason authority.
+- **Booked FX remains historical authority.** A later reference publication never
+  revalues an existing booked snapshot, journal, allocation or report contribution.
+  Company-base totals are computed from verified booked FX (`BASE_PARITY`, verified
+  `REFERENCE`, governed `MANUAL_OVERRIDE`) — never from today's market rate.
+- **Automation fails closed.** An unsupported AI/import currency maps to the bounded
+  `currency_unsupported` exception and an unavailable reference to
+  `fx_reference_unavailable`; neither becomes authoritative financial data.
+- **Scheduler cadence.** The proposed Production cadence is `30 7,12,17 * * *` UTC
+  (07:30 / 12:30 / 17:30) using the existing scheduler, provider and security
+  architecture — a cadence adjustment, not a new scheduler. **Not yet live.**
+- **Historical base-availability inventory is intentionally untouched.** Six legacy
+  Production records remain `LEGACY_UNVERIFIED` and excluded from company-base totals
+  (`INV-202606-00003`, `INV-202606-00005`, `INV-202606-00033`, `INV-202606-00059`,
+  `RCT-202606-00008`, `RCT-202606-00015`). All six carry journal and/or allocation
+  authority, so safe Draft repairs are **0** and safe non-destructive posted repairs
+  are **0**. They were **not** backfilled or revalued: this is intentional fail-closed
+  accounting history. The UI states this as *Base amount unavailable*, with
+  "Company-base total excludes *X* documents without verified booked FX." The
+  objective of this work is to stop correctly governed **new** MYR/SGD documents from
+  ever entering that state — not to repair the six.
 
 ---
 
@@ -2032,6 +2102,12 @@ subsystem. Rates are **reference** data: a booking rate must be explicitly selec
 and governed (`fx_booking_rate_decisions`), and automated allocation refuses to
 proceed unless `automation_fx_is_authoritative()` confirms booked-FX provenance for
 both the receipt and each invoice (`BR-AUTO-FX-UNAVAILABLE`).
+
+Provenance wording is deliberately bounded: rates are MAS-backed **via Frankfurter**,
+not a direct MAS publication feed, and the UI does not present them as real-time
+market quotes. Production currently runs one `07:30 UTC` sync; the Post-Gate-E
+cadence proposal is `30 7,12,17 * * *` UTC on the same job, provider and Vault
+secret — **local, not yet deployed** (see 11.23).
 
 ### 18.6 Vercel and Git integration
 
@@ -5192,6 +5268,7 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | Post-9D **Gate D** (dashboard distribution + monetary summary authority) | **Closed** |
 | **Gate E** (autonomous AR operations) | **CLOSED / PASS** — see 51.3 |
 | **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **CLOSED / PASS** — committed, migrated, deployed and safely verified without reconnecting the healthy mailbox |
+| **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **LOCAL IMPLEMENTATION — PENDING CODEX FINAL REVIEW / MIGRATION / DEPLOYMENT.** Migration 043 is **not applied**, the new scheduler cadence is **not live**, and Production remains in its existing pre-043 state |
 
 ### 51.2 Deployment state
 
@@ -5297,6 +5374,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 | **Implemented, deployed, activated, proven** | Core AR (customers, invoices, CN/DN, receipts, allocation, journals), imports, reports and exports, notifications, FX governance, dashboard authority, Gate E ingestion, document intelligence, Observe Only, Draft Only, Straight-Through, auto-allocation, fail-closed identifier authority, **governed recovery completion (Retry Matching, Migration 041 applied)**, **Reminder Evaluation and Reminder Delivery (Automatic Delivery)**, scheduler |
 | **Implemented, deployed, not activated** | Microsoft mail provider, real OCR provider for the import intake path |
 | **Implemented, deployed, safely verified** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow. The healthy Production mailbox remained enabled and was not reconnected |
+| **Implemented locally, NOT migrated, NOT deployed** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, 07:30 / 12:30 / 17:30 UTC cadence proposal). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 

@@ -15,7 +15,7 @@ export const FRANKFURTER_BASE_URL = `https://${FRANKFURTER_SOURCE_HOST}/v2`;
 export const FRANKFURTER_PROVIDER_RATE_TYPE = 'frankfurter-rebased-mas-reference';
 export const PROVIDER_TIMEOUT_MS = 8_000;
 export const REAL_PROVIDER_MAX_ATTEMPTS = 3;
-export const FX_REFERENCE_STALE_AFTER_DAYS = 3;
+export const FX_REFERENCE_STALE_AFTER_BUSINESS_DAYS = 3;
 export const INITIAL_REAL_PROVIDER_PAIRS = [
   { fromCurrency: 'SGD', toCurrency: 'MYR' },
   { fromCurrency: 'USD', toCurrency: 'MYR' },
@@ -233,19 +233,27 @@ export function lookupLatestOnOrBefore<T extends { effectiveDate: string }>(
 export function calculateStaleState(
   latestEffectiveDate: string | null,
   requestedDate: string,
-  thresholdDays = FX_REFERENCE_STALE_AFTER_DAYS,
+  thresholdBusinessDays = FX_REFERENCE_STALE_AFTER_BUSINESS_DAYS,
 ): { is_stale: boolean; stale_reason: string | null; age_days: number | null } {
   assertDate(requestedDate, 'requested_date');
   if (!latestEffectiveDate) {
     return { is_stale: true, stale_reason: 'missing_reference_rate', age_days: null };
   }
   assertDate(latestEffectiveDate, 'latest_effective_date');
-  const latest = Date.parse(`${latestEffectiveDate}T00:00:00.000Z`);
-  const requested = Date.parse(`${requestedDate}T00:00:00.000Z`);
-  const ageDays = Math.max(0, Math.floor((requested - latest) / 86_400_000));
+  const latest = new Date(`${latestEffectiveDate}T00:00:00.000Z`);
+  const requested = new Date(`${requestedDate}T00:00:00.000Z`);
+  let ageDays = 0;
+  for (
+    const cursor = new Date(latest.getTime() + 86_400_000);
+    cursor <= requested;
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  ) {
+    const weekday = cursor.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) ageDays += 1;
+  }
   return {
-    is_stale: ageDays > thresholdDays,
-    stale_reason: ageDays > thresholdDays ? 'effective_date_older_than_threshold' : null,
+    is_stale: ageDays > thresholdBusinessDays,
+    stale_reason: ageDays > thresholdBusinessDays ? 'effective_date_older_than_business_day_threshold' : null,
     age_days: ageDays,
   };
 }
