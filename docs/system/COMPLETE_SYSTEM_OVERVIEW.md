@@ -10,21 +10,22 @@
 | Field | Value |
 |---|---|
 | Document type | System dossier / technical reference |
-| Repository checkpoint | **Gate E closure** at commit `c24f5232c2c96099333fd6e98dbd0540dd7ce0f2` on branch `main` (`HEAD == origin/main`). Final Gate E implementation commit `2f7199c6720e3086064fc38e0d63722da9f254cf`; Migration 041 runtime remediation commit `cc6610bccfba28b06a221cef0f989001bd4e7e47`; Gate E evidence closure commit `c24f5232c2c96099333fd6e98dbd0540dd7ce0f2`. |
-| Working-tree state at checkpoint | At Gate E closure the tree was clean (`0` staged, `0` ahead/behind). A **separate, later Post-Gate-E task** — mailbox Delivery UX consolidation — is in progress **locally and uncommitted**: untracked `database/042_post_gate_e_mailbox_delivery_onboarding.sql` and `database/042b_..._smoke_tests.sql`, plus modified backend `automation/*` and frontend `automation/mailbox/oauth` files. Migration 042 is **local only — not committed, not applied, not deployed**. Untracked `Poster/` and `social-media/` directories are unrelated and **not** inspected (out of scope by instruction). |
+| Repository checkpoint | **Post-Gate-E mailbox Delivery UX rollout**: implementation commit `6c4e0d5f2c58f0fd6ba6a053aeee74bdd702d66b`, followed by rollback-smoke catalog compatibility commit `ccd51e5f7e2d281b124129fbfe8cacaac09b94de`, on branch `main`. Gate E remains closed at evidence commit `c24f5232c2c96099333fd6e98dbd0540dd7ce0f2`; its final implementation is `2f7199c6720e3086064fc38e0d63722da9f254cf` and Migration 041 remediation is `cc6610bccfba28b06a221cef0f989001bd4e7e47`. |
+| Working-tree state at checkpoint | The Post-Gate-E implementation is committed, pushed, migrated and deployed. Migration 042 is applied as ledger entry `20260811065053 post_gate_e_mailbox_delivery_onboarding`; rollback-only 042b passed on real PostgreSQL inside `BEGIN … ROLLBACK` and was not registered as a migration. Untracked `Poster/` and `social-media/` directories remain unrelated and excluded. |
 | Method | Read-only repository and Git-history analysis. Implementation (source, migrations, tests, configuration) was treated as the source of truth over prose documentation. |
 | Scope of this document | The entire AR system, not only the Gate E automation work. |
 | Sensitive data | No secret values, tokens, credentials, browser authentication state, or Vault contents appear in this document. Only variable **names** and their purposes are recorded. |
 
 > **Status.** Gate E (Autonomous AR Operations) is **CLOSED / PASS**. Production
-> runs **Automation v19** in **Straight-Through** operating mode with **Automatic
+> runs **Automation v21** in **Straight-Through** operating mode with **Automatic
 > Delivery** reminders; Migration 041 (Retry Matching runtime compatibility) is
 > **applied and verified in Production**, so the earlier `digest(...)` runtime
 > defect is **resolved**, not an active limitation. Section 51 records the exact
-> closure status. A **separate Post-Gate-E** mailbox Delivery UX consolidation
-> (Migration 042 and the one-action Enable-delivery flow) is **local
-> implementation pending Codex commit/migration/deployment** and is described as
-> such wherever current-state wording applies — it is **not** deployed.
+> closure status. The **separate Post-Gate-E** mailbox Delivery UX consolidation
+> is now deployed and verified: one business action starts governed OAuth when
+> needed and the server atomically enables Delivery only after successful callback
+> validation. The healthy Production credential was preserved rather than
+> destructively reconnected for this verification.
 
 ---
 
@@ -433,7 +434,7 @@ flowchart TB
   DEV["Developer workstation<br/>Windows 11, VS Code, PowerShell<br/>Node.js, npm, Deno, Supabase CLI"]
   GH["GitHub - main branch"]
   VC["Vercel Production<br/>Git-integrated deployment"]
-  SBF["Supabase Edge Functions<br/>versioned deploys, e.g. automation v19"]
+  SBF["Supabase Edge Functions<br/>versioned deploys, e.g. automation v21"]
   SBD[("Supabase PostgreSQL<br/>forward-only numbered migrations")]
   SEC["Supabase Edge secrets + Vault"]
 
@@ -4324,7 +4325,7 @@ Each is given impact, existing mitigation, and a possible future enhancement.
 | Demo-scale data | Performance characteristics unknown | Indexes and pagination are in place from the start | Seeded volume testing |
 | Microsoft provider unactivated | Untested in Production | Fully implemented behind the same interface and unit-tested | Activate with a real tenant |
 | No user-acceptance study | No usability or productivity measurement | The UX is documented and role-aware | Structured evaluation with SME finance staff |
-| Post-Gate-E Delivery UX not yet deployed | The one-action Enable-delivery flow (Migration 042) is local-only | It is implemented and validated locally against the reviewed backend contract | Codex commit → review → migration → deployment |
+| First-time Delivery onboarding was not destructively replayed against the healthy Production mailbox | The live credential was intentionally preserved | The complete Enable → OAuth → callback → automatic-enable path is covered by deterministic automated tests; Production verification covered the already-ready state | Exercise first-time onboarding with a dedicated non-Production mailbox if broader UAT is required |
 
 ---
 
@@ -5172,11 +5173,9 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 > `c24f5232c2c96099333fd6e98dbd0540dd7ce0f2` (branch `main`, `HEAD == origin/main`).**
 >
 > Gate E (Autonomous AR Operations) is **CLOSED / PASS**. The subsections below
-> record the closure state. A separate, later **Post-Gate-E** mailbox Delivery UX
-> consolidation (Migration 042 and the one-action Enable-delivery flow) is
-> **local implementation pending Codex commit/migration/deployment** and is
-> flagged as such wherever it appears; it is **not** part of the closed Gate E and
-> is **not** deployed.
+> record the closure state. The separate **Post-Gate-E** mailbox Delivery UX
+> consolidation is now deployed and verified; it does not alter the closed Gate E
+> result or its financial evidence.
 
 ### 51.1 Gate status
 
@@ -5192,16 +5191,16 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | Post-9D **Gate C** (report PDF/XLSX export) | Live |
 | Post-9D **Gate D** (dashboard distribution + monetary summary authority) | **Closed** |
 | **Gate E** (autonomous AR operations) | **CLOSED / PASS** — see 51.3 |
-| **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **Local implementation, pending deployment** — not committed/applied/deployed |
+| **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **CLOSED / PASS** — committed, migrated, deployed and safely verified without reconnecting the healthy mailbox |
 
 ### 51.2 Deployment state
 
 | Component | State at checkpoint |
 |---|---|
 | Frontend | Deployed to Vercel Production from the reviewed commit; canonical URL returned HTTP 200 |
-| Edge Functions | All 17 deployed; `automation` at **v19**, ACTIVE, with a recorded bundle SHA-256 |
-| Database migrations | `001`–`041` applied to Production. `039` recorded as `20260810185134 gate_e_authoritative_capability_profiles`; `040` as `20260810185201 gate_e_exception_recovery_authority`; **`041` as `20260811033608 gate_e_retry_matching_runtime_compatibility`** (Retry Matching runtime fix). Rollback-only `039b`/`040b`/`041b` deliberately **not** registered as migrations (each executed inside `BEGIN … ROLLBACK` as a PASS smoke) |
-| **Migration 042 + 042b** (Post-Gate-E Delivery UX) | **Local only** — untracked working-tree files. Not committed, not pushed, not applied, not deployed |
+| Edge Functions | All 17 deployed; `automation` at **v21**, ACTIVE, bundle SHA-256 `ef0cf68abe4c44c47bb6ef63366eb854df796fde41d9368381499a4bf5f267e9` |
+| Database migrations | `001`–`042` applied to Production. `039` recorded as `20260810185134 gate_e_authoritative_capability_profiles`; `040` as `20260810185201 gate_e_exception_recovery_authority`; **`041` as `20260811033608 gate_e_retry_matching_runtime_compatibility`**; and **`042` as `20260811065053 post_gate_e_mailbox_delivery_onboarding`**. Rollback-only smoke files are deliberately not migration-ledger entries |
+| **Migration 042 + 042b** (Post-Gate-E Delivery UX) | **Applied / verified** — 042 is installed once; 042b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue |
 | Scheduler | One active `gate-e-automation-worker` cron job, `*/10 * * * *`, succeeding |
 | Gmail mailbox | `kelvin.works.x@gmail.com` — connected, mailbox enabled, ingestion enabled, **Delivery enabled**, no reconnect required, history-cursor-backed, mapped to the receiving bank account. Ingestion and Delivery use **independent OAuth credential authority** even on the same Google account; Delivery proved scope `https://www.googleapis.com/auth/gmail.send` |
 | OpenAI | Active; `gpt-5.6-luna` via `responses-v1` |
@@ -5255,7 +5254,7 @@ should not be relied on:
 | Surface | Stale claim | Reality |
 |---|---|---|
 | `docs/architecture/GATE_E_AUTONOMOUS_AR_OPERATIONS_BACKEND.md` | "Migrations 034–038 … deployed. Gate E remains open in Draft Only … Migrations 039 and 040 … have not been committed, pushed, applied, deployed, or activated." | 039 and 040 **are** applied in Production; the mode is `straight_through` |
-| `docs/gate-e/AUTOMATION_USER_GUIDE.md` | "the backend is implemented locally, pending deployment … Nothing in this area processes real documents or sends real email today." | The backend is deployed (`automation` v19) and has processed real documents in Production |
+| `docs/gate-e/AUTOMATION_USER_GUIDE.md` | "the backend is implemented locally, pending deployment … Nothing in this area processes real documents or sends real email today." | The backend is deployed (`automation` v21) and has processed real documents in Production |
 | `frontend/src/lib/feature-status.ts` | Gate E rows labelled "Frontend Implemented — Pending Backend Deployment"; "Auto-Allocation: Disabled" | Auto-Allocation is enabled under `straight_through` and has executed |
 
 The authoritative status source is `docs/evidence/GATE_E_PRODUCTION_ROLLOUT_EVIDENCE.md`
@@ -5297,7 +5296,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 |---|---|
 | **Implemented, deployed, activated, proven** | Core AR (customers, invoices, CN/DN, receipts, allocation, journals), imports, reports and exports, notifications, FX governance, dashboard authority, Gate E ingestion, document intelligence, Observe Only, Draft Only, Straight-Through, auto-allocation, fail-closed identifier authority, **governed recovery completion (Retry Matching, Migration 041 applied)**, **Reminder Evaluation and Reminder Delivery (Automatic Delivery)**, scheduler |
 | **Implemented, deployed, not activated** | Microsoft mail provider, real OCR provider for the import intake path |
-| **Implemented locally, pending Codex commit/migration/deployment** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow |
+| **Implemented, deployed, safely verified** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow. The healthy Production mailbox remained enabled and was not reconnected |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 
@@ -5450,9 +5449,7 @@ Production; and no CI pipeline. (The earlier Retry Matching runtime defect was
 resolved by Migration 041, applied and verified in Production.)
 
 **Q. What would you do next?**
-Land the Post-Gate-E mailbox Delivery UX (Migration 042 and the one-action
-Enable-delivery flow) through commit, review, migration and deployment, then broaden
-the reminder proof beyond the single controlled invoice. After that: a governed tax-code
+Broaden the reminder proof beyond the single controlled invoice. After that: a governed tax-code
 mapping so real taxed invoices can be automated, per-tenant leases and Gmail push
 notifications for latency and scale, and a CI pipeline so the validation discipline is
 machine-enforced rather than documented.
@@ -5486,16 +5483,15 @@ machine-enforced rather than documented.
 
 | # | Enhancement | Why it is worth doing next |
 |---|---|---|
-| 1 | **Land the Post-Gate-E Delivery UX (Migration 042) through commit → review → migration → deployment** | The one-action Enable-delivery flow and its atomic finalizer are implemented locally; completing deployment removes the remaining manual/operator step for onboarding a Delivery credential |
-| 2 | **Broaden reminder proof beyond the single controlled evidence** | Reminder Evaluation and Delivery are Production-proven for one controlled invoice; wider real-world volume would further validate the "financial resilience" objective |
-| 3 | **Governed tax-code mapping for automation** | Removes the single largest functional gap — most real SME invoices carry tax, and `TAX_MAPPING_REQUIRED` currently blocks them |
-| 4 | **Richer exception analytics** | Counts and trends by reason code and by day would show *which* failure classes dominate and where extraction is weakest — good research material as well as good operations |
-| 5 | **Configurable reminder policies** | Per-customer or per-segment stage offsets and escalation, replacing the single tenant-wide array |
-| 6 | **Field-level provenance in the recovery panel** | Highlight where each candidate came from in the source document, so a Finance Manager decides faster and more confidently |
-| 7 | **Scheduler alerting** | An email or webhook after N consecutive failed or stalled cycles — currently a silent stall is only visible if someone opens the Overview screen |
-| 8 | **A CI pipeline** | Run the existing suites automatically on push; the tests already exist, only the automation is missing |
-| 9 | **Adversarial document corpus** | A regression suite of prompt-injection and malformed documents, turning a claimed defence into a tested one |
-| 10 | **Refresh the stale status surfaces** | Regenerate the architecture doc, user guide and `feature-status.ts` from the live database rather than maintaining them by hand |
+| 1 | **Broaden reminder proof beyond the single controlled evidence** | Reminder Evaluation and Delivery are Production-proven for one controlled invoice; wider real-world volume would further validate the "financial resilience" objective |
+| 2 | **Governed tax-code mapping for automation** | Removes the single largest functional gap — most real SME invoices carry tax, and `TAX_MAPPING_REQUIRED` currently blocks them |
+| 3 | **Richer exception analytics** | Counts and trends by reason code and by day would show *which* failure classes dominate and where extraction is weakest — good research material as well as good operations |
+| 4 | **Configurable reminder policies** | Per-customer or per-segment stage offsets and escalation, replacing the single tenant-wide array |
+| 5 | **Field-level provenance in the recovery panel** | Highlight where each candidate came from in the source document, so a Finance Manager decides faster and more confidently |
+| 6 | **Scheduler alerting** | An email or webhook after N consecutive failed or stalled cycles — currently a silent stall is only visible if someone opens the Overview screen |
+| 7 | **A CI pipeline** | Run the existing suites automatically on push; the tests already exist, only the automation is missing |
+| 8 | **Adversarial document corpus** | A regression suite of prompt-injection and malformed documents, turning a claimed defence into a tested one |
+| 9 | **Refresh the stale status surfaces** | Regenerate the architecture doc, user guide and `feature-status.ts` from the live database rather than maintaining them by hand |
 
 ### 55.2 Research-oriented extensions (well suited to an FYP write-up)
 
@@ -5760,7 +5756,7 @@ in the risk table are analytical, not measured — except where a risk is marked
 | Contents of `Poster/` and `social-media/` | **Not inspected** — excluded by instruction |
 | Contents of `backups/`, `frontend/playwright/.auth/`, `.env*` | **Not inspected** — git-ignored, and reading auth state is explicitly prohibited by `CLAUDE.md` |
 | Exact current row counts in Production | Section 51.5 records the authoritative counts **at Gate E closure**; live counts may have advanced since |
-| Post-Gate-E Delivery UX (Migration 042) deployment | **Local only** — implemented and validated locally, pending Codex commit/migration/deployment; not applied to Production |
+| Post-Gate-E Delivery UX (Migration 042) first-time live consent replay | **Not destructively repeated** — Migration 042 and the UI are deployed; automated tests prove Enable → OAuth → automatic enable, while Production verification intentionally preserved the already-healthy credential |
 
 ### 58.6 Deliberate omissions
 
