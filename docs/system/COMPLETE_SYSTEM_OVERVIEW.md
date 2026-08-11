@@ -244,7 +244,7 @@ in four measurable ways:
 - Double-entry journal entries and journal lines, with reversal support.
 - Multi-currency with a governed FX reference-rate service and booking-rate
   provenance/override governance. **New** AR financial transactions are scoped to
-  `MYR` and `SGD` (Post-Gate-E, local — see 11.23); historical `USD`/`EUR`/`GBP`/`CNY`
+  `MYR` and `SGD` (Post-Gate-E, deployed — see 11.23); historical `USD`/`EUR`/`GBP`/`CNY`
   records remain readable, searchable and reportable.
 - Aging analysis, customer statements, AR summaries, dashboard metrics, credit
   rating drill-down, and PDF/XLSX report export.
@@ -1164,7 +1164,7 @@ Notable groupings:
 | 031–033 | Post-Batch-9D Gates A / B / D (governed FX booking, notifications + rating drill-down, dashboard authority) |
 | 034–041 | Gate E: autonomous operations, OAuth vault, secure scheduler, critical-identifier authority, receipt-reference authority, capability profiles, exception recovery, retry-matching compatibility |
 | 042 | Post-Gate-E mailbox delivery onboarding |
-| **043** | **Post-Gate-E FX/currency freshness authority — LOCAL ONLY, NOT APPLIED.** Transaction-currency triggers, business-day freshness, FX scheduler cadence. `043b` is rollback-only and must never be registered as a ledger entry |
+| **043** | **Post-Gate-E FX/currency freshness authority — APPLIED / VERIFIED.** Prospective transaction-currency triggers, business-day freshness and the in-place FX scheduler cadence update. `043b` passed inside `BEGIN ... ROLLBACK` and is not a ledger entry |
 
 ---
 
@@ -1422,11 +1422,12 @@ governed booking-rate selection on invoice and receipt drafts
 (`fx_create_governed_invoice_draft`, `fx_select_reference_booking_rate`, and the
 decision/supersession tables from Migrations 017–026 and 031).
 
-#### Post-Gate-E transaction-currency and freshness authority (local, Migration 043 **not applied**)
+#### Post-Gate-E transaction-currency and freshness authority (deployed, Migration 043 applied)
 
-> Status during this checkpoint: **local implementation, pending Codex final review,
-> migration and deployment.** Production still runs the pre-043 state. Nothing below
-> is deployed, and no Production row has been changed.
+> Status: **CLOSED / PASS.** Migration 043, the reviewed Edge runtimes and the
+> frontend are deployed. Production verification changed reference data only through
+> the governed FX sync; it changed no financial document, journal, allocation,
+> reminder, delivery, command, or exception row.
 
 - **New-transaction currency scope.** `SUPPORTED_TRANSACTION_CURRENCIES = ['MYR','SGD']`
   governs newly created Invoices, Credit Notes, Debit Notes (all via the Invoice-family
@@ -1474,9 +1475,10 @@ decision/supersession tables from Migrations 017–026 and 031).
 - **Automation fails closed.** An unsupported AI/import currency maps to the bounded
   `currency_unsupported` exception and an unavailable reference to
   `fx_reference_unavailable`; neither becomes authoritative financial data.
-- **Scheduler cadence.** The proposed Production cadence is `30 7,12,17 * * *` UTC
+- **Scheduler cadence.** The Production cadence is `30 7,12,17 * * *` UTC
   (07:30 / 12:30 / 17:30) using the existing scheduler, provider and security
-  architecture — a cadence adjustment, not a new scheduler. **Not yet live.**
+  architecture — a cadence adjustment, not a new scheduler. It is live on the one
+  canonical job, whose command fingerprint and Vault-secret boundary were preserved.
 - **Historical base-availability inventory is intentionally untouched.** Six legacy
   Production records remain `LEGACY_UNVERIFIED` and excluded from company-base totals
   (`INV-202606-00003`, `INV-202606-00005`, `INV-202606-00033`, `INV-202606-00059`,
@@ -2105,9 +2107,9 @@ both the receipt and each invoice (`BR-AUTO-FX-UNAVAILABLE`).
 
 Provenance wording is deliberately bounded: rates are MAS-backed **via Frankfurter**,
 not a direct MAS publication feed, and the UI does not present them as real-time
-market quotes. Production currently runs one `07:30 UTC` sync; the Post-Gate-E
-cadence proposal is `30 7,12,17 * * *` UTC on the same job, provider and Vault
-secret — **local, not yet deployed** (see 11.23).
+market quotes. Production runs `30 7,12,17 * * *` UTC on the same canonical job,
+provider and Vault secret. A governed post-deployment invocation succeeded `3/3`
+with an active SGDMYR business-date reference and no duplicate Active group (see 11.23).
 
 ### 18.6 Vercel and Git integration
 
@@ -5268,15 +5270,16 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | Post-9D **Gate D** (dashboard distribution + monetary summary authority) | **Closed** |
 | **Gate E** (autonomous AR operations) | **CLOSED / PASS** — see 51.3 |
 | **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **CLOSED / PASS** — committed, migrated, deployed and safely verified without reconnecting the healthy mailbox |
-| **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **LOCAL IMPLEMENTATION — PENDING CODEX FINAL REVIEW / MIGRATION / DEPLOYMENT.** Migration 043 is **not applied**, the new scheduler cadence is **not live**, and Production remains in its existing pre-043 state |
+| **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **CLOSED / PASS.** Migration 043 is applied and verified, the reviewed Edge/frontend code is deployed, the three-run UTC cadence is live, and a governed Production FX sync succeeded without financial mutation |
 
 ### 51.2 Deployment state
 
 | Component | State at checkpoint |
 |---|---|
 | Frontend | Deployed to Vercel Production from the reviewed commit; canonical URL returned HTTP 200 |
-| Edge Functions | All 17 deployed; `automation` at **v21**, ACTIVE, bundle SHA-256 `ef0cf68abe4c44c47bb6ef63366eb854df796fde41d9368381499a4bf5f267e9` |
-| Database migrations | `001`–`042` applied to Production. `039` recorded as `20260810185134 gate_e_authoritative_capability_profiles`; `040` as `20260810185201 gate_e_exception_recovery_authority`; **`041` as `20260811033608 gate_e_retry_matching_runtime_compatibility`**; and **`042` as `20260811065053 post_gate_e_mailbox_delivery_onboarding`**. Rollback-only smoke files are deliberately not migration-ledger entries |
+| Edge Functions | All 17 deployed; task runtimes ACTIVE: `automation` v22, `invoices` v38, `receipts` v31, `imports` v35, `fx-rate-sync` v11 and `fx-rates` v11 |
+| Database migrations | `001`–`043` applied to Production. `041` is `20260811033608 gate_e_retry_matching_runtime_compatibility`; `042` is `20260811065053 post_gate_e_mailbox_delivery_onboarding`; **`043` is `20260811200301 post_gate_e_fx_currency_freshness_authority`**. Rollback-only smoke files are deliberately not migration-ledger entries |
+| **Migration 043 + 043b** (Post-Gate-E FX/currency) | **Applied / verified** — 043 is installed once; 043b passed against real Production PostgreSQL inside `BEGIN ... ROLLBACK` with zero persistent residue and no historical financial DML |
 | **Migration 042 + 042b** (Post-Gate-E Delivery UX) | **Applied / verified** — 042 is installed once; 042b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue |
 | Scheduler | One active `gate-e-automation-worker` cron job, `*/10 * * * *`, succeeding |
 | Gmail mailbox | `kelvin.works.x@gmail.com` — connected, mailbox enabled, ingestion enabled, **Delivery enabled**, no reconnect required, history-cursor-backed, mapped to the receiving bank account. Ingestion and Delivery use **independent OAuth credential authority** even on the same Google account; Delivery proved scope `https://www.googleapis.com/auth/gmail.send` |
@@ -5374,7 +5377,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 | **Implemented, deployed, activated, proven** | Core AR (customers, invoices, CN/DN, receipts, allocation, journals), imports, reports and exports, notifications, FX governance, dashboard authority, Gate E ingestion, document intelligence, Observe Only, Draft Only, Straight-Through, auto-allocation, fail-closed identifier authority, **governed recovery completion (Retry Matching, Migration 041 applied)**, **Reminder Evaluation and Reminder Delivery (Automatic Delivery)**, scheduler |
 | **Implemented, deployed, not activated** | Microsoft mail provider, real OCR provider for the import intake path |
 | **Implemented, deployed, safely verified** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow. The healthy Production mailbox remained enabled and was not reconnected |
-| **Implemented locally, NOT migrated, NOT deployed** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, 07:30 / 12:30 / 17:30 UTC cadence proposal). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
+| **Implemented, deployed, safely verified** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, live 07:30 / 12:30 / 17:30 UTC cadence). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 
@@ -5666,7 +5669,9 @@ Accounts Receivable (AR) module/
 │   ├── 038 ★                    Receipt-to-Invoice reference authority (internal + external)
 │   ├── 039 ★                    Backend-authoritative capability profiles
 │   ├── 040 ★                    Exception recovery authority
-│   ├── 041 (LOCAL ONLY)         Retry-matching runtime compatibility fix
+│   ├── 041                      Retry-matching runtime compatibility fix (applied)
+│   ├── 042                      Post-Gate-E mailbox Delivery onboarding (applied)
+│   ├── 043                      Post-Gate-E FX/currency freshness authority (applied)
 │   ├── operators/               One-off operator scripts + their contract tests
 │   └── README.md                Schema overview, ER diagram, PRD coverage matrix
 │

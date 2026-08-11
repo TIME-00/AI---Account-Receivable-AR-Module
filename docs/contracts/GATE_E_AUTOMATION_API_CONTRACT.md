@@ -503,7 +503,7 @@ closed union; it is not a free-form slug.
 
 `reason_code` accepts only Migration 034's bounded exception vocabulary plus
 Migration 037's prospective Straight-Through identifier refusal and the
-Post-Gate-E prospective FX-reference refusal introduced by local Migration 043:
+Post-Gate-E prospective FX-reference refusal deployed with Migration 043:
 `mailbox_not_configured`, `mailbox_reconnect_required`, `provider_unavailable`,
 `message_duplicate`, `attachment_duplicate`, `unsupported_file`, `unsafe_file`,
 `encrypted_document`, `oversized_document`, `ambiguous_classification`,

@@ -1,7 +1,7 @@
 # Post-Gate-E FX and Transaction-Currency Authority
 
-Status: local implementation complete; Migration 043 is not applied and no
-Production runtime is changed by this document.
+Status: CLOSED / PASS. Migration 043 is applied and verified in Production;
+the reviewed runtime and scheduler cadence are deployed.
 
 Gate E and the Mailbox Delivery UX rollout remain closed. This additive
 boundary governs future AR document creation and FX reference freshness.
@@ -111,3 +111,19 @@ Draft has no downstream financial authority.
   Automation operating mode.
 - Migration 043b is rollback-only and must never be registered as a persistent
   migration.
+
+## Production rollout evidence
+
+- Migration ledger: `20260811200301_post_gate_e_fx_currency_freshness_authority`.
+- Migration 043b passed against real Production PostgreSQL inside its reviewed
+  `BEGIN ... ROLLBACK` boundary and left no persistent residue.
+- The single canonical job remains `batch_9d_e_fx_scheduler_production`; its
+  command fingerprint was preserved while the schedule changed in place to
+  `30 7,12,17 * * *` UTC.
+- A governed scheduler-path invocation on FX Sync v11 completed `3/3` pairs
+  with zero failures and persisted the active SGDMYR reference `3.1969`,
+  effective `2026-08-11`, with MAS/Frankfurter provenance. No duplicate Active
+  company/pair/effective-date group exists.
+- Migration, smoke, deployment, and verification produced zero financial,
+  allocation, journal, reminder, delivery, command, or exception delta. The six
+  protected `LEGACY_UNVERIFIED` documents were not backfilled or revalued.

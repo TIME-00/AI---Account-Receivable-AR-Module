@@ -6,7 +6,7 @@ Status: active in Production from 2026-07-23.
 
 - Project: `kusseuycqgdilychphpq`.
 - Job: `batch_9d_e_fx_scheduler_production`.
-- Schedule: `30 7 * * *` UTC (`15:30` Asia/Kuala_Lumpur).
+- Schedule: `30 7,12,17 * * *` UTC (`15:30`, `20:30`, `01:30` Asia/Kuala_Lumpur).
 - Route: `POST /fx-rate-sync/scheduled-sync`.
 - Provider: `MAS` through the locked Frankfurter/MAS adapter contract.
 - Pairs: the approved SGD, USD and EUR reference pairs into company base currency MYR.
@@ -17,19 +17,24 @@ Status: active in Production from 2026-07-23.
 The job body and caller cannot override company, provider, pairs or route. The Edge function validates the
 scheduler secret and fails closed. A user JWT and the database admin key are not scheduler credentials.
 
-## Post-Gate-E freshness remediation (local, not deployed)
+## Post-Gate-E freshness remediation (deployed and verified)
 
-Read-only Production evidence showed that the single `07:30 UTC` attempt can
-run before the MAS-backed business-date publication is available. Migration 043
-therefore proposes `30 7,12,17 * * *` UTC for the same named job. It preserves
-the existing command and Vault secret, installs no competing job, and fails if
-the canonical name is duplicated. Until Migration 043 is independently reviewed
-and deployed, the installed Production schedule above remains authoritative.
+Read-only Production evidence showed that the former single `07:30 UTC` attempt
+could run before the MAS-backed business-date publication was available.
+Migration 043 changed the same named job in place to `30 7,12,17 * * *` UTC. It
+preserved the existing command fingerprint and Vault secret, installed no
+competing job, and fails if the canonical name is duplicated.
 
 Reference usability is measured using a three-business-day window rather than
 raw calendar age. The provider effective date must still be on or before the
 transaction date; weekends are excluded, while genuinely stale data continues
 to fail closed.
+
+Production ledger entry:
+`20260811200301_post_gate_e_fx_currency_freshness_authority`. The rollback-only
+043b smoke passed inside `BEGIN ... ROLLBACK` and is not a migration-ledger
+entry. A post-deployment governed scheduler-path invocation completed `3/3`
+pairs with zero failures and no duplicate Active reference group.
 
 ## Health checks
 
