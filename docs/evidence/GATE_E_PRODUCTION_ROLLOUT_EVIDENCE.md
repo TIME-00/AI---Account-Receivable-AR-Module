@@ -1706,3 +1706,80 @@ for the controlled representative; no delivery attempt exists. The 20:30 UTC
 natural cycle completed with zero messages, attachments, commands, allocations,
 or failures, and the reminder count remained one. This proves evaluation and
 stage idempotency while delivery remains provider-gated.
+
+## Migration 041 deployment and governed recovery completion
+
+Claude Code completed the independent read-only review of the four-file
+Migration 041 remediation with verdict PASS, no blocking defects, and deployment
+readiness READY. The exact remediation was frozen as commit
+`cc6610bccfba28b06a221cef0f989001bd4e7e47`, parent
+`a655d1f583c41be5807704871e472271a588de82`, and pushed to `main` at
+ahead/behind 0/0. Migration 041 was applied exactly once and recorded as
+`20260811033608_gate_e_retry_matching_runtime_compatibility`; rollback-only 041b
+was not registered as a migration.
+
+Production catalog verification proves both Retry Matching and Reminder
+Evaluation are postgres-owned SECURITY DEFINER functions with empty search paths
+and qualified `extensions.digest(...)` calls. The underlying `allocate_receipt`
+body remained unchanged. Direct EXECUTE is denied to PUBLIC, `anon`, and
+`authenticated`, while the reviewed `service_role` Edge path remains allowed.
+The exact reviewed 041b script then executed against real Production PostgreSQL
+inside its `BEGIN ... ROLLBACK` boundary and passed. It left no catalog, setting,
+financial, recovery, reminder, or delivery residue.
+
+The existing single Finance Manager `confirm_receipt_invoice_match` recovery was
+reused; no second recovery was recorded. Retry Matching created exactly one
+completed `human_confirmed_invoice` allocation decision and one active MYR 43.17
+allocation. `RCT-202608-00003` became Fully Allocated with zero unallocated;
+`INV-202608-00003` became Paid with zero outstanding; and the linked
+`critical_identifier_unverified` exception became resolved. Exactly one matching
+completion audit exists. The original `...NOMATCH` provider extraction and the
+immutable recovery record remain unchanged, and generic exception safe details
+still contain no candidate reference. The next 03:50 UTC natural scheduler cycle
+completed with zero failures and did not duplicate the recovery, decision,
+allocation, audit, command, or journal effect.
+
+## Final functional activation - controlled Reminder Delivery and Gate E closure
+
+The Production Gmail mailbox was provisioned with a unique opaque delivery Vault
+reference without changing ingestion, its history cursor, receiving-bank mapping,
+or any financial setting. The authenticated Finance Manager completed the
+separate Gmail delivery OAuth consent. The consumed OAuth state requested exactly
+`https://www.googleapis.com/auth/gmail.send`; the company/mailbox-bound Vault
+token exists, is current, and no token or credential value was exposed.
+Production then enabled mailbox delivery and atomically selected Reminder
+Automation `automatic_delivery`, deriving Reminder Evaluation and Reminder
+Delivery enabled while retaining Operating Mode `straight_through` and all five
+document-processing capabilities enabled.
+
+The 04:10 UTC natural worker pass delivered the existing stage -3 reminder for
+`INV-202608-00004` exactly once through Gmail to the controlled, currently assigned
+Sales Representative. The attempt is `sent`, has a provider message identifier,
+contains no error class or redacted error code, and the reminder is `delivered` at
+outstanding snapshot MYR 91.23. No provider-delivery exception was opened. The
+04:20 UTC natural worker pass completed with zero failures and left exactly one
+delivery attempt, proving duplicate-send prevention without a manual send or
+retry.
+
+Final Production counts are 20 Invoices, 14 Receipts, 15 allocation details, 31
+journal entries, 11 customers, seven Automation commands, two allocation
+decisions, one reminder, and one delivery attempt. Against the frozen activation
+baseline, every delta is explained by the controlled run: three posted Invoices
+(positive, negative, reminder), two posted Receipts, two allocations, five
+balanced posting journals, five document commands, two allocation decisions, one
+reminder, and one Gmail delivery. Customers are unchanged. The positive external-
+reference pair remains Paid/Fully Allocated for MYR 137.42; the recovered negative
+pair remains Paid/Fully Allocated for MYR 43.17. Historical Draft Invoice
+`INV-202608-00001` and Draft Receipt `RCT-202608-00001` remain unposted and
+unchanged. The historical unsupported-document exception remains open with zero
+retries.
+
+The final Production profile is Straight-Through with Mailbox Synchronization,
+Document Intelligence, Invoice Automation, Receipt Automation, and Auto-
+Allocation enabled. Reminder Automation is Automatic Delivery with evaluation
+and delivery enabled. Gate E is CLOSED / PASS. Production now demonstrates the
+complete monitoring-oriented autonomous AR workflow: Gmail ingestion, AI document
+understanding, deterministic validation, governed Invoice/Receipt creation and
+posting, deterministic external-reference matching, Auto-Allocation, fail-closed
+exception recovery with immutable human authority, deterministic Reminder
+Evaluation, and controlled idempotent Gmail Reminder Delivery.
