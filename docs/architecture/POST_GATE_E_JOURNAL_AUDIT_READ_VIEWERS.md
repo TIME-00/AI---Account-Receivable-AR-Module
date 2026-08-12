@@ -1,6 +1,6 @@
 # Post-Gate-E Journal and Audit Read Viewers
 
-Status: IMPLEMENTED / VALIDATED LOCALLY — PENDING CODEX REVIEW AND DEPLOYMENT. The backend/database read side passed independent review, and the frontend Journal Entries and Audit Trail viewers are implemented and validated locally. Migration 044 is **not applied**, the `journal-entries` and `audit-trail` Edge Functions are **not deployed**, and the frontend is **not deployed**. This work is not part of Gate E and does not change journal generation, posting, allocations, Automation, Gmail, FX authority, or historical evidence.
+Status: **CLOSED / PASS.** Migration 044 is applied once as `20260812032930_post_gate_e_journal_audit_read_viewers`; its rollback-only 044b smoke passed against Production PostgreSQL with zero residue. The `journal-entries` and `audit-trail` Edge Functions are ACTIVE at v1, and Vercel deployment `dpl_FBxeUWsH6YpmWLJbu4y3KbF25Zth` is READY from implementation commit `c845a7573a69b2a3d068ec25627121c7775f0dfb`. This work is not part of Gate E and does not change journal generation, posting, allocations, Automation, Gmail, FX authority, or historical evidence.
 
 The current Journal Entries and Settings > Audit Trail pages are no longer reference-only: they are read-only operational viewers over these APIs (list, filters, keyset pagination, and detail). The paragraph below describes the pre-implementation state that motivated the feature.
 
@@ -194,9 +194,11 @@ Every other field returns `value_redacted: true`; the raw old/new values are omi
 
 All functions are PostgreSQL-owned, `STABLE`, `SECURITY DEFINER`, and use `search_path=''` with fully-qualified objects. `PUBLIC`, `anon`, and `authenticated` have no execution privilege. Private source helpers also deny `service_role`; only the guarded list/detail RPCs form the backend boundary.
 
-The migration contains no financial or audit-source DML. The single new index is on the 33-row journal header table at the read-only Production inventory checkpoint, so its lock duration is expected to be minimal; rollout must still verify the live catalog before application.
+The migration contains no financial or audit-source DML. The single new index was applied to the 33-row journal header table and verified without a business-row delta.
 
-`database/044b_post_gate_e_journal_audit_read_viewers_smoke_tests.sql` is rollback-only. It validates ownership, security mode, search path, grants, list envelopes, unauthorized refusal, cross-company detail behavior when a second tenant fixture exists, and unchanged source-row counts.
+`database/044b_post_gate_e_journal_audit_read_viewers_smoke_tests.sql` is rollback-only. It validates ownership, security mode, search path, grants, list envelopes, unauthorized refusal, cross-company detail behavior with a second-tenant fixture, and unchanged source-row counts. It passed locally and against Production inside `BEGIN … ROLLBACK`; it is not a migration-ledger entry.
+
+Production verification exercised both list/detail read models with an existing active Finance Manager identity without returning identity data. Journal and Audit cursor continuations were stable and non-overlapping; journal search and audit action/entity/actor filters matched every returned row; list/detail audit events were identical; every Journal total remained an exact JSON string; all 33 entries were balanced; the 30 linkable sources used the bounded source object and all three `REV` rows remained non-linkable. The normalized audit projection contained 268 events at verification: user, system, and unknown actors remained distinct, all seven customer changes were redacted, no redacted old/new value was returned, and no forbidden metadata key was present. The stored browser session had expired, so no authenticated Playwright claim is made; local component coverage plus live RPC/catalog evidence are the repeatable verification authorities.
 
 ## Known evidence limitations
 

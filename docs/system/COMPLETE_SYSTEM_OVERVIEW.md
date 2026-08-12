@@ -826,8 +826,8 @@ Four independent reasons, all visible in code:
 | `fx-rate-sync` | Scheduled FX provider sync (Frankfurter) with lease + scheduler auth |
 | `daily-overdue` | Scheduled overdue status update and credit hold (BR-INV-005, BR-CM-004) |
 | `automation` | The complete Gate E surface (~40 routes) |
-| `journal-entries` | **Post-Gate-E read viewer** — `GET /journal-entries`, `GET /journal-entries/:id`. Read-only; no write route exists. **Local, not deployed** |
-| `audit-trail` | **Post-Gate-E read viewer** — `GET /audit-trail`, `GET /audit-trail/:eventId`. Read-only. **Local, not deployed** |
+| `journal-entries` | **Post-Gate-E read viewer** — `GET /journal-entries`, `GET /journal-entries/:id`. Read-only; no write route exists. **Production v1 ACTIVE** |
+| `audit-trail` | **Post-Gate-E read viewer** — `GET /audit-trail`, `GET /audit-trail/:eventId`. Read-only. **Production v1 ACTIVE** |
 
 `journal-entries/service.ts` remains a shared write-side service consumed by other
 functions. The new `journal-entries/index.ts` + `read-service.ts` add a separate
@@ -1367,9 +1367,9 @@ See Section 32. Sourced exclusively from import batches at this checkpoint.
 date, action, entity, actor and a bounded identifier search). The Gate E
 `audit-timeline.tsx` component remains the per-document timeline.
 
-> **Lifecycle: IMPLEMENTED / VALIDATED LOCALLY — PENDING CODEX REVIEW AND
-> DEPLOYMENT.** Migration 044 is not applied and neither Edge Function is
-> deployed, so this viewer is not live in Production.
+> **Lifecycle: CLOSED / PASS.** Migration 044 and its rollback-only 044b smoke
+> are applied/verified, both read Edge Functions are ACTIVE at v1, and the
+> reviewed frontend is deployed in Production.
 
 It is a **read model over authoritative stored evidence**, not a universal
 historical ledger, and the UI does not claim that every action is audited or
@@ -1462,9 +1462,9 @@ type, currency, GL account code) and a dedicated detail route showing the header
 the booked exchange-rate snapshot, reversal linkage, and every line in `line_no`
 order with debit, credit, base debit and base credit.
 
-> **Lifecycle: IMPLEMENTED / VALIDATED LOCALLY — PENDING CODEX REVIEW AND
-> DEPLOYMENT.** Migration 044 is not applied and the Edge Function is not
-> deployed, so this viewer is not live in Production.
+> **Lifecycle: CLOSED / PASS.** Migration 044 and its rollback-only 044b smoke
+> are applied/verified, `journal-entries` is ACTIVE at v1, and the reviewed
+> frontend list/detail viewer is deployed in Production.
 
 Properties worth stating explicitly:
 
@@ -5346,15 +5346,16 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | **Gate E** (autonomous AR operations) | **CLOSED / PASS** — see 51.3 |
 | **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **CLOSED / PASS** — committed, migrated, deployed and safely verified without reconnecting the healthy mailbox |
 | **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **CLOSED / PASS.** Migration 043 is applied and verified, the reviewed Edge/frontend code is deployed, the three-run UTC cadence is live, and a governed Production FX sync succeeded without financial mutation |
-| **Post-Gate-E Journal & Audit read viewers** (Migration 044) | **IMPLEMENTED / VALIDATED LOCALLY — PENDING CODEX REVIEW AND DEPLOYMENT.** Migration 044 is **not applied**, the `journal-entries` and `audit-trail` Edge Functions are **not deployed**, and the frontend viewers are **not deployed**. Production is unchanged |
+| **Post-Gate-E Journal & Audit read viewers** (Migration 044) | **CLOSED / PASS.** Migration 044 is applied and verified; 044b passed as a rollback-only Production smoke; both read Edge Functions are ACTIVE at v1; the frontend viewers are deployed and the rollout caused zero financial/audit-source mutation |
 
 ### 51.2 Deployment state
 
 | Component | State at checkpoint |
 |---|---|
 | Frontend | Deployed to Vercel Production from the reviewed commit; canonical URL returned HTTP 200 |
-| Edge Functions | All 17 deployed; task runtimes ACTIVE: `automation` v22, `invoices` v38, `receipts` v31, `imports` v35, `fx-rate-sync` v11 and `fx-rates` v11 |
-| Database migrations | `001`–`043` applied to Production. `041` is `20260811033608 gate_e_retry_matching_runtime_compatibility`; `042` is `20260811065053 post_gate_e_mailbox_delivery_onboarding`; **`043` is `20260811200301 post_gate_e_fx_currency_freshness_authority`**. Rollback-only smoke files are deliberately not migration-ledger entries |
+| Edge Functions | All 19 deployed; task runtimes ACTIVE: `automation` v22, `invoices` v38, `receipts` v31, `imports` v35, `fx-rate-sync` v11, `fx-rates` v11, **`journal-entries` v1** and **`audit-trail` v1** |
+| Database migrations | `001`–`044` applied to Production. `041` is `20260811033608 gate_e_retry_matching_runtime_compatibility`; `042` is `20260811065053 post_gate_e_mailbox_delivery_onboarding`; `043` is `20260811200301 post_gate_e_fx_currency_freshness_authority`; **`044` is `20260812032930 post_gate_e_journal_audit_read_viewers`**. Rollback-only smoke files are deliberately not migration-ledger entries |
+| **Migration 044 + 044b** (Journal/Audit read viewers) | **Applied / verified** — 044 is installed once; 044b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue and no source-row mutation |
 | **Migration 043 + 043b** (Post-Gate-E FX/currency) | **Applied / verified** — 043 is installed once; 043b passed against real Production PostgreSQL inside `BEGIN ... ROLLBACK` with zero persistent residue and no historical financial DML |
 | **Migration 042 + 042b** (Post-Gate-E Delivery UX) | **Applied / verified** — 042 is installed once; 042b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue |
 | Scheduler | One active `gate-e-automation-worker` cron job, `*/10 * * * *`, succeeding |
@@ -5454,7 +5455,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 | **Implemented, deployed, not activated** | Microsoft mail provider, real OCR provider for the import intake path |
 | **Implemented, deployed, safely verified** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow. The healthy Production mailbox remained enabled and was not reconnected |
 | **Implemented, deployed, safely verified** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, live 07:30 / 12:30 / 17:30 UTC cadence). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
-| **Implemented locally, NOT migrated, NOT deployed** | Post-Gate-E Journal Entries and Audit Trail read viewers — Migration 044 / 044b, the `journal-entries` and `audit-trail` read Edge Functions, and the two frontend viewers. Read-side only: no financial write path, no audit-source rewrite and no synthetic backfill |
+| **Implemented, deployed, safely verified** | Post-Gate-E Journal Entries and Audit Trail read viewers — Migration 044 / rollback-only 044b, `journal-entries` v1, `audit-trail` v1, and the two frontend viewers. Read-side only: no financial write path, no audit-source rewrite and no synthetic backfill |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 
@@ -5626,8 +5627,8 @@ machine-enforced rather than documented.
 | **Tenant isolation** | `company_id` everywhere, enforced at three layers plus tenant-link triggers | Proven structurally; only one tenant exists in Production |
 | **Auditability** | Immutable audit, classifications, extractions, ownership history and recovery evidence; the audit log is load-bearing | No metrics, tracing or alerting backend |
 | **Idempotency** | Six independent mechanisms; consecutive zero-work cycles proven | Adds conceptual complexity to every write path |
-| **Architecture** | Clear layering, six provider interfaces, one DTO boundary, a frozen versioned contract | Very large surface: 41 migrations, a 4 774-line service file |
-| **Testing** | ~1 000 frontend + 468 backend tests, DB smoke tests, 34 E2E flows, controlled Production proofs | No CI, no load testing, no coverage thresholds, no automated accessibility audit |
+| **Architecture** | Clear layering, six provider interfaces, one DTO boundary, a frozen versioned contract | Very large surface: 44 migrations, a 4 774-line service file |
+| **Testing** | 1,127 frontend + 510 backend tests, DB smoke tests, deterministic E2E flows, controlled Production proofs | No CI, no load testing, no coverage thresholds, no automated accessibility audit |
 | **UX** | Role-aware navigation, truthful readiness, three-stage document view, exact-decimal money rendering | No bulk exception actions, no localisation, single reminder policy, no general document viewer |
 | **Scalability** | Bounded queries, purposeful partial indexes, pagination, retention purging | Single global lease, hard per-cycle ceilings, client-side export generation, single region |
 | **Documentation** | Extensive plans, reviews, runbooks and dated evidence per gate | Three status surfaces are stale relative to the code (Section 51.4) |
