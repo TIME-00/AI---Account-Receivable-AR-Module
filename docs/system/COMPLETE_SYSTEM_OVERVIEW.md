@@ -642,7 +642,7 @@ frontend/src/
       credit-notes/                List
       receipts/                    List, new, import, [id] detail
       allocations/                 Allocation Wizard
-      journal-entries/             Journal reference
+      journal-entries/             Read-only Journal viewer: list + [id] detail
       notifications/               Notification centre
       reports/                     Report centre + aging/invoices/receipts/outstanding
       profile/                     User profile
@@ -674,7 +674,9 @@ uses a nested `layout.tsx` that renders role-filtered sub-tabs.
 - `components/layout/sidebar.tsx` — collapsible navigation with three sections
   (*Main Menu*: Dashboard, Customers, Invoices, Credit Notes, Receipts, Allocation
   Wizard, Automation; *Reports & Analytics*: Report Center, Journal Entries;
-  *System*: Settings, Roles, Audit Trail);
+  *System*: Settings, Roles, Audit Trail). Journal Entries and Audit Trail are
+  role-gated in the nav (`visibleTo`), so a role that cannot use them does not
+  see them; this is a UX gate only and direct URLs still fail closed on the page;
 - `components/layout/header.tsx` — global search, notification dropdown, profile;
 - `components/layout/ar-help-panel.tsx` — a slide-over help panel rendered from
   Markdown.
@@ -824,9 +826,12 @@ Four independent reasons, all visible in code:
 | `fx-rate-sync` | Scheduled FX provider sync (Frankfurter) with lease + scheduler auth |
 | `daily-overdue` | Scheduled overdue status update and credit hold (BR-INV-005, BR-CM-004) |
 | `automation` | The complete Gate E surface (~40 routes) |
+| `journal-entries` | **Post-Gate-E read viewer** — `GET /journal-entries`, `GET /journal-entries/:id`. Read-only; no write route exists. **Local, not deployed** |
+| `audit-trail` | **Post-Gate-E read viewer** — `GET /audit-trail`, `GET /audit-trail/:eventId`. Read-only. **Local, not deployed** |
 
-`journal-entries/service.ts` is a shared service consumed by other functions rather
-than a separate HTTP entry point.
+`journal-entries/service.ts` remains a shared write-side service consumed by other
+functions. The new `journal-entries/index.ts` + `read-service.ts` add a separate
+read-only HTTP entry point alongside it and do not change posting behaviour.
 
 ### 8.2 Deno runtime
 
@@ -1165,6 +1170,7 @@ Notable groupings:
 | 034–041 | Gate E: autonomous operations, OAuth vault, secure scheduler, critical-identifier authority, receipt-reference authority, capability profiles, exception recovery, retry-matching compatibility |
 | 042 | Post-Gate-E mailbox delivery onboarding |
 | **043** | **Post-Gate-E FX/currency freshness authority — APPLIED / VERIFIED.** Prospective transaction-currency triggers, business-day freshness and the in-place FX scheduler cadence update. `043b` passed inside `BEGIN ... ROLLBACK` and is not a ledger entry |
+| **044** | **Post-Gate-E Journal/Audit read viewers — IMPLEMENTED LOCALLY, NOT APPLIED.** Read-only `journal_read_*` / `audit_read_*` RPCs, one cursor index, no DML. `044b` is rollback-only and must never be registered as a ledger entry |
 
 ---
 
@@ -1356,9 +1362,45 @@ See Section 32. Sourced exclusively from import batches at this checkpoint.
 
 ### 11.12 Audit trail
 
-`settings/audit-log/page.tsx` plus the Gate E `audit-timeline.tsx` component render
-`automation_audit_events` and the legacy `customer_change_logs`,
-`credit_control_logs`, `report_audit_logs`.
+`settings/audit-log/page.tsx` is a **read-only Audit Trail viewer** over the
+`audit-trail` Edge Function (list + event detail, keyset paginated, filterable by
+date, action, entity, actor and a bounded identifier search). The Gate E
+`audit-timeline.tsx` component remains the per-document timeline.
+
+> **Lifecycle: IMPLEMENTED / VALIDATED LOCALLY — PENDING CODEX REVIEW AND
+> DEPLOYMENT.** Migration 044 is not applied and neither Edge Function is
+> deployed, so this viewer is not live in Production.
+
+It is a **read model over authoritative stored evidence**, not a universal
+historical ledger, and the UI does not claim that every action is audited or
+imply any certification. Normalized events are projected from sources that
+already record their own evidence: invoice/receipt create-post-cancel columns,
+allocations and reversals, Credit Note allocations, generated journals,
+`customer_change_logs`, `credit_control_logs`, `report_audit_logs`, selected
+`automation_audit_events` lifecycle types, reminders and delivery attempts, FX
+booking decision events, and import batches. Events that were never recorded
+simply do not appear — no state transition is reconstructed or invented.
+
+**Privacy and redaction.** The API returns allow-listed scalar metadata per
+source kind and nothing else; an unrecognised key or a non-scalar value fails the
+whole response closed. No OAuth token, refresh token, provider secret, Vault
+value, API key, Gmail body, attachment, OCR text, model prompt/response, bank
+credential, command payload, raw provider response or internal exception is
+reachable. Customer change values are exposed only for an explicit list of
+non-sensitive fields; anything else returns `value_redacted` and the UI renders
+*"Value changed — sensitive value hidden"* rather than a value — including in
+tooltips and `title` attributes. `auth.users` is never joined, so `display_name`
+is always null and no name or email is exposed.
+
+**Actor semantics.** `user` requires a stored user id; `system` is used only
+where the stored origin evidence supports it; anything else stays `unknown` and
+is displayed as *Unknown* — never relabelled as system automation.
+
+**Role policy.** Finance Manager and Auditor only. AR Clerk and AR Supervisor do
+not receive a company-wide audit trail, and System Admin is configuration-only —
+the page living under Settings does not grant access. Navigation hides the entry
+for roles that cannot use it, and both the Edge Function and an independent
+database role check enforce the boundary.
 
 ### 11.13 Documents and mailbox ingestion
 
@@ -1411,8 +1453,41 @@ per-mailbox OAuth, exposed to Finance Manager and System Admin only.
 ### 11.22 Global search, profile, journal entries
 
 `search` Edge Function powers header search (`use-global-search.ts`);
-`profile/page.tsx` shows the signed-in identity and roles; `journal-entries/page.tsx`
-is a read/reference surface over `journal_entries` and `journal_entry_lines`.
+`profile/page.tsx` shows the signed-in identity and roles.
+
+`journal-entries/page.tsx` and `journal-entries/[id]/page.tsx` are a **read-only
+Journal Entries viewer** over the `journal-entries` Edge Function: a filterable,
+keyset-paginated list (search on JE number / source document, date range, source
+type, currency, GL account code) and a dedicated detail route showing the header,
+the booked exchange-rate snapshot, reversal linkage, and every line in `line_no`
+order with debit, credit, base debit and base credit.
+
+> **Lifecycle: IMPLEMENTED / VALIDATED LOCALLY — PENDING CODEX REVIEW AND
+> DEPLOYMENT.** Migration 044 is not applied and the Edge Function is not
+> deployed, so this viewer is not live in Production.
+
+Properties worth stating explicitly:
+
+- **System-generated authority.** Journal entries are produced by the backend
+  when a document is posted, cancelled or reversed. There is **no manual journal
+  entry editor** and no create, edit, delete, post or reverse control anywhere in
+  this viewer — it is strictly read-only, and it covers AR activity rather than a
+  complete general ledger.
+- **Exact decimals.** Amounts are backend `NUMERIC` values cast to text and
+  rendered verbatim; the frontend never parses a monetary value through
+  `Number`, so no binary floating point enters the display path.
+- **Safe source linkage.** A source-document link is rendered only from the
+  backend's allow-listed `source` object (Invoice / Credit Note / Debit Note /
+  Receipt, resolved inside the company boundary). `REV`, `ADJ`, `WO` and
+  unresolved sources render as plain text — no destination is inferred from a
+  source string.
+- **Fail-closed detail.** The service rejects a detail whose returned line count
+  disagrees with `line_count`, so an incomplete same-company GL join is never
+  displayed as if it were the whole entry.
+- **Role policy.** AR Supervisor, Finance Manager and Auditor. AR Clerk has no
+  company-wide journal access and System Admin gains no financial read authority;
+  navigation hides the entry for roles that cannot use it, and the Edge Function
+  plus an independent database role check remain the authority.
 
 ### 11.23 FX reference rates and booking governance
 
@@ -5271,6 +5346,7 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | **Gate E** (autonomous AR operations) | **CLOSED / PASS** — see 51.3 |
 | **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **CLOSED / PASS** — committed, migrated, deployed and safely verified without reconnecting the healthy mailbox |
 | **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **CLOSED / PASS.** Migration 043 is applied and verified, the reviewed Edge/frontend code is deployed, the three-run UTC cadence is live, and a governed Production FX sync succeeded without financial mutation |
+| **Post-Gate-E Journal & Audit read viewers** (Migration 044) | **IMPLEMENTED / VALIDATED LOCALLY — PENDING CODEX REVIEW AND DEPLOYMENT.** Migration 044 is **not applied**, the `journal-entries` and `audit-trail` Edge Functions are **not deployed**, and the frontend viewers are **not deployed**. Production is unchanged |
 
 ### 51.2 Deployment state
 
@@ -5378,6 +5454,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 | **Implemented, deployed, not activated** | Microsoft mail provider, real OCR provider for the import intake path |
 | **Implemented, deployed, safely verified** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow. The healthy Production mailbox remained enabled and was not reconnected |
 | **Implemented, deployed, safely verified** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, live 07:30 / 12:30 / 17:30 UTC cadence). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
+| **Implemented locally, NOT migrated, NOT deployed** | Post-Gate-E Journal Entries and Audit Trail read viewers — Migration 044 / 044b, the `journal-entries` and `audit-trail` read Edge Functions, and the two frontend viewers. Read-side only: no financial write path, no audit-source rewrite and no synthetic backfill |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 

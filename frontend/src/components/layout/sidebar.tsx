@@ -22,8 +22,28 @@ import {
   ShieldCheck,
   Shield,
 } from "lucide-react";
+import { useUserRole } from "@/hooks/use-user-role";
+import {
+  AUDIT_VIEWER_ROLES,
+  JOURNAL_VIEWER_ROLES,
+} from "@/lib/journal-audit/contract";
 
-const navItems = [
+/**
+ * Navigation items. `visibleTo` is an optional UX gate: a role that cannot use
+ * a destination does not see it, so nobody navigates into a predictable
+ * permission-denied page. It is presentation only — the Edge Function and the
+ * database role checks remain the security authority, and a direct URL visit
+ * still fails closed on its own page.
+ */
+const navItems: Array<{
+  section: string;
+  items: Array<{
+    href: string;
+    label: string;
+    icon: typeof LayoutDashboard;
+    visibleTo?: readonly string[];
+  }>;
+}> = [
   {
     section: "Main Menu",
     items: [
@@ -40,7 +60,12 @@ const navItems = [
     section: "Reports & Analytics",
     items: [
       { href: "/reports",         label: "Report Center",  icon: BarChart3 },
-      { href: "/journal-entries", label: "Journal Entries", icon: BookOpen },
+      {
+        href: "/journal-entries",
+        label: "Journal Entries",
+        icon: BookOpen,
+        visibleTo: JOURNAL_VIEWER_ROLES,
+      },
     ],
   },
   {
@@ -48,7 +73,12 @@ const navItems = [
     items: [
       { href: "/settings",           label: "Settings",     icon: Settings },
       { href: "/settings/roles",     label: "Roles",        icon: ShieldCheck },
-      { href: "/settings/audit-log", label: "Audit Trail",  icon: Shield },
+      {
+        href: "/settings/audit-log",
+        label: "Audit Trail",
+        icon: Shield,
+        visibleTo: AUDIT_VIEWER_ROLES,
+      },
     ],
   },
 ];
@@ -60,6 +90,18 @@ interface SidebarProps {
 export function Sidebar({ onToggleHelp }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
+  const { roles } = useUserRole();
+
+  // Until the authenticated context resolves, `roles` is empty and a gated item
+  // stays hidden — the conservative direction for a permission gate.
+  const visibleSections = navItems
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (item) => !item.visibleTo || item.visibleTo.some((role) => roles.includes(role as never)),
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <aside
@@ -83,7 +125,7 @@ export function Sidebar({ onToggleHelp }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-5">
-        {navItems.map((section) => (
+        {visibleSections.map((section) => (
           <div key={section.section}>
             {!collapsed && (
               <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-600">
