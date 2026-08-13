@@ -30,6 +30,7 @@ import {
 } from "@/components/features/journal-audit/states";
 import { formatDateTime } from "@/lib/automation/format";
 import { formatDate } from "@/lib/utils";
+import { useRegisterCopilotEntity } from "@/providers/copilot-entity-provider";
 
 const DENIED_MESSAGE =
   `The Journal Entries viewer is available to ${JOURNAL_VIEWER_ROLES.join(", ")}. ` +
@@ -44,6 +45,13 @@ export default function JournalEntryDetailPage() {
   const { data, isLoading, isError, error, refetch } = useJournalEntryDetail(
     id,
     allowed && isResolved,
+  );
+
+  // AR Copilot names the entry by its JE number, never by the raw id.
+  useRegisterCopilotEntity(
+    data
+      ? { entityType: "journal_entry", entityId: id, displayNumber: data.je_no }
+      : null,
   );
 
   const status =

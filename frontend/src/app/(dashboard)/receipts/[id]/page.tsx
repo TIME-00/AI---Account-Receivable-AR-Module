@@ -23,6 +23,7 @@ import {
   isPostedDocumentStatus,
 } from "@/lib/fx-presentation";
 import { useBaseCurrency } from "@/hooks/use-base-currency";
+import { useRegisterCopilotEntity } from "@/providers/copilot-entity-provider";
 import { PAYMENT_METHOD_NAMES } from "@/types";
 import {
   ChevronRight, XCircle, ArrowLeft, AlertCircle,
@@ -38,6 +39,14 @@ export default function ReceiptDetailPage() {
   const { baseCurrency } = useBaseCurrency();
   const cancelMutation = useCancelReceipt();
   const { canCancelReceipt } = useUserRole();
+
+  // Give AR Copilot the receipt on screen plus its display number, so the
+  // context chip names the record without exposing the UUID from the URL.
+  useRegisterCopilotEntity(
+    receipt
+      ? { entityType: "receipt", entityId: id, displayNumber: receipt.receipt_no }
+      : null,
+  );
 
   // ── Cancel action ──────────────────────────────────────────────────
   const handleCancel = async () => {

@@ -16,6 +16,7 @@ import { useReceipts, useCustomerExposure } from "@/hooks/use-receipts";
 import { formatMoney, formatMoneySafe, normalizeCurrency } from "@/lib/currency";
 import { CurrencyTotals } from "@/components/ui/currency-subtotals";
 import { CustomerSalesRepPanel } from "@/components/features/automation/customer-sales-rep-panel";
+import { useRegisterCopilotEntity } from "@/providers/copilot-entity-provider";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,17 @@ export default function CustomerDetailPage() {
   // (customers/service.ts::getCustomerById) enforces is_deleted / is_hidden and
   // assignment scope, and 404s when the customer is genuinely inaccessible.
   const { data: customer, isLoading: loadingCust, error: errorCust } = useCustomer(customerId);
+
+  // AR Copilot shows the customer name rather than the UUID from the URL.
+  useRegisterCopilotEntity(
+    customer
+      ? {
+          entityType: "customer",
+          entityId: customerId,
+          displayNumber: customer.customer_name,
+        }
+      : null,
+  );
 
   // B9DD-FEIR-002 / RR-002: invoices/receipts are filtered BY THE SERVER on
   // customer_id, with authoritative collection totals, and each tab keeps its

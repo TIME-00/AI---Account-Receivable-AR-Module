@@ -25,6 +25,8 @@ import {
   isPostedDocumentStatus,
 } from "@/lib/fx-presentation";
 import { useBaseCurrency } from "@/hooks/use-base-currency";
+import { useRegisterCopilotEntity } from "@/providers/copilot-entity-provider";
+import type { CopilotEntityType } from "@/lib/ar-copilot/contract";
 import type { InvoiceLine } from "@/types";
 import {
   ChevronRight, Send, XCircle, ArrowLeft,
@@ -35,6 +37,18 @@ const DOC_TYPE_COLORS: Record<string, string> = {
   Invoice: "bg-blue-50 text-blue-700",
   "Credit Note": "bg-purple-50 text-purple-700",
   "Debit Note": "bg-amber-50 text-amber-700",
+};
+
+/**
+ * This one route renders all three Invoice-family documents, but AR Copilot
+ * treats them as distinct context types. Mapping the real `doc_type` keeps the
+ * hint truthful; anything unrecognised falls back to `invoice`, which is what
+ * the route itself already claims.
+ */
+const COPILOT_ENTITY_BY_DOC_TYPE: Record<string, CopilotEntityType> = {
+  Invoice: "invoice",
+  "Credit Note": "credit_note",
+  "Debit Note": "debit_note",
 };
 
 export default function InvoiceDetailPage() {
@@ -48,6 +62,18 @@ export default function InvoiceDetailPage() {
   const cancelMutation = useCancelInvoice();
   const [isPosting, setIsPosting] = useState(false);
   const { canPostInvoice, canCancelInvoice } = useUserRole();
+
+  // Tell AR Copilot which document is on screen, and give it the display number
+  // it should show instead of the UUID from the URL.
+  useRegisterCopilotEntity(
+    invoice
+      ? {
+          entityType: COPILOT_ENTITY_BY_DOC_TYPE[invoice.doc_type] ?? "invoice",
+          entityId: id,
+          displayNumber: invoice.invoice_no,
+        }
+      : null,
+  );
 
   // ── Post action ────────────────────────────────────────────────────
   const handlePost = async () => {

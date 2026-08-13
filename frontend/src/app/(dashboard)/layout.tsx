@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
-import { ArHelpPanel } from "@/components/layout/ar-help-panel";
+import { ArCopilotPanel } from "@/components/features/ar-copilot/copilot-panel";
+import { CopilotEntityProvider } from "@/providers/copilot-entity-provider";
 import { usePathname } from "next/navigation";
 
 export default function DashboardLayout({
@@ -16,7 +17,7 @@ export default function DashboardLayout({
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -40,25 +41,29 @@ export default function DashboardLayout({
   if (!user) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-app-bg">
-      {/* Sidebar */}
-      <Sidebar onToggleHelp={() => setHelpOpen((v) => !v)} />
+    // The provider lets a detail screen tell the Copilot which record it shows.
+    // It wraps the whole shell so the panel and the page share one registration.
+    <CopilotEntityProvider>
+      <div className="flex h-screen overflow-hidden bg-app-bg">
+        {/* Sidebar */}
+        <Sidebar onToggleHelp={() => setCopilotOpen((v) => !v)} />
 
-      {/* Main Content Area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
+        {/* Main Content Area */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header />
 
-        {/* Page Content */}
-        {/* `key={pathname}` restarts the entry animation on every navigation,
-            so a route change reads as the content arriving rather than as an
-            instant swap. The shell itself never re-animates. */}
-        <main key={pathname} className="ds-page-enter flex-1 overflow-auto p-6">
-          {children}
-        </main>
+          {/* Page Content */}
+          {/* `key={pathname}` restarts the entry animation on every navigation,
+              so a route change reads as the content arriving rather than as an
+              instant swap. The shell itself never re-animates. */}
+          <main key={pathname} className="ds-page-enter flex-1 overflow-auto p-6">
+            {children}
+          </main>
+        </div>
+
+        {/* AR Copilot — AI assistant plus the preserved Workflow Guide */}
+        {copilotOpen && <ArCopilotPanel onClose={() => setCopilotOpen(false)} />}
       </div>
-
-      {/* AR Help / Workflow Guide (local, static guidance — no external AI) */}
-      {helpOpen && <ArHelpPanel onClose={() => setHelpOpen(false)} />}
-    </div>
+    </CopilotEntityProvider>
   );
 }

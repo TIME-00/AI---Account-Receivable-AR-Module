@@ -16,7 +16,7 @@ import {
   Workflow,
   ChevronLeft,
   ChevronRight,
-  LifeBuoy,
+  Sparkles,
   Settings,
   Zap,
   ShieldCheck,
@@ -179,7 +179,9 @@ export function Sidebar({ onToggleHelp }: SidebarProps) {
         ))}
       </nav>
 
-      {/* AR Help / Workflow Guide Button (local help — no external AI) */}
+      {/* AR Copilot — the AI assistant and the Workflow Guide share one drawer.
+          The icon is a restrained spark rather than a mascot: this is a finance
+          console, and the entry should read as a tool, not a toy. */}
       {onToggleHelp && (
         <div className="px-2 pb-2">
           <button
@@ -191,10 +193,10 @@ export function Sidebar({ onToggleHelp }: SidebarProps) {
               "border border-nav-border",
               collapsed && "justify-center px-0"
             )}
-            title={collapsed ? "AR Help" : undefined}
+            title={collapsed ? "AR Copilot" : undefined}
           >
-            <LifeBuoy className="h-[18px] w-[18px] shrink-0 transition-transform duration-normal ease-emphasized group-hover:scale-110" />
-            {!collapsed && <span>AR Help</span>}
+            <Sparkles className="h-[18px] w-[18px] shrink-0 transition-transform duration-normal ease-emphasized group-hover:scale-110 group-hover:text-brand-500" />
+            {!collapsed && <span>AR Copilot</span>}
           </button>
         </div>
       )}

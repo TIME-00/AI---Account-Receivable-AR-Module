@@ -649,7 +649,7 @@ frontend/src/
       settings/                    Settings, roles, audit-log
       automation/                  Gate E area (layout + 7 sub-routes)
   components/
-    layout/                        sidebar, header, ar-help-panel
+    layout/                        sidebar, header
     ui/                            kpi-card, money-cell, status-badge, ...
     features/                      domain components by area
   hooks/                           data + logic hooks (~30 files)
@@ -678,8 +678,13 @@ uses a nested `layout.tsx` that renders role-filtered sub-tabs.
   role-gated in the nav (`visibleTo`), so a role that cannot use them does not
   see them; this is a UX gate only and direct URLs still fail closed on the page;
 - `components/layout/header.tsx` — global search, notification dropdown, profile;
-- `components/layout/ar-help-panel.tsx` — a slide-over help panel rendered from
-  Markdown.
+- `components/features/ar-copilot/copilot-panel.tsx` — the **AR Copilot** slide-over,
+  opened from the sidebar. It combines the read-only AI assistant (*Ask Copilot*)
+  with the preserved deterministic **Workflow Guide**, and replaces the former
+  `ar-help-panel.tsx`. The shell wraps its children in `CopilotEntityProvider` so a
+  detail screen can tell the Copilot which record it is showing. Status at the end
+  of the Claude phase: implemented and validated locally; pending Codex final review
+  and deployment. See `docs/architecture/POST_MODERNIZATION_AR_COPILOT.md`.
 
 ### 7.4 Components
 

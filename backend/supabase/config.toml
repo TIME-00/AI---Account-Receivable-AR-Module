@@ -383,6 +383,11 @@ verify_jwt = false
 [functions.automation]
 verify_jwt = false
 
+# AR Copilot validates the bearer token, company membership, and multi-role
+# authority in-function before any allow-listed read tool can run.
+[functions.ar-copilot]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
