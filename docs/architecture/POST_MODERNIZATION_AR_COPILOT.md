@@ -387,4 +387,26 @@ The final rollout completed on 2026-08-14:
    no Copilot conversation was submitted and no financial, Gmail, Automation,
    Reminder, FX, Journal, Audit, or report state was mutated by this task.
 
+### Live multi-turn remediation (2026-08-14)
+
+Authenticated Production acceptance subsequently exposed a Responses API input
+defect: the first user-only turn succeeded, but replayed assistant history was
+serialized as an `input_text` content part. The provider rejected that follow-up
+request before any read tool executed. The remediation now sends canonical
+`user`/`assistant` message content, replays provider function calls with their
+original `call_id`, and appends correlated `function_call_output` items in the
+reviewed Responses API order.
+
+The server policy now explicitly distinguishes casual/general conversation,
+system knowledge, live AR data, write/action requests, and unauthorized requests.
+Casual conversation needs no financial tool; current/live questions still require
+authorized live evidence; action requests remain read-only. Content-free provider
+diagnostics record request ID, phase, round, attempt, HTTP status, sanitized error
+category, tool name, and latency without prompts, answers, arguments, or AR DTOs.
+
+Remediation commit `f22cc385ec89b19d33234176cfa3a854e63e8a8f` deployed as
+Supabase `ar-copilot` v2. Authenticated read-only Production Playwright acceptance
+verified greeting, second-turn pleasantry, system-guide, live overdue, Invoice
+context, and Receipt context flows. Pre/post financial counts were identical.
+
 There is no database migration or server-side chat-history table for this feature.
