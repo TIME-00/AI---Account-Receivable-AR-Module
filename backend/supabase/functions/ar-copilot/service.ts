@@ -39,12 +39,23 @@ export interface CopilotTelemetry {
   error_category: string | null;
 }
 
+export interface CopilotPhaseTelemetry {
+  request_id: string;
+  phase: "tool_execution";
+  round: number;
+  tool_name: string;
+  success: boolean;
+  latency_ms: number;
+  error_category: string | null;
+}
+
 export interface CopilotServiceDependencies {
   model: CopilotModelProvider;
   reads: CopilotReadServiceContract;
   requestId?: () => string;
   now?: () => number;
   recordTelemetry?: (event: CopilotTelemetry) => void;
+  recordPhaseTelemetry?: (event: CopilotPhaseTelemetry) => void;
 }
 
 function uniqueEvidence(items: CopilotEvidence[]): CopilotEvidence[] {
@@ -83,16 +94,22 @@ function contextInput(
 ): CopilotModelInputItem {
   return {
     role: "user",
-    content: [{
-      type: "input_text",
-      text: `${UNTRUSTED_CONTEXT_NOTICE}\n<untrusted_page_context>\n${
-        JSON.stringify({
-          page: request.context.page,
-          entity: outcome?.data ?? null,
-        })
-      }\n</untrusted_page_context>`,
-    }],
+    content: `${UNTRUSTED_CONTEXT_NOTICE}\n<untrusted_page_context>\n${
+      JSON.stringify({
+        page: request.context.page,
+        entity: outcome?.data ?? null,
+      })
+    }\n</untrusted_page_context>`,
   };
+}
+
+export function conversationInput(
+  request: CopilotChatRequest,
+): CopilotModelInputItem[] {
+  return request.messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+  }));
 }
 
 export class CopilotService {
@@ -102,6 +119,7 @@ export class CopilotService {
   readonly #requestId: () => string;
   readonly #now: () => number;
   readonly #recordTelemetry: (event: CopilotTelemetry) => void;
+  readonly #recordPhaseTelemetry: (event: CopilotPhaseTelemetry) => void;
 
   constructor(dependencies: CopilotServiceDependencies) {
     this.#model = dependencies.model;
@@ -113,6 +131,11 @@ export class CopilotService {
       ((event) =>
         console.info(
           JSON.stringify({ event: "ar_copilot_request", ...event }),
+        ));
+    this.#recordPhaseTelemetry = dependencies.recordPhaseTelemetry ??
+      ((event) =>
+        console.info(
+          JSON.stringify({ event: "ar_copilot_phase", ...event }),
         ));
   }
 
@@ -137,20 +160,22 @@ export class CopilotService {
       }
       const evidence: CopilotEvidence[] = [...(context?.evidence ?? [])];
       const links: CopilotLink[] = [...(context?.links ?? [])];
-      const input: CopilotModelInputItem[] = request.messages.map((
-        message,
-      ) => ({
-        role: message.role,
-        content: [{ type: "input_text", text: message.content }],
-      }));
+      const input = conversationInput(request);
       input.push(contextInput(request, context));
       const question = request.messages.at(-1)?.content ?? "";
+      const requiresLiveData = questionRequiresLiveData(question);
+      const allowsLiveTools = requiresLiveData || context !== null;
 
       for (let round = 0; round <= COPILOT_MAX_TOOL_ROUNDS; round += 1) {
-        const turn = await this.#model.turn(input);
+        const turn = await this.#model.turn(input, {
+          requestId,
+          phase: round === 0 ? "initial_openai" : "post_tool_openai",
+          round,
+        });
         if (turn.type === "answer") {
-          const usedLiveTool = toolNames.some(isLiveDataTool);
-          const answer = questionRequiresLiveData(question) && !usedLiveTool
+          const hasLiveEvidence = context !== null ||
+            toolNames.some(isLiveDataTool);
+          const answer = requiresLiveData && !hasLiveEvidence
             ? "I cannot verify the current company information from system guidance alone. Please ask again so I can check the authorized live records."
             : validateCopilotAnswer(turn.answer);
           success = true;
@@ -181,7 +206,19 @@ export class CopilotService {
             429,
           );
         }
+        const executed: Array<{
+          call: typeof turn.calls[number];
+          outcome: CopilotToolOutcome;
+        }> = [];
         for (const call of turn.calls) {
+          if (isLiveDataTool(call.name) && !allowsLiveTools) {
+            throw new BusinessError(
+              "COPILOT_RESPONSE_UNVERIFIED",
+              "The requested information could not be verified.",
+              502,
+            );
+          }
+          const toolStarted = this.#now();
           let outcome: CopilotToolOutcome;
           try {
             outcome = await this.#tools.execute(
@@ -190,6 +227,15 @@ export class CopilotService {
               call.arguments,
             );
           } catch (error) {
+            this.#recordPhaseTelemetry({
+              request_id: requestId,
+              phase: "tool_execution",
+              round,
+              tool_name: call.name,
+              success: false,
+              latency_ms: Math.max(0, this.#now() - toolStarted),
+              error_category: errorCategory(error),
+            });
             if (error instanceof AuthorizationError) throw error;
             if (error instanceof ValidationError) {
               throw new BusinessError(
@@ -202,14 +248,30 @@ export class CopilotService {
           }
           calls += 1;
           toolNames.push(call.name);
+          this.#recordPhaseTelemetry({
+            request_id: requestId,
+            phase: "tool_execution",
+            round,
+            tool_name: call.name,
+            success: true,
+            latency_ms: Math.max(0, this.#now() - toolStarted),
+            error_category: null,
+          });
           evidence.push(...outcome.evidence);
           links.push(...outcome.links);
-          input.push({
-            type: "function_call",
-            call_id: call.call_id,
-            name: call.name,
-            arguments: call.arguments,
-          });
+          executed.push({ call, outcome });
+        }
+        for (const { call } of executed) {
+          input.push(
+            call.replay_item ?? {
+              type: "function_call",
+              call_id: call.call_id,
+              name: call.name,
+              arguments: call.arguments,
+            },
+          );
+        }
+        for (const { call, outcome } of executed) {
           input.push({
             type: "function_call_output",
             call_id: call.call_id,

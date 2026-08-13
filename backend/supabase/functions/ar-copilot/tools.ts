@@ -481,14 +481,48 @@ export function isLiveDataTool(name: string): boolean {
   return name !== "search_system_guide";
 }
 
-export function questionRequiresLiveData(question: string): boolean {
-  const lower = question.toLowerCase();
+export type CopilotQuestionIntent =
+  | "casual_general"
+  | "system_knowledge"
+  | "live_data"
+  | "write_action";
+
+export function classifyCopilotQuestion(
+  question: string,
+): CopilotQuestionIntent {
+  const lower = question.trim().toLowerCase();
+  if (
+    /^(?:hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening))[!.?\s]*$/
+      .test(
+        lower,
+      ) ||
+    /^(?:how are you(?: today)?|what can you (?:do|help me with)|can you explain (?:that|it) (?:more )?simply)[?.!\s]*$/
+      .test(
+        lower,
+      )
+  ) return "casual_general";
+  if (
+    /^(?:please\s+)?(?:post|cancel|allocate|reverse|send|change|delete|create)\b/
+      .test(
+        lower,
+      ) ||
+    /^(?:can|could|would|will) you\s+(?:please\s+)?(?:post|cancel|allocate|reverse|send|change|delete|create)\b/
+      .test(
+        lower,
+      )
+  ) return "write_action";
   if (
     /^\s*what (?:is|does|are)\b/.test(lower) &&
     !/\b(my|our|this|current|today|now)\b/.test(lower)
   ) {
-    return false;
+    return "system_knowledge";
   }
-  return /\b(current|today|now|latest|outstanding|overdue|unapplied|unallocated|still open|audit activity|which customers|which invoices|which documents|which (?:automation )?exceptions|how much|how many|what happened|why (?:is|was|did)|this customer|this invoice|this receipt|this document|this journal|this record|my customer|our customer|received any allocation)\b/
-    .test(lower);
+  return /\b(current|today|now|latest|balance|outstanding|overdue|unapplied|unallocated|still open|audit activity|which customers|which invoices|which documents|which (?:automation )?exceptions|how much|how many|what happened|why (?:is|was|did)|this customer|this invoice|this receipt|this document|this journal|this record|my customer|our customer|received any allocation)\b/
+      .test(lower)
+    ? "live_data"
+    : "system_knowledge";
+}
+
+export function questionRequiresLiveData(question: string): boolean {
+  return classifyCopilotQuestion(question) === "live_data";
 }

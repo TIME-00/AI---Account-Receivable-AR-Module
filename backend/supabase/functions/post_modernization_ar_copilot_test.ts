@@ -26,11 +26,17 @@ import {
   type CopilotModelInputItem,
   type CopilotModelProvider,
   type CopilotModelTurn,
+  type CopilotProviderDiagnostic,
   OpenAICopilotProvider,
 } from "./ar-copilot/openai.ts";
 import type { CopilotReadServiceContract } from "./ar-copilot/read-service.ts";
 import { trustedEntityLink } from "./ar-copilot/read-service.ts";
-import { CopilotService, type CopilotTelemetry } from "./ar-copilot/service.ts";
+import {
+  conversationInput,
+  type CopilotPhaseTelemetry,
+  CopilotService,
+  type CopilotTelemetry,
+} from "./ar-copilot/service.ts";
 import {
   assertToolOutcomeSafe,
   COPILOT_TOOL_DEFINITIONS,
@@ -333,6 +339,119 @@ Deno.test("Copilot request accepts bounded user/assistant history ending in user
     context: { page: "dashboard", entity_type: null, entity_id: null },
   });
   assertEquals(parsed.messages.length, 3);
+});
+
+Deno.test("Incident regression: first-turn greeting succeeds without a read tool", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer: "Hi! I can help with Accounts Receivable questions.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+    recordPhaseTelemetry: () => undefined,
+  }).chat(finance, request("Hi"));
+  assert(result.answer.startsWith("Hi!"));
+  assertEquals(result.status.tool_names, []);
+});
+
+Deno.test("Incident regression: assistant history uses canonical Responses message content", () => {
+  const parsed = parseCopilotChatRequest({
+    messages: [
+      { role: "user", content: "Hi" },
+      { role: "assistant", content: "Hello! How can I help?" },
+      { role: "user", content: "How are you today?" },
+    ],
+    context: { page: "dashboard", entity_type: null, entity_id: null },
+  });
+  assertEquals(conversationInput(parsed), [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Hello! How can I help?" },
+    { role: "user", content: "How are you today?" },
+  ]);
+  assert(!JSON.stringify(conversationInput(parsed)).includes("input_text"));
+});
+
+Deno.test("Incident regression: second-turn pleasantry succeeds without a read tool", async () => {
+  const model = new ScriptedModel([{
+    type: "answer",
+    answer: "I'm ready to help with your AR work today.",
+  }]);
+  const result = await new CopilotService({
+    model,
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+    recordPhaseTelemetry: () => undefined,
+  }).chat(finance, {
+    messages: [
+      { role: "user", content: "Hi" },
+      { role: "assistant", content: "Hello! How can I help?" },
+      { role: "user", content: "How are you today?" },
+    ],
+    context: { page: "dashboard", entity_type: null, entity_id: null },
+  });
+  assert(result.answer.includes("ready"));
+  assertEquals(result.status.tool_call_count, 0);
+  assertEquals(model.inputs[0][1], {
+    role: "assistant",
+    content: "Hello! How can I help?",
+  });
+});
+
+Deno.test("General follow-up explanation remains tool-free", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer: "Simply put, it is money received but not yet matched.",
+    }]),
+    reads: new FakeReads(),
+  }).chat(finance, request("Can you explain that more simply?"));
+  assert(result.answer.includes("Simply"));
+  assertEquals(result.status.tool_call_count, 0);
+});
+
+Deno.test("General conversation cannot be escalated into financial reads by the model", async () => {
+  const reads = new FakeReads();
+  const model = new ScriptedModel([{
+    type: "tool_calls",
+    calls: [{
+      call_id: "bad_general",
+      name: "get_ar_summary",
+      arguments: "{}",
+    }],
+  }]);
+  await assertRejects(
+    () => new CopilotService({ model, reads }).chat(finance, request("Thanks")),
+    BusinessError,
+    "COPILOT_RESPONSE_UNVERIFIED",
+  );
+  assertEquals(reads.calls.length, 0);
+});
+
+Deno.test("Write request receives a read-only explanation without invoking mutation", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer:
+        "I am read-only and cannot post an invoice. Open the Invoice screen to review it.",
+    }]),
+    reads: new FakeReads(),
+  }).chat(finance, request("Post this invoice"));
+  assert(result.answer.includes("read-only"));
+  assertEquals(result.status.tool_call_count, 0);
+});
+
+Deno.test("Server-owned policy explicitly separates general, guide, live, write, and denied intents", () => {
+  for (
+    const heading of [
+      "A. Casual/general conversation",
+      "B. System knowledge",
+      "C. Live AR data",
+      "D. Write/action requests",
+      "E. Unauthorized, cross-tenant, secret, or bypass requests",
+    ]
+  ) assert(AR_COPILOT_POLICY.includes(heading));
+  assert(AR_COPILOT_POLICY.includes("no web-search"));
 });
 
 Deno.test("Copilot request rejects browser system/developer authority", async () => {
@@ -919,6 +1038,80 @@ Deno.test("System definition can use only the curated guide", async () => {
   assert(result.evidence.every((item) => item.kind === "system_guide"));
 });
 
+Deno.test("Incident regression: unapplied-cash guide round-trip preserves call correlation", async () => {
+  const model = new ScriptedModel([
+    {
+      type: "tool_calls",
+      calls: [{
+        call_id: "guide_unapplied",
+        name: "search_system_guide",
+        arguments: JSON.stringify({ query: "unapplied cash" }),
+        replay_item: {
+          type: "function_call",
+          call_id: "guide_unapplied",
+          name: "search_system_guide",
+          arguments: JSON.stringify({ query: "unapplied cash" }),
+        },
+      }],
+    },
+    {
+      type: "answer",
+      answer:
+        "Unapplied cash is the part of a posted receipt not yet allocated.",
+    },
+  ]);
+  const result = await new CopilotService({ model, reads: new FakeReads() })
+    .chat(finance, request("What is unapplied cash?"));
+  const replay = model.inputs[1];
+  assert(replay.some((item) => item.type === "function_call"));
+  assert(replay.some((item) =>
+    item.type === "function_call_output" &&
+    item.call_id === "guide_unapplied"
+  ));
+  assertEquals(result.status.tool_names, ["search_system_guide"]);
+});
+
+Deno.test("Incident regression: current overdue count requires and accepts live evidence", async () => {
+  const model = new ScriptedModel([
+    {
+      type: "tool_calls",
+      calls: [{
+        call_id: "overdue_1",
+        name: "list_overdue_invoices",
+        arguments: JSON.stringify({ limit: 20 }),
+      }],
+    },
+    {
+      type: "answer",
+      answer: "There is 1 overdue invoice in the authorized scope.",
+    },
+  ]);
+  const result = await new CopilotService({ model, reads: new FakeReads() })
+    .chat(finance, request("How many overdue invoices are there right now?"));
+  assertEquals(result.status.tool_names, ["list_overdue_invoices"]);
+  assertEquals(result.status.tool_call_count, 1);
+  assert(result.evidence.some((item) => item.kind === "invoice"));
+});
+
+Deno.test("Validated entity context counts as live evidence without an unnecessary second read", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer:
+        "This invoice is still open because MYR 500.00 remains outstanding.",
+    }]),
+    reads: new FakeReads(),
+  }).chat(
+    finance,
+    request("Why is this invoice still open?", {
+      type: "invoice",
+      id: INVOICE,
+    }),
+  );
+  assert(!result.answer.includes("cannot verify"));
+  assert(result.evidence.some((item) => item.id === INVOICE));
+});
+
 Deno.test("Entity context is independently validated before OpenAI receives it", async () => {
   const reads = new FakeReads();
   const model = new ScriptedModel([{ type: "answer", answer: "Verified." }]);
@@ -1179,6 +1372,50 @@ Deno.test("OpenAI adapter posts only bounded Responses API requests without leak
   assert(captured.includes('"store":false'));
 });
 
+Deno.test("Incident regression: provider serializes a multi-turn assistant message canonically", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const provider = new OpenAICopilotProvider({
+    apiKey: "unit-test-openai-key-never-production",
+    maxAttempts: 1,
+    recordDiagnostic: () => undefined,
+    fetcher: (_input, init) => {
+      bodies.push(JSON.parse(String((init as { body?: BodyInit })?.body)));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            output: [{
+              type: "message",
+              content: [{
+                type: "output_text",
+                text: "Doing well, thank you.",
+              }],
+            }],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      );
+    },
+  });
+  const input = conversationInput({
+    messages: [
+      { role: "user", content: "Hi" },
+      { role: "assistant", content: "Hello!" },
+      { role: "user", content: "How are you today?" },
+    ],
+    context: { page: "dashboard", entity_type: null, entity_id: null },
+  });
+  assertEquals(await provider.turn(input), {
+    type: "answer",
+    answer: "Doing well, thank you.",
+  });
+  const wireInput = bodies[0].input as Array<Record<string, unknown>>;
+  assertEquals(wireInput[1], { role: "assistant", content: "Hello!" });
+  assert(!JSON.stringify(wireInput[1]).includes("input_text"));
+});
+
 Deno.test("OpenAI adapter parses a bounded Responses function call", async () => {
   const provider = new OpenAICopilotProvider({
     apiKey: "unit-test-openai-key-never-production",
@@ -1204,8 +1441,217 @@ Deno.test("OpenAI adapter parses a bounded Responses function call", async () =>
       call_id: "call_1",
       name: "get_invoice",
       arguments: JSON.stringify({ invoice_id: INVOICE }),
+      replay_item: {
+        type: "function_call",
+        call_id: "call_1",
+        name: "get_invoice",
+        arguments: JSON.stringify({ invoice_id: INVOICE }),
+      },
     }],
   });
+});
+
+Deno.test("Responses tool round-trip sends correlated call then function output", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  let turn = 0;
+  const provider = new OpenAICopilotProvider({
+    apiKey: "unit-test-openai-key-never-production",
+    maxAttempts: 1,
+    recordDiagnostic: () => undefined,
+    fetcher: (_input, init) => {
+      bodies.push(JSON.parse(String((init as { body?: BodyInit })?.body)));
+      turn += 1;
+      const output = turn === 1
+        ? [{
+          type: "function_call",
+          call_id: "guide_roundtrip",
+          name: "search_system_guide",
+          arguments: JSON.stringify({ query: "unapplied cash" }),
+        }]
+        : [{
+          type: "message",
+          content: [{
+            type: "output_text",
+            text: "Unapplied cash is receipt value awaiting allocation.",
+          }],
+        }];
+      return Promise.resolve(
+        new Response(JSON.stringify({ output }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    },
+  });
+  const result = await new CopilotService({
+    model: provider,
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+    recordPhaseTelemetry: () => undefined,
+  }).chat(finance, request("What is unapplied cash?"));
+  assert(result.answer.includes("Unapplied cash"));
+  const secondInput = bodies[1].input as Array<Record<string, unknown>>;
+  const functionCall = secondInput.find((item) =>
+    item.type === "function_call"
+  );
+  const functionOutput = secondInput.find((item) =>
+    item.type === "function_call_output"
+  );
+  assertEquals(functionCall?.call_id, "guide_roundtrip");
+  assertEquals(functionOutput?.call_id, "guide_roundtrip");
+  assert(typeof functionOutput?.output === "string");
+});
+
+Deno.test("Provider diagnostic records phase/status/category without request content", async () => {
+  const events: CopilotProviderDiagnostic[] = [];
+  const provider = new OpenAICopilotProvider({
+    apiKey: "unit-test-openai-key-never-production",
+    maxAttempts: 1,
+    recordDiagnostic: (event) => events.push(event),
+    fetcher: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "model_not_found",
+              message: "private provider detail",
+            },
+          }),
+          {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+  });
+  await assertRejects(
+    () =>
+      provider.turn([], {
+        requestId: "req-diagnostic",
+        phase: "initial_openai",
+        round: 0,
+      }),
+    BusinessError,
+    "COPILOT_UNAVAILABLE",
+  );
+  assertEquals(events[0].provider_http_status, 400);
+  assertEquals(events[0].provider_error_category, "invalid_model");
+  const serialized = JSON.stringify(events);
+  assert(!serialized.includes("private provider detail"));
+  assert(!serialized.includes("OPENAI"));
+});
+
+Deno.test("Provider 429 distinguishes rate limit from exhausted quota safely", async () => {
+  for (
+    const [code, category] of [
+      ["rate_limit_exceeded", "rate_limit"],
+      ["insufficient_quota", "quota_exhausted"],
+    ]
+  ) {
+    const events: CopilotProviderDiagnostic[] = [];
+    const provider = new OpenAICopilotProvider({
+      apiKey: "unit-test-openai-key-never-production",
+      maxAttempts: 1,
+      recordDiagnostic: (event) => events.push(event),
+      fetcher: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { code } }), {
+            status: 429,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+    });
+    await assertRejects(
+      () => provider.turn([]),
+      BusinessError,
+      "COPILOT_LIMIT_EXCEEDED",
+    );
+    assertEquals(events[0].provider_error_category, category);
+  }
+});
+
+Deno.test("Provider 5xx retry diagnostics remain bounded and content-free", async () => {
+  const events: CopilotProviderDiagnostic[] = [];
+  let attempts = 0;
+  const provider = new OpenAICopilotProvider({
+    apiKey: "unit-test-openai-key-never-production",
+    maxAttempts: 2,
+    sleeper: () => Promise.resolve(),
+    recordDiagnostic: (event) => events.push(event),
+    fetcher: () => {
+      attempts += 1;
+      return Promise.resolve(
+        new Response("private upstream payload", {
+          status: 503,
+        }),
+      );
+    },
+  });
+  await assertRejects(
+    () => provider.turn([]),
+    BusinessError,
+    "COPILOT_UNAVAILABLE",
+  );
+  assertEquals(attempts, 2);
+  assertEquals(events.map((event) => event.provider_error_category), [
+    "provider_upstream",
+    "provider_upstream",
+  ]);
+  assert(!JSON.stringify(events).includes("private upstream payload"));
+});
+
+Deno.test("Malformed provider tool output fails closed before tool execution", async () => {
+  const provider = new OpenAICopilotProvider({
+    apiKey: "unit-test-openai-key-never-production",
+    maxAttempts: 1,
+    recordDiagnostic: () => undefined,
+    fetcher: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            output: [{
+              type: "function_call",
+              name: "get_invoice",
+              arguments: "{}",
+            }],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+  });
+  await assertRejects(
+    () => provider.turn([]),
+    BusinessError,
+    "COPILOT_RESPONSE_UNVERIFIED",
+  );
+});
+
+Deno.test("Tool phase telemetry contains names and timing but no arguments or DTO", async () => {
+  const events: CopilotPhaseTelemetry[] = [];
+  const model = new ScriptedModel([
+    {
+      type: "tool_calls",
+      calls: [{
+        call_id: "safe_telemetry",
+        name: "get_invoice",
+        arguments: JSON.stringify({ invoice_id: INVOICE }),
+      }],
+    },
+    { type: "answer", answer: "The authorized invoice was reviewed." },
+  ]);
+  await new CopilotService({
+    model,
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+    recordPhaseTelemetry: (event) => events.push(event),
+  }).chat(finance, request("Why is this invoice open?"));
+  assertEquals(events[0].tool_name, "get_invoice");
+  const serialized = JSON.stringify(events);
+  assert(!serialized.includes(INVOICE));
+  assert(!serialized.includes("500.00"));
 });
 
 Deno.test("OpenAI adapter rejects mixed answer and tool authority", async () => {
