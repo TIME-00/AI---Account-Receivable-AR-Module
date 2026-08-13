@@ -157,7 +157,7 @@ export default function JournalEntriesPage() {
       {/* ── Filters ── */}
       <section
         aria-label="Journal entry filters"
-        className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3"
+        className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-surface p-3"
       >
         <FilterField label="Search" htmlFor="je-search">
           <div className="relative">
@@ -279,7 +279,7 @@ export default function JournalEntriesPage() {
             company-wide total.
           </p>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-surface">
             <table className="w-full min-w-[980px] text-sm">
               <caption className="sr-only">
                 Journal entries, newest first. Select a JE number to open its detail.

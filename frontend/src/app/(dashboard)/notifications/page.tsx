@@ -106,7 +106,7 @@ export default function NotificationsPage() {
                 "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
                 readState === tab.value
                   ? "border-brand-200 bg-brand-50 text-brand-700"
-                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+                  : "border-slate-200 bg-surface text-slate-500 hover:bg-slate-50",
               )}
             >
               {tab.label}
@@ -124,7 +124,7 @@ export default function NotificationsPage() {
                 "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
                 (typeFilter === "all" ? "all" : typeFilter) === tab.value
                   ? "border-brand-200 bg-brand-50 text-brand-700"
-                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+                  : "border-slate-200 bg-surface text-slate-500 hover:bg-slate-50",
               )}
             >
               {tab.label}

@@ -89,7 +89,7 @@ export default function AutomationOverviewPage() {
 
       {/* Operating mode + readiness */}
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-surface p-5">
           <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Operating Mode
           </p>
@@ -104,7 +104,7 @@ export default function AutomationOverviewPage() {
           </p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-surface p-5">
           <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Document Intelligence
           </p>
@@ -116,7 +116,7 @@ export default function AutomationOverviewPage() {
           </p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-surface p-5">
           <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Ingestion Readiness
           </p>
@@ -129,7 +129,7 @@ export default function AutomationOverviewPage() {
           </p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-surface p-5">
           <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Delivery Readiness
           </p>
@@ -141,7 +141,7 @@ export default function AutomationOverviewPage() {
           </p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-xl border border-slate-200 bg-surface p-5">
           <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Synchronization
           </p>
@@ -155,7 +155,7 @@ export default function AutomationOverviewPage() {
       </section>
 
       {/* Capabilities — read-only, backend-derived from the automation modes. */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <section className="rounded-xl border border-slate-200 bg-surface p-5">
         <h2 className="text-sm font-semibold text-slate-800">Capabilities</h2>
         <p className="mt-1 text-xs text-slate-500">
           Capabilities are managed automatically based on the selected automation

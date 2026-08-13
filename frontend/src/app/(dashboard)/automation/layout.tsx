@@ -50,7 +50,7 @@ export default function AutomationLayout({ children }: { children: React.ReactNo
         <>
           <nav
             aria-label="Automation sections"
-            className="flex flex-wrap gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1"
+            className="flex flex-wrap gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-surface p-1"
           >
             {tabs.map((tab) => {
               const active = tab.exact

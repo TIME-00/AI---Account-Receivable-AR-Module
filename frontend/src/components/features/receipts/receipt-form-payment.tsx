@@ -68,7 +68,7 @@ export function ReceiptFormPayment({
               <select
                 {...field}
                 className={cn(
-                  "h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-800",
+                  "h-10 w-full rounded-lg border bg-surface px-3 text-sm text-slate-800",
                   "focus:outline-none focus:ring-1 focus:ring-brand-500",
                   form.formState.errors.payment_method ? "border-red-500" : "border-slate-300"
                 )}
@@ -94,7 +94,7 @@ export function ReceiptFormPayment({
                 {...field}
                 disabled={isLoadingBankAccounts || !hasBankAccounts}
                 className={cn(
-                  "h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-800",
+                  "h-10 w-full rounded-lg border bg-surface px-3 text-sm text-slate-800",
                   "focus:outline-none focus:ring-1 focus:ring-brand-500",
                   (isLoadingBankAccounts || !hasBankAccounts) && "cursor-not-allowed bg-slate-50 text-slate-400",
                   form.formState.errors.bank_account_id ? "border-red-500" : "border-slate-300"
@@ -145,7 +145,7 @@ export function ReceiptFormPayment({
             {...form.register("reference_no")}
             placeholder={isCheque ? "Cheque number (required)" : "Bank reference (optional)"}
             className={cn(
-              "h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-800",
+              "h-10 w-full rounded-lg border bg-surface px-3 text-sm text-slate-800",
               "focus:outline-none focus:ring-1 focus:ring-brand-500",
               form.formState.errors.reference_no ? "border-red-500" : "border-slate-300"
             )}
@@ -165,7 +165,7 @@ export function ReceiptFormPayment({
               type="date"
               {...form.register("cheque_date")}
               className={cn(
-                "h-10 w-full rounded-lg border bg-white px-3 text-sm text-slate-800",
+                "h-10 w-full rounded-lg border bg-surface px-3 text-sm text-slate-800",
                 "focus:outline-none focus:ring-1 focus:ring-brand-500",
                 form.formState.errors.cheque_date ? "border-red-500" : "border-slate-300"
               )}

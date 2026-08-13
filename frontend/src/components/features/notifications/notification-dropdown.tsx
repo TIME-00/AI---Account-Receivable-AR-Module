@@ -139,7 +139,7 @@ export function NotificationDropdown() {
             role="dialog"
             aria-label="Notifications"
             style={{ top: anchor.top, right: anchor.right }}
-            className="fixed z-[100] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl shadow-slate-300/40"
+            className="fixed z-[100] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-lg border border-slate-200 bg-surface shadow-xl shadow-slate-300/40"
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
               <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">

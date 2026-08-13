@@ -42,7 +42,7 @@ function DecisionDetail({ decision }: { decision: DocumentDecision }) {
   return (
     <div className="grid gap-3 bg-slate-50/70 p-4 md:grid-cols-3">
       {/* 1. AI candidate */}
-      <section className="rounded-lg border border-slate-200 bg-white p-3">
+      <section className="rounded-lg border border-slate-200 bg-surface p-3">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           1 · AI Candidate
         </p>
@@ -66,7 +66,7 @@ function DecisionDetail({ decision }: { decision: DocumentDecision }) {
       </section>
 
       {/* 2. Deterministic validation */}
-      <section className="rounded-lg border border-slate-200 bg-white p-3">
+      <section className="rounded-lg border border-slate-200 bg-surface p-3">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           2 · Deterministic Validation
         </p>
@@ -102,7 +102,7 @@ function DecisionDetail({ decision }: { decision: DocumentDecision }) {
       </section>
 
       {/* 3. Authoritative result */}
-      <section className="rounded-lg border border-slate-200 bg-white p-3">
+      <section className="rounded-lg border border-slate-200 bg-surface p-3">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           3 · Authoritative Result
         </p>
@@ -229,7 +229,7 @@ export default function DocumentDecisionsPage() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-surface">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-500">

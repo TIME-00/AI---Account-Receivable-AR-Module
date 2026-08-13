@@ -278,7 +278,7 @@ function FilterGroup<T extends string>({
             "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
             value === option
               ? "border-brand-200 bg-brand-50 text-brand-700"
-              : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              : "border-slate-200 bg-surface text-slate-500 hover:bg-slate-50"
           )}
         >
           {getLabel(option)}

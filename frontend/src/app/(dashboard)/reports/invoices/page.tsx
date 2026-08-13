@@ -103,11 +103,11 @@ export default function InvoiceSummaryPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-surface p-4">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Total Invoices</p>
           <p className="mt-1 font-mono text-xl font-bold text-slate-900">{overall.total}</p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-surface p-4">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid (by currency)</p>
           {paid ? (
             <CurrencyTotals byCurrency={paid.byCurrency} color="text-emerald-600" className="mt-1" />

@@ -2,7 +2,8 @@
 
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { formatMoneySafe } from "@/lib/currency";
-import { TOOLTIP_STYLE } from "./chart-tooltip";
+import { useTooltipStyle } from "./chart-tooltip";
+import { TREND_COLOR, TREND_COLOR_ACTIVE, useChartTheme } from "@/lib/theme/chart-theme";
 import { TrendingUp } from "lucide-react";
 
 interface CollectionTrendPoint {
@@ -20,6 +21,8 @@ interface CollectionTrendChartProps {
 }
 
 export function CollectionTrendChart({ data, currency, isLoading = false }: CollectionTrendChartProps) {
+  const chart = useChartTheme();
+  const tooltipStyle = useTooltipStyle();
   const hasData = data.some((point) => point.collected > 0);
 
   return (
@@ -46,18 +49,18 @@ export function CollectionTrendChart({ data, currency, isLoading = false }: Coll
             <AreaChart data={data}>
               <defs>
                 <linearGradient id="collectionGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.18} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  <stop offset="5%" stopColor={TREND_COLOR} stopOpacity={0.18} />
+                  <stop offset="95%" stopColor={TREND_COLOR} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-              <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} />
-              <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
+              <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
+              <XAxis dataKey="label" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={{ stroke: chart.grid }} tickLine={false} />
+              <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
               <Tooltip
                 formatter={(value: number) => [formatMoneySafe(value, currency), "Collected"]}
-                contentStyle={TOOLTIP_STYLE}
+                contentStyle={tooltipStyle}
               />
-              <Area type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} fill="url(#collectionGradient)" dot={{ fill: "#10b981", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "#34d399" }} />
+              <Area type="monotone" dataKey="collected" stroke={TREND_COLOR} strokeWidth={2} fill="url(#collectionGradient)" dot={{ fill: TREND_COLOR, r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: TREND_COLOR_ACTIVE }} />
             </AreaChart>
           </ResponsiveContainer>
         )}

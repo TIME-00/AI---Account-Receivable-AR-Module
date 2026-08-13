@@ -1,28 +1,33 @@
-import type { SupabaseClient } from 'supabase';
-import type { AuthContext } from './_shared/auth.ts';
-import { AuthorizationError, BusinessError } from './_shared/errors.ts';
-import { InvoiceService } from './invoices/service.ts';
-import { ReceiptService } from './receipts/service.ts';
+import type { SupabaseClient } from "supabase";
+import type { AuthContext } from "./_shared/auth.ts";
+import { AuthorizationError, BusinessError } from "./_shared/errors.ts";
+import { InvoiceService } from "./invoices/service.ts";
+import { ReceiptService } from "./receipts/service.ts";
+import {
+  readCustomerServiceSource,
+  readImportServiceSource,
+  readInvoiceServiceSource,
+} from "./test-support/refactored-source.ts";
 import {
   CURRENT_OUTSTANDING_AMOUNT_BASIS,
   CURRENT_UNALLOCATED_AMOUNT_BASIS,
   parseMonetaryCollectionSummary,
   parseVersionedMonetaryCollectionSummary,
   serializeMonetaryCollectionSummary,
-} from './reports/monetary-contracts.ts';
-import { validateDashboardMetricsResponse } from './reports/dashboard-types.ts';
+} from "./reports/monetary-contracts.ts";
+import { validateDashboardMetricsResponse } from "./reports/dashboard-types.ts";
 
 const read = (path: string) =>
   Deno.readTextFile(new URL(path, import.meta.url));
 
 function assert(
   condition: unknown,
-  message = 'Assertion failed',
+  message = "Assertion failed",
 ): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-function assertEquals<T>(actual: T, expected: T, message = 'Values differ') {
+function assertEquals<T>(actual: T, expected: T, message = "Values differ") {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(
       `${message}. Expected ${JSON.stringify(expected)}, got ${
@@ -51,10 +56,10 @@ async function rejectedError(
   try {
     await action();
   } catch (error) {
-    assert(error instanceof Error, 'Expected a typed Error rejection');
+    assert(error instanceof Error, "Expected a typed Error rejection");
     return error as Error & { code?: string; status?: number };
   }
-  throw new Error('Expected operation to reject');
+  throw new Error("Expected operation to reject");
 }
 
 function v1Summary(currentAmountBasis: string) {
@@ -65,15 +70,15 @@ function v1Summary(currentAmountBasis: string) {
     row_count: 1,
     amount_basis: amountBasis,
     base_total: 425,
-    base_currency: 'MYR',
+    base_currency: "MYR",
     by_currency: [{
-      currency: 'USD',
+      currency: "USD",
       amount: 100,
       base_amount: 425,
       count: 1,
     }],
     meta: {
-      base_currency: 'MYR',
+      base_currency: "MYR",
       multi_currency: false,
       normalization_basis: normalizationBasis,
     },
@@ -81,11 +86,11 @@ function v1Summary(currentAmountBasis: string) {
   return {
     current_balance_summary: entry(
       currentAmountBasis,
-      'current_balance_x_booked_rate',
+      "current_balance_x_booked_rate",
     ),
     document_total_summary: entry(
-      'original_document_total',
-      'original_booked_base_snapshot',
+      "original_document_total",
+      "original_booked_base_snapshot",
     ),
   };
 }
@@ -101,21 +106,21 @@ function v2Summary(currentAmountBasis: string) {
     unavailable_count: 2,
     base_available: false,
     amount_basis: amountBasis,
-    base_currency: 'MYR',
-    base_total: '125.50',
+    base_currency: "MYR",
+    base_total: "125.50",
     by_currency: [
       {
-        currency: 'MYR',
-        amount: '125.50',
-        base_amount: '125.50',
+        currency: "MYR",
+        amount: "125.50",
+        base_amount: "125.50",
         count: 1,
         authoritative_document_count: 1,
         unavailable_count: 0,
         base_available: true,
       },
       {
-        currency: 'USD',
-        amount: '100.00',
+        currency: "USD",
+        amount: "100.00",
         base_amount: null,
         count: 2,
         authoritative_document_count: 0,
@@ -124,34 +129,34 @@ function v2Summary(currentAmountBasis: string) {
       },
     ],
     unavailable_by_currency: [{
-      currency: 'USD',
+      currency: "USD",
       document_count: 2,
     }],
     meta: {
       contract_version: 2,
-      base_currency: 'MYR',
+      base_currency: "MYR",
       multi_currency: true,
       normalization_basis: normalizationBasis,
-      authority_basis: 'current_consistent_booked_fx_decision',
+      authority_basis: "current_consistent_booked_fx_decision",
     },
   });
   return {
     current_balance_summary: entry(
       currentAmountBasis,
-      'current_balance_x_booked_rate',
+      "current_balance_x_booked_rate",
     ),
     document_total_summary: entry(
-      'original_document_total',
-      'original_booked_base_snapshot',
+      "original_document_total",
+      "original_booked_base_snapshot",
     ),
   };
 }
 
 const auth: AuthContext = {
-  companyId: '10000000-0000-4000-8000-000000000001',
-  userId: '20000000-0000-4000-8000-000000000001',
-  roles: ['Finance Manager'],
-  highestRole: 'Finance Manager',
+  companyId: "10000000-0000-4000-8000-000000000001",
+  userId: "20000000-0000-4000-8000-000000000001",
+  roles: ["Finance Manager"],
+  highestRole: "Finance Manager",
   email: null,
 };
 
@@ -165,8 +170,8 @@ class CollectionClient {
     return Promise.resolve({
       data: {
         rows: [],
-        total: name === 'ar_invoice_collection' ? 0 : 0,
-        summary: name === 'ar_invoice_collection'
+        total: name === "ar_invoice_collection" ? 0 : 0,
+        summary: name === "ar_invoice_collection"
           ? this.invoiceSummary
           : this.receiptSummary,
       },
@@ -191,9 +196,9 @@ class CollectionResultClient {
   }
 }
 
-Deno.test('Gate D internal v1 tag serializes to the exact legacy wire contract without authority', () => {
-  const invoiceInput = v1Summary('current_outstanding');
-  const receiptInput = v1Summary('current_unallocated');
+Deno.test("Gate D internal v1 tag serializes to the exact legacy wire contract without authority", () => {
+  const invoiceInput = v1Summary("current_outstanding");
+  const receiptInput = v1Summary("current_unallocated");
   const internalInvoice = parseVersionedMonetaryCollectionSummary(
     invoiceInput,
     { currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS },
@@ -208,46 +213,48 @@ Deno.test('Gate D internal v1 tag serializes to the exact legacy wire contract w
 
   const invoice = serializeMonetaryCollectionSummary(internalInvoice);
   const receipt = serializeMonetaryCollectionSummary(internalReceipt);
-  for (const [parsed, input] of [
-    [invoice, invoiceInput],
-    [receipt, receiptInput],
-  ] as const) {
+  for (
+    const [parsed, input] of [
+      [invoice, invoiceInput],
+      [receipt, receiptInput],
+    ] as const
+  ) {
     assertEquals(
       JSON.stringify(parsed),
       JSON.stringify(input),
-      'Legacy native and base fields must be unchanged',
+      "Legacy native and base fields must be unchanged",
     );
     assertEquals(parsed.current_balance_summary.base_total, 425);
     assert(
-      !('contract_version' in parsed.current_balance_summary.meta),
-      'v1 current-balance meta must retain the legacy wire shape',
+      !("contract_version" in parsed.current_balance_summary.meta),
+      "v1 current-balance meta must retain the legacy wire shape",
     );
     assert(
-      !('contract_version' in parsed.document_total_summary.meta),
-      'v1 document-total meta must retain the legacy wire shape',
+      !("contract_version" in parsed.document_total_summary.meta),
+      "v1 document-total meta must retain the legacy wire shape",
     );
     assert(
-      !('base_available' in parsed.current_balance_summary),
-      'v1 must not be promoted to v2 authority',
+      !("base_available" in parsed.current_balance_summary),
+      "v1 must not be promoted to v2 authority",
     );
     assert(
-      !('authoritative_document_count' in parsed.current_balance_summary),
-      'v1 must not fabricate authority counts',
+      !("authoritative_document_count" in parsed.current_balance_summary),
+      "v1 must not fabricate authority counts",
     );
     assert(
       !JSON.stringify(parsed).includes('"contract_version":1'),
-      'The internal v1 tag must not be serialized',
+      "The internal v1 tag must not be serialized",
     );
   }
 });
 
-Deno.test('Gate D parser strictly accepts the exact Invoice and Receipt v2 contract', () => {
+Deno.test("Gate D parser strictly accepts the exact Invoice and Receipt v2 contract", () => {
   const internalInvoice = parseVersionedMonetaryCollectionSummary(
-    v2Summary('current_outstanding'),
+    v2Summary("current_outstanding"),
     { currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS },
   );
   const internalReceipt = parseVersionedMonetaryCollectionSummary(
-    v2Summary('current_unallocated'),
+    v2Summary("current_unallocated"),
     { currentAmountBasis: CURRENT_UNALLOCATED_AMOUNT_BASIS },
   );
   assertEquals(internalInvoice.contractVersion, 2);
@@ -260,33 +267,33 @@ Deno.test('Gate D parser strictly accepts the exact Invoice and Receipt v2 contr
     ]
   ) {
     assertEquals(parsed.current_balance_summary.meta.contract_version, 2);
-    assertEquals(parsed.current_balance_summary.base_total, '125.50');
+    assertEquals(parsed.current_balance_summary.base_total, "125.50");
     assertEquals(
       parsed.current_balance_summary.by_currency[1].base_amount,
       null,
     );
     assert(
-      'unavailable_by_currency' in parsed.current_balance_summary,
-      'Expected v2 unavailable currency contract',
+      "unavailable_by_currency" in parsed.current_balance_summary,
+      "Expected v2 unavailable currency contract",
     );
     assertEquals(
       parsed.current_balance_summary.unavailable_by_currency,
-      [{ currency: 'USD', document_count: 2 }],
+      [{ currency: "USD", document_count: 2 }],
     );
   }
 });
 
-Deno.test('Gate D parser rejects mixed versions, malformed decimals, counts and ordering', () => {
-  const mixed = v2Summary('current_outstanding');
+Deno.test("Gate D parser rejects mixed versions, malformed decimals, counts and ordering", () => {
+  const mixed = v2Summary("current_outstanding");
   mixed.document_total_summary = v1Summary(
-    'current_outstanding',
+    "current_outstanding",
   ).document_total_summary as unknown as typeof mixed.document_total_summary;
   expectThrows(
     () =>
       parseMonetaryCollectionSummary(mixed, {
         currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS,
       }),
-    'Invalid monetary summary contract.',
+    "Invalid monetary summary contract.",
   );
 
   for (
@@ -301,12 +308,12 @@ Deno.test('Gate D parser rejects mixed versions, malformed decimals, counts and 
         summary.current_balance_summary.by_currency.reverse();
       },
       (summary: ReturnType<typeof v2Summary>) => {
-        summary.current_balance_summary.by_currency[1].base_amount = '0.00';
+        summary.current_balance_summary.by_currency[1].base_amount = "0.00";
       },
       (summary: ReturnType<typeof v2Summary>) => {
         summary.current_balance_summary.by_currency.push({
-          currency: 'ZZZ',
-          amount: '0.00',
+          currency: "ZZZ",
+          amount: "0.00",
           base_amount: null,
           count: 0,
           authoritative_document_count: 0,
@@ -316,29 +323,29 @@ Deno.test('Gate D parser rejects mixed versions, malformed decimals, counts and 
       },
     ]
   ) {
-    const malformed = v2Summary('current_outstanding');
+    const malformed = v2Summary("current_outstanding");
     mutate(malformed);
     expectThrows(
       () =>
         parseMonetaryCollectionSummary(malformed, {
           currentAmountBasis: CURRENT_OUTSTANDING_AMOUNT_BASIS,
         }),
-      'Invalid monetary summary contract.',
+      "Invalid monetary summary contract.",
     );
   }
 });
 
-Deno.test('Gate D Invoice and Receipt services map v1 before migration and v2 after migration', async () => {
+Deno.test("Gate D Invoice and Receipt services map v1 before migration and v2 after migration", async () => {
   for (
     const [invoiceSummary, receiptSummary, version] of [
       [
-        v1Summary('current_outstanding'),
-        v1Summary('current_unallocated'),
+        v1Summary("current_outstanding"),
+        v1Summary("current_unallocated"),
         1,
       ],
       [
-        v2Summary('current_outstanding'),
-        v2Summary('current_unallocated'),
+        v2Summary("current_outstanding"),
+        v2Summary("current_unallocated"),
         2,
       ],
     ] as const
@@ -360,12 +367,12 @@ Deno.test('Gate D Invoice and Receipt services map v1 before migration and v2 af
     for (const summary of [invoices.summary, receipts.summary]) {
       if (version === 1) {
         assert(
-          !('contract_version' in summary.current_balance_summary.meta),
-          'Invoice and Receipt v1 APIs must omit contract_version',
+          !("contract_version" in summary.current_balance_summary.meta),
+          "Invoice and Receipt v1 APIs must omit contract_version",
         );
         assert(
-          !('contract_version' in summary.document_total_summary.meta),
-          'Both v1 summaries must use the same legacy wire version',
+          !("contract_version" in summary.document_total_summary.meta),
+          "Both v1 summaries must use the same legacy wire version",
         );
       } else {
         assertEquals(
@@ -381,14 +388,14 @@ Deno.test('Gate D Invoice and Receipt services map v1 before migration and v2 af
   }
 });
 
-Deno.test('Gate D service mixed-version failures are fixed English copy and sanitized', async () => {
-  const invoiceMixed = v2Summary('current_outstanding');
+Deno.test("Gate D service mixed-version failures are fixed English copy and sanitized", async () => {
+  const invoiceMixed = v2Summary("current_outstanding");
   invoiceMixed.document_total_summary = v1Summary(
-    'current_outstanding',
+    "current_outstanding",
   ).document_total_summary as unknown as typeof invoiceMixed.document_total_summary;
-  const receiptMixed = v2Summary('current_unallocated');
+  const receiptMixed = v2Summary("current_unallocated");
   receiptMixed.document_total_summary = v1Summary(
-    'current_unallocated',
+    "current_unallocated",
   ).document_total_summary as unknown as typeof receiptMixed.document_total_summary;
   const client = new CollectionClient(
     invoiceMixed,
@@ -404,11 +411,11 @@ Deno.test('Gate D service mixed-version failures are fixed English copy and sani
       ),
   );
   assert(invoiceError instanceof BusinessError);
-  assertEquals(invoiceError.code, 'REPORT_CONTRACT_INVALID');
+  assertEquals(invoiceError.code, "REPORT_CONTRACT_INVALID");
   assertEquals(invoiceError.status, 500);
   assertEquals(
     invoiceError.message,
-    'Failed to list invoices: invalid monetary summary contract.',
+    "Failed to list invoices: invalid monetary summary contract.",
   );
 
   const receiptError = await rejectedError(
@@ -420,15 +427,15 @@ Deno.test('Gate D service mixed-version failures are fixed English copy and sani
       ),
   );
   assert(receiptError instanceof BusinessError);
-  assertEquals(receiptError.code, 'REPORT_CONTRACT_INVALID');
+  assertEquals(receiptError.code, "REPORT_CONTRACT_INVALID");
   assertEquals(receiptError.status, 500);
   assertEquals(
     receiptError.message,
-    'Failed to list receipts: invalid monetary summary contract.',
+    "Failed to list receipts: invalid monetary summary contract.",
   );
 });
 
-Deno.test('Gate D Invoice and Receipt collection RPC errors use sanitized authorization and internal classifications', async () => {
+Deno.test("Gate D Invoice and Receipt collection RPC errors use sanitized authorization and internal classifications", async () => {
   const operations = [
     (client: SupabaseClient) =>
       new InvoiceService(client, client).listInvoices(
@@ -448,46 +455,46 @@ Deno.test('Gate D Invoice and Receipt collection RPC errors use sanitized author
     const authorizationClient = new CollectionResultClient({
       data: null,
       error: {
-        code: '42501',
-        message: 'permission denied for private_schema.secret_table',
+        code: "42501",
+        message: "permission denied for private_schema.secret_table",
       },
     }) as unknown as SupabaseClient;
     const authorizationError = await rejectedError(() =>
       operation(authorizationClient)
     );
     assert(authorizationError instanceof AuthorizationError);
-    assertEquals(authorizationError.code, 'AUTHORIZATION_ERROR');
+    assertEquals(authorizationError.code, "AUTHORIZATION_ERROR");
     assertEquals(authorizationError.status, 403);
-    assertEquals(authorizationError.message, 'Insufficient permissions');
-    assert(!authorizationError.message.includes('private_schema'));
-    assert(!authorizationError.message.includes('permission denied'));
+    assertEquals(authorizationError.message, "Insufficient permissions");
+    assert(!authorizationError.message.includes("private_schema"));
+    assert(!authorizationError.message.includes("permission denied"));
 
     const internalClient = new CollectionResultClient({
       data: null,
       error: {
-        code: 'XX000',
-        message: 'relation private_schema.secret_table does not exist',
+        code: "XX000",
+        message: "relation private_schema.secret_table does not exist",
       },
     }) as unknown as SupabaseClient;
     const internalError = await rejectedError(() => operation(internalClient));
     assert(internalError instanceof BusinessError);
-    assertEquals(internalError.code, 'REPORT_QUERY_FAILED');
+    assertEquals(internalError.code, "REPORT_QUERY_FAILED");
     assertEquals(internalError.status, 500);
     assertEquals(
       internalError.message,
-      'Unable to retrieve the requested collection.',
+      "Unable to retrieve the requested collection.",
     );
-    assert(!internalError.message.includes('private_schema'));
-    assert(!internalError.message.includes('relation'));
+    assert(!internalError.message.includes("private_schema"));
+    assert(!internalError.message.includes("relation"));
   }
 });
 
-Deno.test('Gate D Invoice and Receipt malformed collection envelopes remain sanitized contract failures', async () => {
+Deno.test("Gate D Invoice and Receipt malformed collection envelopes remain sanitized contract failures", async () => {
   const malformedClient = new CollectionResultClient({
     data: {
-      rows: 'not-an-array',
+      rows: "not-an-array",
       total: -1,
-      summary: v2Summary('current_outstanding'),
+      summary: v2Summary("current_outstanding"),
     },
     error: null,
   }) as unknown as SupabaseClient;
@@ -509,20 +516,20 @@ Deno.test('Gate D Invoice and Receipt malformed collection envelopes remain sani
   for (const operation of operations) {
     const error = await rejectedError(operation);
     assert(error instanceof BusinessError);
-    assertEquals(error.code, 'REPORT_CONTRACT_INVALID');
+    assertEquals(error.code, "REPORT_CONTRACT_INVALID");
     assertEquals(error.status, 500);
-    assert(!error.message.includes('not-an-array'));
+    assert(!error.message.includes("not-an-array"));
   }
 });
 
-Deno.test('Gate D Dashboard validator enforces schema, population, statuses and exact rating order', () => {
+Deno.test("Gate D Dashboard validator enforces schema, population, statuses and exact rating order", () => {
   const dashboard = {
     meta: {
-      company_id: '10000000-0000-4000-8000-000000000001',
-      base_currency: 'MYR',
-      as_of_date: '2026-07-29',
-      calculated_at: '2026-07-29T00:00:00.000Z',
-      scope: 'company',
+      company_id: "10000000-0000-4000-8000-000000000001",
+      base_currency: "MYR",
+      as_of_date: "2026-07-29",
+      calculated_at: "2026-07-29T00:00:00.000Z",
+      scope: "company",
       trend_months: 1,
     },
     kpis: {
@@ -542,11 +549,11 @@ Deno.test('Gate D Dashboard validator enforces schema, population, statuses and 
       unpaid_total: 0,
     },
     aging_buckets: [
-      ['current', 'Current'],
-      ['1_30', '1-30 Days'],
-      ['31_60', '31-60 Days'],
-      ['61_90', '61-90 Days'],
-      ['over_90', 'Over 90 Days'],
+      ["current", "Current"],
+      ["1_30", "1-30 Days"],
+      ["31_60", "31-60 Days"],
+      ["61_90", "61-90 Days"],
+      ["over_90", "Over 90 Days"],
     ].map(([key, label]) => ({
       key,
       label,
@@ -555,18 +562,18 @@ Deno.test('Gate D Dashboard validator enforces schema, population, statuses and 
       percentage: 0,
     })),
     collection_trend: [{
-      month: '2026-07',
+      month: "2026-07",
       collected_base: 0,
       receipt_count: 0,
     }],
     top_outstanding_customers: [],
-    credit_rating_distribution: ['AAA', 'AA', 'A', 'B', 'C', 'D'].map(
+    credit_rating_distribution: ["AAA", "AA", "A", "B", "C", "D"].map(
       (rating) => ({ rating, customer_count: 0, outstanding_base: 0 }),
     ),
     customer_credit_rating_distribution: {
-      population: 'VISIBLE_CUSTOMERS',
-      included_statuses: ['Active', 'Inactive', 'Blocked', 'On Hold'],
-      rows: ['AAA', 'AA', 'A', 'B', 'C', 'D'].map(
+      population: "VISIBLE_CUSTOMERS",
+      included_statuses: ["Active", "Inactive", "Blocked", "On Hold"],
+      rows: ["AAA", "AA", "A", "B", "C", "D"].map(
         (rating) => ({ rating, customer_count: 0 }),
       ),
     },
@@ -591,7 +598,7 @@ Deno.test('Gate D Dashboard validator enforces schema, population, statuses and 
   } as typeof dashboard.customer_credit_rating_distribution.rows[0];
   expectThrows(
     () => validateDashboardMetricsResponse(dashboard),
-    'customer_credit_rating_distribution.rows[0]',
+    "customer_credit_rating_distribution.rows[0]",
   );
   delete (
     dashboard.customer_credit_rating_distribution.rows[0] as Record<
@@ -602,51 +609,51 @@ Deno.test('Gate D Dashboard validator enforces schema, population, statuses and 
   dashboard.customer_credit_rating_distribution.rows.reverse();
   expectThrows(
     () => validateDashboardMetricsResponse(dashboard),
-    'customer_credit_rating_distribution.rows[0].rating',
+    "customer_credit_rating_distribution.rows[0].rating",
   );
 });
 
-Deno.test('Gate D SQL preserves signatures, filters, outer keys and one exact authority classifier', async () => {
+Deno.test("Gate D SQL preserves signatures, filters, outer keys and one exact authority classifier", async () => {
   const migration = await read(
-    '../../../database/033_post_batch_9d_gate_d_dashboard_customer_distribution_and_monetary_summary_authority.sql',
+    "../../../database/033_post_batch_9d_gate_d_dashboard_customer_distribution_and_monetary_summary_authority.sql",
   );
   const invoiceStart = migration.indexOf(
-    'CREATE OR REPLACE FUNCTION public.ar_invoice_collection(',
+    "CREATE OR REPLACE FUNCTION public.ar_invoice_collection(",
   );
   const receiptStart = migration.indexOf(
-    'CREATE OR REPLACE FUNCTION public.ar_receipt_collection(',
+    "CREATE OR REPLACE FUNCTION public.ar_receipt_collection(",
   );
   const invoiceSql = migration.slice(invoiceStart, receiptStart);
   const receiptSql = migration.slice(receiptStart);
 
   for (
     const required of [
-      'BEGIN;',
-      'COMMIT;',
+      "BEGIN;",
+      "COMMIT;",
       "SET search_path = ''",
-      'SECURITY INVOKER',
+      "SECURITY INVOKER",
       "'rows'",
       "'total'",
       "'summary'",
       "'current_balance_summary'",
       "'document_total_summary'",
-      'p_page INTEGER DEFAULT 1',
-      'p_page_size INTEGER DEFAULT 50',
-      'current_consistent_booked_fx_decision',
-      'LEGACY_UNVERIFIED',
-      'd.stale_reference = false',
+      "p_page INTEGER DEFAULT 1",
+      "p_page_size INTEGER DEFAULT 50",
+      "current_consistent_booked_fx_decision",
+      "LEGACY_UNVERIFIED",
+      "d.stale_reference = false",
       "d.approval_status IN ('NotRequired', 'Approved')",
       "d.lifecycle_status = 'Posted'",
-      'd.booked_rate = i.exchange_rate::NUMERIC',
-      'd.booked_rate = r.exchange_rate::NUMERIC',
-      'i.base_total',
-      '= ROUND(i.total_amount * d.booked_rate, 2)',
-      'r.base_amount',
-      '= ROUND(r.receipt_amount * d.booked_rate, 2)',
-      'd.posted = false',
-      'd.posted_at IS NULL',
-      'd.posted = true',
-      'd.posted_at IS NOT NULL',
+      "d.booked_rate = i.exchange_rate::NUMERIC",
+      "d.booked_rate = r.exchange_rate::NUMERIC",
+      "i.base_total",
+      "= ROUND(i.total_amount * d.booked_rate, 2)",
+      "r.base_amount",
+      "= ROUND(r.receipt_amount * d.booked_rate, 2)",
+      "d.posted = false",
+      "d.posted_at IS NULL",
+      "d.posted = true",
+      "d.posted_at IS NOT NULL",
     ]
   ) {
     assert(
@@ -656,18 +663,18 @@ Deno.test('Gate D SQL preserves signatures, filters, outer keys and one exact au
   }
 
   const invoiceClassifier = invoiceSql.slice(
-    invoiceSql.indexOf('EXISTS ('),
-    invoiceSql.indexOf(') AS is_authoritative'),
-  ).replaceAll('i.', 'tx.').replaceAll('invoice_id', 'transaction_id')
-    .replaceAll('invoice_date', 'transaction_date');
+    invoiceSql.indexOf("EXISTS ("),
+    invoiceSql.indexOf(") AS is_authoritative"),
+  ).replaceAll("i.", "tx.").replaceAll("invoice_id", "transaction_id")
+    .replaceAll("invoice_date", "transaction_date");
   const receiptClassifier = receiptSql.slice(
-    receiptSql.indexOf('EXISTS ('),
-    receiptSql.indexOf(') AS is_authoritative'),
-  ).replaceAll('r.', 'tx.').replaceAll('receipt_id', 'transaction_id')
-    .replaceAll('receipt_date', 'transaction_date');
+    receiptSql.indexOf("EXISTS ("),
+    receiptSql.indexOf(") AS is_authoritative"),
+  ).replaceAll("r.", "tx.").replaceAll("receipt_id", "transaction_id")
+    .replaceAll("receipt_date", "transaction_date");
   assert(
     invoiceClassifier.length > 4_000 && receiptClassifier.length > 4_000,
-    'Authority predicates must be substantive',
+    "Authority predicates must be substantive",
   );
   for (
     const source of [
@@ -683,35 +690,35 @@ Deno.test('Gate D SQL preserves signatures, filters, outer keys and one exact au
 
   for (
     const filter of [
-      'p_status IS NULL',
-      'p_customer_id IS NULL',
-      'p_posting_period IS NULL',
-      'p_date_from IS NULL',
-      'p_date_to IS NULL',
-      'p_search IS NULL',
+      "p_status IS NULL",
+      "p_customer_id IS NULL",
+      "p_posting_period IS NULL",
+      "p_date_from IS NULL",
+      "p_date_to IS NULL",
+      "p_search IS NULL",
     ]
   ) {
     assert(invoiceSql.includes(filter));
     assert(receiptSql.includes(filter));
   }
-  assert(invoiceSql.includes('p_doc_type IS NULL'));
-  assert(receiptSql.includes('p_payment_method IS NULL'));
+  assert(invoiceSql.includes("p_doc_type IS NULL"));
+  assert(receiptSql.includes("p_payment_method IS NULL"));
 });
 
-Deno.test('Gate D Dashboard and customer list use equal tenant, visibility and assignment predicates', async () => {
+Deno.test("Gate D Dashboard and customer list use equal tenant, visibility and assignment predicates", async () => {
   const migration = await read(
-    '../../../database/033_post_batch_9d_gate_d_dashboard_customer_distribution_and_monetary_summary_authority.sql',
+    "../../../database/033_post_batch_9d_gate_d_dashboard_customer_distribution_and_monetary_summary_authority.sql",
   );
-  const customers = await read('./customers/service.ts');
+  const customers = await readCustomerServiceSource(import.meta.url);
   for (
     const predicate of [
-      'c.company_id = p_company_id',
-      'c.is_deleted = false',
-      'c.is_hidden = false',
-      'uca.company_id = p_company_id',
-      'uca.user_id = p_user_id',
-      'uca.customer_id = c.id',
-      'uca.is_active = true',
+      "c.company_id = p_company_id",
+      "c.is_deleted = false",
+      "c.is_hidden = false",
+      "uca.company_id = p_company_id",
+      "uca.user_id = p_user_id",
+      "uca.customer_id = c.id",
+      "uca.is_active = true",
     ]
   ) {
     assert(
@@ -725,66 +732,66 @@ Deno.test('Gate D Dashboard and customer list use equal tenant, visibility and a
   assert(customers.includes(".order('customer_id', { ascending: true })"));
   assert(
     migration.includes(
-      'ON public.customers (company_id, credit_rating, customer_id)',
+      "ON public.customers (company_id, credit_rating, customer_id)",
     ),
   );
 });
 
-Deno.test('Gate D migration has zero financial DML/backfill and governed paths cannot create false authority', async () => {
+Deno.test("Gate D migration has zero financial DML/backfill and governed paths cannot create false authority", async () => {
   const migration = await read(
-    '../../../database/033_post_batch_9d_gate_d_dashboard_customer_distribution_and_monetary_summary_authority.sql',
+    "../../../database/033_post_batch_9d_gate_d_dashboard_customer_distribution_and_monetary_summary_authority.sql",
   );
-  const executable = migration.replace(/--.*$/gm, '');
+  const executable = migration.replace(/--.*$/gm, "");
   for (
     const table of [
-      'invoices',
-      'receipts',
-      'exchange_rates',
-      'fx_reference_rates',
-      'fx_booking_rate_decisions',
-      'fx_booking_rate_decision_events',
-      'journal_entries',
-      'journal_lines',
-      'allocations',
-      'allocation_details',
-      'import_rows',
-      'import_batches',
+      "invoices",
+      "receipts",
+      "exchange_rates",
+      "fx_reference_rates",
+      "fx_booking_rate_decisions",
+      "fx_booking_rate_decision_events",
+      "journal_entries",
+      "journal_lines",
+      "allocations",
+      "allocation_details",
+      "import_rows",
+      "import_batches",
     ]
   ) {
     assert(
       !new RegExp(
         `\\b(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM|MERGE\\s+INTO)\\s+public\\.${table}\\b`,
-        'i',
+        "i",
       ).test(executable),
       `Gate D must not mutate public.${table}`,
     );
   }
 
-  const invoiceService = await read('./invoices/service.ts');
-  const receiptService = await read('./receipts/service.ts');
-  const importService = await read('./imports/service.ts');
-  const monetaryContracts = await read('./reports/monetary-contracts.ts');
-  assert(invoiceService.includes('fx_create_governed_invoice_draft'));
-  assert(receiptService.includes('fx_create_governed_receipt_draft'));
-  assert(importService.includes('createInvoice'));
-  assert(importService.includes('createReceipt'));
+  const invoiceService = await readInvoiceServiceSource(import.meta.url);
+  const receiptService = await read("./receipts/service.ts");
+  const importService = await readImportServiceSource(import.meta.url);
+  const monetaryContracts = await read("./reports/monetary-contracts.ts");
+  assert(invoiceService.includes("fx_create_governed_invoice_draft"));
+  assert(receiptService.includes("fx_create_governed_receipt_draft"));
+  assert(importService.includes("createInvoice"));
+  assert(importService.includes("createReceipt"));
   assert(
     monetaryContracts.includes(
-      'Deploy a frontend compatibility build that understands v1 and v2',
+      "Deploy a frontend compatibility build that understands v1 and v2",
     ),
   );
   assert(
     monetaryContracts.includes(
-      'Deploy v1/v2-compatible Invoice, Receipt and Reports Edge Functions.',
+      "Deploy v1/v2-compatible Invoice, Receipt and Reports Edge Functions.",
     ),
   );
   assert(
-    monetaryContracts.includes('Apply Migration 033 last to activate v2.'),
+    monetaryContracts.includes("Apply Migration 033 last to activate v2."),
   );
   assert(
     migration.includes(
       "d.source_category IN (\n            'BASE_PARITY',\n            'CATALOG',\n            'REFERENCE_SELECTED',\n            'MANUAL_OVERRIDE'",
     ),
-    'Authority must be an allow-list that excludes legacy and missing provenance',
+    "Authority must be an allow-list that excludes legacy and missing provenance",
   );
 });

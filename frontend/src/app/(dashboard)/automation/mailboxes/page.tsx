@@ -227,7 +227,7 @@ function MailboxCard({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
+    <div className="rounded-xl border border-slate-200 bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -527,7 +527,7 @@ export default function MailboxesPage() {
           <button
             type="button"
             onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-fill-hover"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add Mailbox
           </button>
@@ -540,7 +540,7 @@ export default function MailboxesPage() {
             e.preventDefault();
             submit();
           }}
-          className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2"
+          className="grid gap-3 rounded-xl border border-slate-200 bg-surface p-4 sm:grid-cols-2"
           aria-label="Create mailbox"
         >
           <label className="flex flex-col gap-1 text-xs">
@@ -587,7 +587,7 @@ export default function MailboxesPage() {
             <button
               type="submit"
               disabled={create.isPending}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
             >
               {create.isPending ? "Saving…" : "Create"}
             </button>

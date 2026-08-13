@@ -53,10 +53,10 @@ export function CreditRatingCustomerDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[80] bg-slate-950/45" />
+        <Dialog.Overlay className="ds-overlay-enter fixed inset-0 z-[80] ds-scrim" />
         <Dialog.Content
           aria-modal="true"
-          className="fixed inset-x-4 top-1/2 z-[90] mx-auto flex max-h-[calc(100vh-2rem)] w-auto max-w-3xl -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl focus:outline-none sm:inset-x-auto sm:left-1/2 sm:w-[min(760px,calc(100vw-2rem))] sm:-translate-x-1/2"
+          className="fixed inset-x-4 top-1/2 z-[90] mx-auto flex max-h-[calc(100vh-2rem)] w-auto max-w-3xl -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-line-strong bg-surface-elevated shadow-elevated focus:outline-none ds-overlay-enter sm:inset-x-auto sm:left-1/2 sm:w-[min(760px,calc(100vw-2rem))] sm:-translate-x-1/2"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             closeRef.current?.focus();
@@ -109,7 +109,7 @@ export function CreditRatingCustomerDialog({
                 <button
                   type="button"
                   onClick={onRefresh}
-                  className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 font-medium hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                  className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-surface px-3 py-2 font-medium hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
                 >
                   <RefreshCw className="h-4 w-4" aria-hidden="true" />
                   Refresh
@@ -193,7 +193,7 @@ export function CreditRatingCustomerDialog({
                 aria-label="Previous customer page"
                 onClick={() => onPageChange(page - 1)}
                 disabled={page <= 1 || isFetching || !showRows}
-                className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                className="rounded-lg border border-slate-200 bg-surface p-2 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
               >
                 <ChevronLeft className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -202,7 +202,7 @@ export function CreditRatingCustomerDialog({
                 aria-label="Next customer page"
                 onClick={() => onPageChange(page + 1)}
                 disabled={page >= totalPages || isFetching || !showRows}
-                className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                className="rounded-lg border border-slate-200 bg-surface p-2 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
               >
                 <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </button>

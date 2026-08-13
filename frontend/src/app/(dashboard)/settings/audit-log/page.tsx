@@ -149,7 +149,7 @@ export default function AuditTrailPage() {
       {/* ── Filters ── */}
       <section
         aria-label="Audit event filters"
-        className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3"
+        className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-surface p-3"
       >
         <FilterField label="Search" htmlFor="audit-search">
           <div className="relative">
@@ -265,7 +265,7 @@ export default function AuditTrailPage() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-surface">
             <table className="w-full min-w-[900px] text-sm">
               <caption className="sr-only">
                 Recorded audit events, newest first. Select an event to view its detail.
@@ -408,8 +408,8 @@ function AuditEventDialog({
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-xl focus:outline-none">
+        <Dialog.Overlay className="ds-overlay-enter fixed inset-0 z-50 ds-scrim" />
+        <Dialog.Content className="ds-overlay-enter fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-line-strong bg-surface-elevated p-5 shadow-elevated focus:outline-none">
           <div className="flex items-start justify-between gap-4">
             <Dialog.Title className="text-sm font-semibold text-slate-900">
               {event ? auditActionLabel(event.action) : "Audit event"}

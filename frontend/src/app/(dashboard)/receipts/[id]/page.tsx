@@ -92,7 +92,7 @@ export default function ReceiptDetailPage() {
         <p className="mt-1 text-sm text-slate-500">The receipt may have been deleted or you don&apos;t have access.</p>
         <Link
           href="/receipts"
-          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 transition-colors"
+          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-accent-fill px-4 py-2 text-sm font-medium text-white hover:bg-accent-fill-hover transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Receipts

@@ -132,7 +132,7 @@ export function ReceiptFormCustomer({
               type="date"
               {...form.register("receipt_date")}
               className={cn(
-                "h-10 w-full rounded-lg border bg-white pl-10 pr-3 text-sm text-slate-800",
+                "h-10 w-full rounded-lg border bg-surface pl-10 pr-3 text-sm text-slate-800",
                 "focus:outline-none focus:ring-1 focus:ring-brand-500",
                 form.formState.errors.receipt_date ? "border-red-500" : "border-slate-300"
               )}
@@ -149,7 +149,7 @@ export function ReceiptFormCustomer({
           <input
             type="date"
             {...form.register("value_date")}
-            className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="h-10 w-full rounded-lg border border-slate-300 bg-surface px-3 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
       </div>

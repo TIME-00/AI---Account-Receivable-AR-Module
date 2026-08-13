@@ -193,7 +193,7 @@ export default function InvoiceImportPage() {
           onClick={() => setMode("csv")}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-            mode === "csv" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            mode === "csv" ? "bg-surface text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
           )}
         >
           <FileSpreadsheet className="h-4 w-4" />
@@ -204,7 +204,7 @@ export default function InvoiceImportPage() {
           onClick={() => setMode("ocr")}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-            mode === "ocr" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            mode === "ocr" ? "bg-surface text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
           )}
         >
           <ScanLine className="h-4 w-4" />
@@ -249,7 +249,7 @@ export default function InvoiceImportPage() {
                   <div
                     className={cn(
                       "h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300",
-                      isActive && "bg-brand-600 text-white shadow-md shadow-brand-200/50 scale-110",
+                      isActive && "bg-accent-fill text-white shadow-md shadow-brand-200/50 scale-110",
                       isPast && "bg-emerald-500 text-white",
                       isFuture && "bg-slate-200 text-slate-400"
                     )}
@@ -337,7 +337,7 @@ export default function InvoiceImportPage() {
                 </div>
               </div>
               {isLoading && (
-                <div className="absolute inset-0 rounded-2xl bg-white/80 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-2xl bg-surface/80 flex items-center justify-center">
                   <Loader2 className="h-8 w-8 text-brand-500 animate-spin" />
                   <span className="ml-3 text-sm font-medium text-slate-600">Uploading...</span>
                 </div>
@@ -395,7 +395,7 @@ export default function InvoiceImportPage() {
                         {copied ? "Copied!" : "Copy"}
                       </button>
                     </div>
-                    <pre className="p-4 text-xs font-mono text-slate-700 overflow-x-auto bg-white leading-relaxed">
+                    <pre className="p-4 text-xs font-mono text-slate-700 overflow-x-auto bg-surface leading-relaxed">
                       {SAMPLE_CSV}
                     </pre>
                   </div>

@@ -50,7 +50,7 @@ export function AuditTimeline({ events }: { events: AuditEvent[] }) {
               />
               <span aria-hidden="true" className="mt-1 w-px flex-1 bg-slate-200" />
             </div>
-            <div className="flex-1 rounded-lg border border-slate-100 bg-white p-3">
+            <div className="flex-1 rounded-lg border border-slate-100 bg-surface p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-slate-800">
                   {humanize(event.event_type)}

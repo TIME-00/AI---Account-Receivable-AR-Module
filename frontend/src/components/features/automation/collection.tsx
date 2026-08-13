@@ -25,7 +25,7 @@ export function FilterSelect<T extends string>({
         onChange={(event) =>
           onChange(event.target.value === "" ? undefined : (event.target.value as T))
         }
-        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+        className="rounded-lg border border-slate-300 bg-surface px-2 py-1 text-xs"
       >
         <option value="">All</option>
         {options.map((option) => (
@@ -94,7 +94,7 @@ export function Pagination({
 /** Filter toolbar container that stays usable on mobile (wraps, scrolls). */
 export function FilterBar({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-surface p-3">
       {children}
     </div>
   );

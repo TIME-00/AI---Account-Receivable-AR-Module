@@ -170,7 +170,7 @@ export default function SalesRepresentativesPage() {
           <button
             type="button"
             onClick={openCreate}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent-fill-hover"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add Representative
           </button>
@@ -183,7 +183,7 @@ export default function SalesRepresentativesPage() {
             e.preventDefault();
             submit();
           }}
-          className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2"
+          className="grid gap-3 rounded-xl border border-slate-200 bg-surface p-4 sm:grid-cols-2"
           aria-label={
             editor.mode === "create"
               ? "Create sales representative"
@@ -238,7 +238,7 @@ export default function SalesRepresentativesPage() {
             <button
               type="submit"
               disabled={saving}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
             >
               {saving ? "Saving…" : editor.mode === "create" ? "Save" : "Update"}
             </button>
@@ -264,7 +264,7 @@ export default function SalesRepresentativesPage() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-surface">
             <table className="w-full min-w-[560px] text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-500">

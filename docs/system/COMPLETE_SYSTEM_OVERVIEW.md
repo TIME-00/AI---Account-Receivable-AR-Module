@@ -1171,6 +1171,7 @@ Notable groupings:
 | 042 | Post-Gate-E mailbox delivery onboarding |
 | **043** | **Post-Gate-E FX/currency freshness authority — APPLIED / VERIFIED.** Prospective transaction-currency triggers, business-day freshness and the in-place FX scheduler cadence update. `043b` passed inside `BEGIN ... ROLLBACK` and is not a ledger entry |
 | **044** | **Post-Gate-E Journal/Audit read viewers — IMPLEMENTED LOCALLY, NOT APPLIED.** Read-only `journal_read_*` / `audit_read_*` RPCs, one cursor index, no DML. `044b` is rollback-only and must never be registered as a ledger entry |
+| **045** | **Post-Gate-E account UI preference — IMPLEMENTED LOCALLY, NOT APPLIED.** Adds `public.user_ui_preferences` (`user_id` PK, `theme_preference` constrained to `dark`/`light`, default `dark`). RLS owner-only as defence in depth; `PUBLIC`/`anon`/`authenticated` table privileges revoked; `service_role` granted SELECT/INSERT/UPDATE only, never DELETE. No financial DML and no `company_id`. `045b` is rollback-only and must never be registered as a ledger entry |
 
 ---
 
@@ -5347,6 +5348,7 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **CLOSED / PASS** — committed, migrated, deployed and safely verified without reconnecting the healthy mailbox |
 | **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **CLOSED / PASS.** Migration 043 is applied and verified, the reviewed Edge/frontend code is deployed, the three-run UTC cadence is live, and a governed Production FX sync succeeded without financial mutation |
 | **Post-Gate-E Journal & Audit read viewers** (Migration 044) | **CLOSED / PASS.** Migration 044 is applied and verified; 044b passed as a rollback-only Production smoke; both read Edge Functions are ACTIVE at v1; the frontend viewers are deployed and the rollout caused zero financial/audit-source mutation |
+| **Post-Gate-E UI modernization + codebase hygiene** (Migration 045) | **IMPLEMENTED / VALIDATED LOCALLY - PENDING CODEX FINAL REVIEW, MIGRATION AND DEPLOYMENT.** Account-level dark/light theme authority, a semantic frontend Design System, a motion and scroll-reveal system, and the backend cohesion refactor. Migration 045 is **NOT** applied to Production and the modernized UI is **NOT** Production-live. Presentation-only: no financial, role, Gmail, FX, Automation or Journal/Audit behaviour changes |
 
 ### 51.2 Deployment state
 
@@ -5456,6 +5458,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 | **Implemented, deployed, safely verified** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow. The healthy Production mailbox remained enabled and was not reconnected |
 | **Implemented, deployed, safely verified** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, live 07:30 / 12:30 / 17:30 UTC cadence). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
 | **Implemented, deployed, safely verified** | Post-Gate-E Journal Entries and Audit Trail read viewers — Migration 044 / rollback-only 044b, `journal-entries` v1, `audit-trail` v1, and the two frontend viewers. Read-side only: no financial write path, no audit-source rewrite and no synthetic backfill |
+| **Implemented and validated locally, NOT deployed** | Post-Gate-E UI modernization and codebase hygiene — Migration 045 / rollback-only 045b, `GET`/`PATCH /auth/ui-preferences`, the semantic frontend Design System with dark default and an explicit light choice, the motion and scroll-reveal system, and the backend cohesion refactor. Migration 045 has not been applied to Production and the modernized UI is not Production-live |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 
@@ -5799,6 +5802,75 @@ Accounts Receivable (AR) module/
 ★ = the highest-value files for understanding the system's distinguishing architecture.
 
 ---
+
+## 56A. Presentation layer: theme, Design System and motion
+
+> **Status: IMPLEMENTED / VALIDATED LOCALLY - PENDING CODEX FINAL REVIEW, MIGRATION AND
+> DEPLOYMENT.** Migration 045 is not applied to Production and this UI is not
+> Production-live. Nothing in this section changes financial, role, Gmail, FX,
+> Automation or Journal/Audit behaviour.
+
+Full detail lives in `docs/architecture/POST_GATE_E_UI_MODERNIZATION_AND_CODEBASE_HYGIENE.md`.
+
+### 56A.1 Theme authority
+
+Theme is an account-level presentation preference with exactly two values, `dark`
+and `light`. There is deliberately no "System" option. The default, and the
+fallback for every unresolved or malformed case, is **dark**.
+
+The authority chain is: the authenticated `auth` Edge Function owns the stored
+preference (`GET` / `PATCH /auth/ui-preferences`), deriving the account from the
+verified bearer token — the browser never supplies a user id. The preference is
+independent of company, AR role, financial settings and Automation mode, so it
+follows the account across company contexts and is available to every
+authenticated user regardless of financial role.
+
+### 56A.2 First paint
+
+The document is server-rendered with `class="dark"` and the dark tokens are
+defined on `:root`, so the first paint is dark even with JavaScript disabled.
+White is never painted, so there is no white-to-dark flash. The synchronous
+script in `<head>` enforces Dark and reads no account cache because identity is
+not yet resolved. After authentication resolves, that account's keyed cache may
+accelerate reconciliation; the server preference remains authoritative.
+
+### 56A.3 Cross-user isolation on a shared workstation
+
+The browser cache is a paint accelerator only and carries no authorization role.
+Each cached theme is filed under the account that chose it. There is no global
+active-user pointer: unresolved identity always paints Dark, including when a
+previous operator closed the browser without logging out. Only after AuthProvider
+resolves the exact account may its keyed cache accelerate reconciliation. One
+operator's preference therefore cannot paint or become another operator's
+restored account preference.
+
+### 56A.4 Design System
+
+Colour resolves through CSS custom properties; Tailwind only names them. The
+existing `slate` and status scales are themselves tokenised — in dark, `slate`
+becomes a hand-tuned graphite ramp running the other way, and chromatic tints are
+re-blended into the dark ground while the 400/500 status steps stay vivid. This
+is why roughly 2,100 existing utilities theme correctly without a single `dark:`
+variant and without rewriting the financial pages.
+
+Dark is a deep blue-black instrument console: layered panels, rim-light
+hairlines, restrained luminous accents, no animated wallpaper. Light is
+independently designed as a professional financial surface: disciplined neutral
+canvas, white elevated panels, clear border hierarchy, soft shadows, restrained
+brand colour. Financial values are the hero in both.
+
+### 56A.5 Motion
+
+One centralized scale drives page entry, section reveal, dialog and dropdown
+entry, button press, card lift and the active-navigation indicator. No animation
+dependency was added; CSS transitions, CSS keyframes, IntersectionObserver and the
+existing Radix primitives were sufficient. Scroll reveal shares a single
+IntersectionObserver for the whole page, attaches no scroll listener, reveals each
+section once, and never animates individual table rows.
+
+`prefers-reduced-motion: reduce` removes non-essential animation outright rather
+than shortening it, while keeping state changes legible — the active-navigation
+indicator stays drawn, only its growth animation is dropped.
 
 ## 57. Glossary
 

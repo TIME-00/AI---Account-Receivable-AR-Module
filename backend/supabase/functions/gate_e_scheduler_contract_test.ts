@@ -3,6 +3,7 @@ import {
   signAutomationWorkerInvocation,
   validateAutomationWorker,
 } from "./automation/worker-auth.ts";
+import { readAutomationServiceSource } from "./test-support/refactored-source.ts";
 
 function assert(
   condition: unknown,
@@ -40,9 +41,7 @@ const smoke = await Deno.readTextFile(
     import.meta.url,
   ),
 );
-const service = await Deno.readTextFile(
-  new URL("./automation/service.ts", import.meta.url),
-);
+const service = await readAutomationServiceSource(import.meta.url);
 const workerAuth = await Deno.readTextFile(
   new URL("./automation/worker-auth.ts", import.meta.url),
 );

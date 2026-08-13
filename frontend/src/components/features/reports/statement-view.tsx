@@ -86,7 +86,7 @@ export function StatementView({ statement }: StatementViewProps) {
           { label: "Total credit", value: total_credit_base },
           { label: "Closing balance", value: closing_balance_base },
         ].map((c) => (
-          <div key={c.label} className="rounded-xl border border-slate-200 bg-white p-4">
+          <div key={c.label} className="rounded-xl border border-slate-200 bg-surface p-4">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               {c.label} (company base)
             </p>

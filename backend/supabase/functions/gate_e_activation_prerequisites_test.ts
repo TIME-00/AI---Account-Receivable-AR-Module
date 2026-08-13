@@ -14,6 +14,7 @@ import {
 } from "./automation/oauth.ts";
 import { handleAutomationRequest } from "./automation/index.ts";
 import { AutomationService } from "./automation/service.ts";
+import { readAutomationServiceSource } from "./test-support/refactored-source.ts";
 import { FixtureSecretResolver } from "./automation/providers.ts";
 import {
   AUTOMATION_WORKER_SECRET_HEADER,
@@ -1929,7 +1930,7 @@ Deno.test("Migration 042 binds Delivery activation to single-use server intent a
 
 Deno.test("Gate E OpenAI document intelligence remains disabled until server configuration is valid", async () => {
   const [service, document, openai] = await Promise.all([
-    Deno.readTextFile(new URL("./automation/service.ts", import.meta.url)),
+    readAutomationServiceSource(import.meta.url),
     Deno.readTextFile(new URL("./automation/document.ts", import.meta.url)),
     Deno.readTextFile(
       new URL("./automation/openai-document.ts", import.meta.url),

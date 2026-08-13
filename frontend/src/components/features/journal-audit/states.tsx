@@ -18,7 +18,7 @@ export function ViewerLoading({ label = "Loading" }: { label?: string }) {
     <div
       role="status"
       aria-live="polite"
-      className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500"
+      className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-surface p-8 text-sm text-slate-500"
     >
       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
       <span>{label}…</span>
@@ -32,7 +32,7 @@ export function ViewerTableSkeleton({ rows = 6, columns = 6 }: { rows?: number; 
     <div
       role="status"
       aria-live="polite"
-      className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+      className="overflow-hidden rounded-xl border border-slate-200 bg-surface"
     >
       <span className="sr-only">Loading results…</span>
       <div className="divide-y divide-slate-100">
@@ -75,7 +75,7 @@ export function ViewerError({
         <button
           type="button"
           onClick={onRetry}
-          className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100"
+          className="rounded-lg border border-red-300 bg-surface px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100"
         >
           Retry
         </button>
@@ -116,7 +116,7 @@ export function ViewerPermissionDenied({
   return (
     <div
       role="alert"
-      className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-10 text-center"
+      className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-surface p-10 text-center"
     >
       <Lock className="h-6 w-6 text-slate-400" aria-hidden="true" />
       <p className="text-sm font-semibold text-slate-800">{title}</p>
@@ -214,4 +214,4 @@ export function FilterField({
 }
 
 export const FILTER_CONTROL_CLASS =
-  "h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500";
+  "h-8 w-full rounded-lg border border-slate-300 bg-surface px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500";

@@ -116,7 +116,7 @@ export function MoneySummary({ summary, title, className }: MoneySummaryProps) {
 
   return (
     <section
-      className={cn("rounded-lg border border-slate-200 bg-white p-3", className)}
+      className={cn("rounded-lg border border-slate-200 bg-surface p-3", className)}
       aria-label={title ?? amountLabel}
     >
       {title && (

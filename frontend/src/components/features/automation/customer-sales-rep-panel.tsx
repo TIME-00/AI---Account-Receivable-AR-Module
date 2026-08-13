@@ -240,7 +240,7 @@ export function CustomerSalesRepPanel({ customerId }: { customerId: string }) {
               type="button"
               onClick={submit}
               disabled={assign.isPending}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
             >
               Confirm
             </button>

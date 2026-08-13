@@ -823,6 +823,17 @@ async function boot(page: Page, role: RoleName): Promise<Recorder> {
       });
     };
 
+    // ── Authenticated account theme preference ──
+    if (path.endsWith("/auth/ui-preferences")) {
+      if (method === "GET") return send({ theme: "dark", source: "default" });
+      if (method === "PATCH") {
+        const body = request.postDataJSON() as { theme?: unknown };
+        if (body.theme !== "dark" && body.theme !== "light") return fail();
+        return send({ theme: body.theme, source: "saved" });
+      }
+      return fail();
+    }
+
     // ── Authenticated role/company context (GET ONLY) ──
     // Only GET /auth/me returns the synthetic auth context. Any other method
     // (POST/PATCH/PUT/DELETE) falls through to the final strict fail() branch —

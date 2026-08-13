@@ -38,7 +38,7 @@ export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
                 className={cn(
                   "flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition-all",
                   isActive
-                    ? "bg-brand-600 text-white shadow-lg shadow-brand-900/40"
+                    ? "bg-accent-fill text-white shadow-lg shadow-brand-900/40"
                     : isComplete
                     ? "bg-brand-600/20 text-brand-500"
                     : "bg-slate-200 text-slate-500"

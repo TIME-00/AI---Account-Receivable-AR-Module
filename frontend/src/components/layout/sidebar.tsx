@@ -106,19 +106,20 @@ export function Sidebar({ onToggleHelp }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "relative flex h-screen flex-col border-r border-sidebar-border bg-sidebar-bg transition-all duration-300",
+        "relative flex h-screen flex-col border-r border-nav-border bg-nav-bg",
+        "transition-[width] duration-slow ease-emphasized",
         collapsed ? "w-[68px]" : "w-[240px]"
       )}
     >
       {/* Logo / Brand */}
-      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 shadow-lg shadow-brand-900/40">
+      <div className="flex h-16 items-center gap-3 border-b border-nav-border px-4">
+        <div className="ds-glow-subtle flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700">
           <Zap className="h-5 w-5 text-white" />
         </div>
         {!collapsed && (
           <div className="animate-fade-in">
-            <p className="text-sm font-bold text-white tracking-tight">TSH Synergy</p>
-            <p className="text-[10px] font-medium text-brand-400 uppercase tracking-widest">AR Module</p>
+            <p className="text-sm font-bold tracking-tight text-nav-text-active">TSH Synergy</p>
+            <p className="text-[10px] font-medium text-brand-500 uppercase tracking-widest">AR Module</p>
           </div>
         )}
       </div>
@@ -128,7 +129,7 @@ export function Sidebar({ onToggleHelp }: SidebarProps) {
         {visibleSections.map((section) => (
           <div key={section.section}>
             {!collapsed && (
-              <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-600">
+              <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-nav-text/70">
                 {section.section}
               </p>
             )}
@@ -142,26 +143,32 @@ export function Sidebar({ onToggleHelp }: SidebarProps) {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      // `ds-brand-edge` grows a luminous rule on the leading
+                      // edge of the active item; `data-active` drives it so the
+                      // indicator animates in rather than snapping.
+                      data-active={isActive ? "true" : "false"}
+                      aria-current={isActive ? "page" : undefined}
                       className={cn(
-                        "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
+                        "ds-brand-edge ds-press group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
                         isActive
-                          ? "bg-sidebar-active text-sidebar-text-active shadow-sm shadow-black/20"
-                          : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active",
+                          ? "bg-nav-active text-nav-text-active"
+                          : "text-nav-text hover:bg-nav-hover hover:text-nav-text-active",
                         collapsed && "justify-center px-0"
                       )}
                       title={collapsed ? item.label : undefined}
                     >
                       <item.icon
                         className={cn(
-                          "h-[18px] w-[18px] shrink-0 transition-colors",
+                          "h-[18px] w-[18px] shrink-0 transition-transform duration-normal ease-emphasized",
+                          "group-hover:scale-110",
                           isActive
-                            ? "text-brand-400"
-                            : "text-slate-500 group-hover:text-slate-300"
+                            ? "text-brand-500"
+                            : "text-nav-text group-hover:text-nav-text-active"
                         )}
                       />
                       {!collapsed && <span>{item.label}</span>}
                       {isActive && !collapsed && (
-                        <div className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-400" />
+                        <div className="ds-glow-subtle ml-auto h-1.5 w-1.5 rounded-full bg-brand-500" />
                       )}
                     </Link>
                   </li>
@@ -178,25 +185,27 @@ export function Sidebar({ onToggleHelp }: SidebarProps) {
           <button
             onClick={onToggleHelp}
             className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
-              "bg-sidebar-hover/40 text-slate-300",
-              "hover:bg-sidebar-hover hover:text-sidebar-text-active",
-              "border border-sidebar-border",
+              "ds-press group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium",
+              "bg-nav-hover/50 text-nav-text",
+              "hover:bg-nav-hover hover:text-nav-text-active",
+              "border border-nav-border",
               collapsed && "justify-center px-0"
             )}
             title={collapsed ? "AR Help" : undefined}
           >
-            <LifeBuoy className="h-[18px] w-[18px] shrink-0" />
+            <LifeBuoy className="h-[18px] w-[18px] shrink-0 transition-transform duration-normal ease-emphasized group-hover:scale-110" />
             {!collapsed && <span>AR Help</span>}
           </button>
         </div>
       )}
 
       {/* Collapse Toggle */}
-      <div className="border-t border-sidebar-border p-2">
+      <div className="border-t border-nav-border p-2">
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="flex w-full items-center justify-center rounded-lg p-2 text-slate-500 transition-colors hover:bg-sidebar-hover hover:text-slate-300"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          className="ds-press flex w-full items-center justify-center rounded-lg p-2 text-nav-text hover:bg-nav-hover hover:text-nav-text-active"
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />

@@ -96,7 +96,7 @@ export default function CreditNotesPage() {
               "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
               docType === t
                 ? "border-brand-200 bg-brand-50 text-brand-700"
-                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                : "border-slate-200 bg-surface text-slate-500 hover:bg-slate-50"
             )}
           >
             {t}s

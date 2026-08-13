@@ -83,7 +83,7 @@ const WORKFLOWS: { heading: string; steps: WorkflowStep[] }[] = [
 
 export function ArHelpPanel({ onClose }: { onClose: () => void }) {
   return (
-    <div className="flex w-[380px] animate-slide-in-right flex-col border-l border-slate-200 bg-white/95 backdrop-blur-xl">
+    <div className="flex w-[380px] animate-slide-in-right flex-col border-l border-slate-200 bg-surface/95 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4">
         <div className="flex items-center gap-2">
           <LifeBuoy className="h-4 w-4 text-brand-500" />
@@ -114,7 +114,7 @@ export function ArHelpPanel({ onClose }: { onClose: () => void }) {
               </h4>
               <ol className="space-y-2.5">
                 {wf.steps.map((step) => (
-                  <li key={step.title} className="rounded-lg border border-slate-100 bg-white p-3">
+                  <li key={step.title} className="rounded-lg border border-slate-100 bg-surface p-3">
                     <p className="text-sm font-medium text-slate-700">{step.title}</p>
                     <p className="mt-0.5 text-xs text-slate-500">{step.body}</p>
                     {step.href && step.hrefLabel && (

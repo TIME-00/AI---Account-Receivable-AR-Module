@@ -128,7 +128,7 @@ export function ExportMenu({ reportType, filters, disabled = false }: ExportMenu
         aria-expanded={open}
         aria-controls={menuId}
         aria-busy={isPending}
-        className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+        className="flex items-center gap-2 rounded-lg border border-slate-200 bg-surface px-4 py-2 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isPending
           ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -144,7 +144,7 @@ export function ExportMenu({ reportType, filters, disabled = false }: ExportMenu
           role="menu"
           aria-label="Choose export format"
           onKeyDown={onMenuKeyDown}
-          className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-300/40"
+          className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-lg border border-slate-200 bg-surface py-1 shadow-xl shadow-slate-300/40"
         >
           {(["pdf", "xlsx"] as const).map((format, index) => (
             <button

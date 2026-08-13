@@ -145,7 +145,7 @@ export default function RolesPage() {
             <tbody className="divide-y divide-slate-100">
               {permissions.map((perm) => (
                 <tr key={perm.action} className="hover:bg-slate-50/80">
-                  <td className="px-4 py-2.5 text-slate-700 font-medium sticky left-0 bg-white">{perm.action}</td>
+                  <td className="px-4 py-2.5 text-slate-700 font-medium sticky left-0 bg-surface">{perm.action}</td>
                   {roles.map((role) => (
                     <td
                       key={role}

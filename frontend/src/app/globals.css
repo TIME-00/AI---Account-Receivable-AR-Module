@@ -4,74 +4,798 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Base Styles ──────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   TSH Synergy AR — Semantic Design System
+
+   Two themes, one token contract. Dark is the default and is defined on
+   `:root`, so a document that never runs JavaScript still paints dark and can
+   never flash white. `.light` overrides the same names; nothing downstream
+   knows which theme is active.
+
+   The colour ramps below are deliberate: the whole product already expresses
+   structure through `slate-*` and accent state through `red/amber/emerald/…`,
+   so those scales are themselves tokenised. In dark, `slate` becomes a
+   hand-tuned graphite ramp running the other way, and each chromatic tint step
+   is re-blended into the dark ground while 400/500 stay vivid. That is what
+   lets ~2,100 existing utilities theme correctly without being rewritten, and
+   it is why a page does not need a single `dark:` variant to look right.
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 @layer base {
+  /* ── Dark (default) ────────────────────────────────────────────────────── */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
+    color-scheme: dark;
+    --c-slate-50: 13 20 36;
+    --c-slate-100: 18 27 47;
+    --c-slate-200: 30 41 63;
+    --c-slate-300: 44 58 88;
+    --c-slate-400: 112 128 160;
+    --c-slate-500: 138 152 181;
+    --c-slate-600: 163 176 201;
+    --c-slate-700: 199 209 227;
+    --c-slate-800: 221 229 242;
+    --c-slate-900: 232 237 247;
+    --c-slate-950: 244 247 252;
+    --c-brand-50: 16 29 56;
+    --c-brand-100: 20 38 74;
+    --c-brand-200: 27 54 94;
+    --c-brand-300: 36 80 137;
+    --c-brand-400: 61 127 224;
+    --c-brand-500: 77 141 255;
+    /* 600/700 remain bright enough for accent text on dark panels. Filled
+       controls use the separate --brand-fill scale below because the same
+       colour cannot satisfy both dark-surface text and white-on-fill AA. */
+    --c-brand-600: 77 141 255;
+    --c-brand-700: 122 171 255;
+    --c-brand-800: 201 220 255;
+    --c-brand-900: 227 237 255;
+    --c-brand-950: 242 247 255;
+    --c-blue-50: 20 38 70;
+    --c-blue-100: 24 46 86;
+    --c-blue-200: 29 57 107;
+    --c-blue-300: 34 71 133;
+    --c-blue-400: 96 165 250;
+    --c-blue-500: 59 130 246;
+    --c-blue-600: 147 197 253;
+    --c-blue-700: 147 197 253;
+    --c-blue-800: 191 219 254;
+    --c-blue-900: 219 234 254;
+    --c-emerald-50: 13 46 51;
+    --c-emerald-100: 14 60 58;
+    --c-emerald-200: 14 76 68;
+    --c-emerald-300: 14 96 79;
+    --c-emerald-400: 52 211 153;
+    --c-emerald-500: 16 185 129;
+    --c-emerald-600: 110 231 183;
+    --c-emerald-700: 110 231 183;
+    --c-emerald-800: 167 243 208;
+    --c-emerald-900: 209 250 229;
+    --c-red-50: 49 28 41;
+    --c-red-100: 67 32 44;
+    --c-red-200: 90 36 47;
+    --c-red-300: 117 42 51;
+    --c-red-400: 248 113 113;
+    --c-red-500: 239 68 68;
+    --c-red-600: 252 165 165;
+    --c-red-700: 252 165 165;
+    --c-red-800: 254 202 202;
+    --c-red-900: 254 226 226;
+    --c-amber-50: 50 42 32;
+    --c-amber-100: 69 53 30;
+    --c-amber-200: 92 67 28;
+    --c-amber-300: 120 83 25;
+    --c-amber-400: 251 191 36;
+    --c-amber-500: 245 158 11;
+    --c-amber-600: 252 211 77;
+    --c-amber-700: 252 211 77;
+    --c-amber-800: 253 230 138;
+    --c-amber-900: 254 243 199;
+    --c-green-50: 16 48 45;
+    --c-green-100: 18 62 50;
+    --c-green-200: 20 80 56;
+    --c-green-300: 23 101 63;
+    --c-green-400: 74 222 128;
+    --c-green-500: 34 197 94;
+    --c-green-600: 134 239 172;
+    --c-green-700: 134 239 172;
+    --c-green-800: 187 247 208;
+    --c-green-900: 220 252 231;
+    --c-purple-50: 38 30 70;
+    --c-purple-100: 50 36 87;
+    --c-purple-200: 66 42 108;
+    --c-purple-300: 84 50 133;
+    --c-purple-400: 192 132 252;
+    --c-purple-500: 168 85 247;
+    --c-purple-600: 216 180 254;
+    --c-purple-700: 216 180 254;
+    --c-purple-800: 233 213 255;
+    --c-purple-900: 243 232 255;
+    --c-gray-50: 28 35 51;
+    --c-gray-100: 36 43 58;
+    --c-gray-200: 45 52 67;
+    --c-gray-300: 56 63 78;
+    --c-gray-400: 156 163 175;
+    --c-gray-500: 107 114 128;
+    --c-gray-600: 209 213 219;
+    --c-gray-700: 209 213 219;
+    --c-gray-800: 229 231 235;
+    --c-gray-900: 243 244 246;
+    --c-indigo-50: 27 33 69;
+    --c-indigo-100: 34 40 85;
+    --c-indigo-200: 42 48 106;
+    --c-indigo-300: 53 58 130;
+    --c-indigo-400: 129 140 248;
+    --c-indigo-500: 99 102 241;
+    --c-indigo-600: 165 180 252;
+    --c-indigo-700: 165 180 252;
+    --c-indigo-800: 199 210 254;
+    --c-indigo-900: 224 231 255;
+    --c-sky-50: 13 43 68;
+    --c-sky-100: 13 55 83;
+    --c-sky-200: 13 69 103;
+    --c-sky-300: 13 87 127;
+    --c-sky-400: 56 189 248;
+    --c-sky-500: 14 165 233;
+    --c-sky-600: 125 211 252;
+    --c-sky-700: 125 211 252;
+    --c-sky-800: 186 230 253;
+    --c-sky-900: 224 242 254;
+    --c-orange-50: 51 35 34;
+    --c-orange-100: 70 43 33;
+    --c-orange-200: 93 52 31;
+    --c-orange-300: 122 64 30;
+    --c-orange-400: 251 146 60;
+    --c-orange-500: 249 115 22;
+    --c-orange-600: 253 186 116;
+    --c-orange-700: 253 186 116;
+    --c-orange-800: 254 215 170;
+    --c-orange-900: 255 237 213;
+    --c-teal-50: 14 46 57;
+    --c-teal-100: 15 59 67;
+    --c-teal-200: 15 76 80;
+    --c-teal-300: 16 95 96;
+    --c-teal-400: 45 212 191;
+    --c-teal-500: 20 184 166;
+    --c-teal-600: 94 234 212;
+    --c-teal-700: 94 234 212;
+    --c-teal-800: 153 246 228;
+    --c-teal-900: 204 251 241;
+    --c-violet-50: 33 32 70;
+    --c-violet-100: 43 37 86;
+    --c-violet-200: 56 44 107;
+    --c-violet-300: 71 53 133;
+    --c-violet-400: 167 139 250;
+    --c-violet-500: 139 92 246;
+    --c-violet-600: 196 181 253;
+    --c-violet-700: 196 181 253;
+    --c-violet-800: 221 214 254;
+    --c-violet-900: 237 233 254;
+
+    /* Structure */
+    --app-bg: 7 11 22;
+    --surface: 13 20 36;
+    --surface-elevated: 18 27 47;
+    --surface-muted: 10 16 30;
+    --surface-glass: 13 20 36;
+    --surface-glass-alpha: 0.72;
+
+    /* Lines */
+    --border: 30 41 63;
+    --border-muted: 22 31 50;
+    --border-strong: 44 58 88;
+
+    /* Type */
+    --text-primary: 232 237 247;
+    --text-secondary: 163 176 201;
+    --text-muted: 112 128 160;
+    --text-inverse: 9 14 26;
+
+    /* Brand */
+    --brand: 77 141 255;
+    --brand-hover: 122 171 255;
+    --brand-muted: 27 54 94;
+    --brand-contrast: 255 255 255;
+    --brand-fill: 47 111 224;
+    --brand-fill-hover: 40 100 210;
+    --brand-fill-active: 32 86 190;
+
+    /* Feedback */
+    --success: 52 211 153;
+    --warning: 251 191 36;
+    --danger: 248 113 113;
+    --info: 96 165 250;
+
+    /* Navigation */
+    --nav-bg: 9 14 26;
+    --nav-border: 26 36 58;
+    --nav-item-hover: 20 29 49;
+    --nav-item-active: 27 44 78;
+    --nav-text: 148 163 184;
+    --nav-text-active: 232 237 247;
+
+    /* Data tables */
+    --table-bg: 13 20 36;
+    --table-header: 16 24 42;
+    --table-row-hover: 20 30 51;
+    --table-border: 28 38 60;
+
+    /* Form controls */
+    --input-bg: 10 16 30;
+    --input-border: 38 50 76;
+    --focus-ring: 77 141 255;
+
+    /* Depth. Dark UIs get depth from luminance and rim light, not drop shadow. */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.45);
+    --shadow-card: 0 1px 0 0 rgb(255 255 255 / 0.04) inset, 0 2px 8px -2px rgb(0 0 0 / 0.6);
+    --shadow-elevated: 0 1px 0 0 rgb(255 255 255 / 0.05) inset, 0 18px 40px -12px rgb(0 0 0 / 0.75);
+
+    /* Modal scrim. Must be an explicit token: a `slate-950` scrim would
+       invert to near-white under the reversed dark ramp. */
+    --scrim: 3 6 14;
+    --scrim-alpha: 0.66;
+
+    /* Luminance accents */
+    --glow-brand: 0 0 0 1px rgb(77 141 255 / 0.28), 0 0 22px -4px rgb(77 141 255 / 0.42);
+    --glow-subtle: 0 0 18px -6px rgb(77 141 255 / 0.3);
+    --hairline: 255 255 255;
+    --hairline-alpha: 0.06;
+
+    /* Motion. One scale, referenced by every animated surface. */
+    --motion-fast: 120ms;
+    --motion-normal: 220ms;
+    --motion-slow: 420ms;
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  /* ── Light ─────────────────────────────────────────────────────────────── */
+  .light {
+    color-scheme: light;
+    --c-slate-50: 248 250 252;
+    --c-slate-100: 241 245 249;
+    --c-slate-200: 226 232 240;
+    --c-slate-300: 203 213 225;
+    --c-slate-400: 148 163 184;
+    --c-slate-500: 100 116 139;
+    --c-slate-600: 71 85 105;
+    --c-slate-700: 51 65 85;
+    --c-slate-800: 30 41 59;
+    --c-slate-900: 15 23 42;
+    --c-slate-950: 2 6 23;
+    --c-brand-50: 239 246 255;
+    --c-brand-100: 219 234 254;
+    --c-brand-200: 191 219 254;
+    --c-brand-300: 147 197 253;
+    --c-brand-400: 96 165 250;
+    --c-brand-500: 59 130 246;
+    --c-brand-600: 37 99 235;
+    --c-brand-700: 29 78 216;
+    --c-brand-800: 30 64 175;
+    --c-brand-900: 30 58 138;
+    --c-brand-950: 15 29 61;
+    --c-blue-50: 239 246 255;
+    --c-blue-100: 219 234 254;
+    --c-blue-200: 191 219 254;
+    --c-blue-300: 147 197 253;
+    --c-blue-400: 96 165 250;
+    --c-blue-500: 59 130 246;
+    --c-blue-600: 37 99 235;
+    --c-blue-700: 29 78 216;
+    --c-blue-800: 30 64 175;
+    --c-blue-900: 30 58 138;
+    --c-emerald-50: 236 253 245;
+    --c-emerald-100: 209 250 229;
+    --c-emerald-200: 167 243 208;
+    --c-emerald-300: 110 231 183;
+    --c-emerald-400: 52 211 153;
+    --c-emerald-500: 16 185 129;
+    --c-emerald-600: 5 150 105;
+    --c-emerald-700: 4 120 87;
+    --c-emerald-800: 6 95 70;
+    --c-emerald-900: 6 78 59;
+    --c-red-50: 254 242 242;
+    --c-red-100: 254 226 226;
+    --c-red-200: 254 202 202;
+    --c-red-300: 252 165 165;
+    --c-red-400: 248 113 113;
+    --c-red-500: 239 68 68;
+    --c-red-600: 220 38 38;
+    --c-red-700: 185 28 28;
+    --c-red-800: 153 27 27;
+    --c-red-900: 127 29 29;
+    --c-amber-50: 255 251 235;
+    --c-amber-100: 254 243 199;
+    --c-amber-200: 253 230 138;
+    --c-amber-300: 252 211 77;
+    --c-amber-400: 251 191 36;
+    --c-amber-500: 245 158 11;
+    --c-amber-600: 217 119 6;
+    --c-amber-700: 180 83 9;
+    --c-amber-800: 146 64 14;
+    --c-amber-900: 120 53 15;
+    --c-green-50: 240 253 244;
+    --c-green-100: 220 252 231;
+    --c-green-200: 187 247 208;
+    --c-green-300: 134 239 172;
+    --c-green-400: 74 222 128;
+    --c-green-500: 34 197 94;
+    --c-green-600: 22 163 74;
+    --c-green-700: 21 128 61;
+    --c-green-800: 22 101 52;
+    --c-green-900: 20 83 45;
+    --c-purple-50: 250 245 255;
+    --c-purple-100: 243 232 255;
+    --c-purple-200: 233 213 255;
+    --c-purple-300: 216 180 254;
+    --c-purple-400: 192 132 252;
+    --c-purple-500: 168 85 247;
+    --c-purple-600: 147 51 234;
+    --c-purple-700: 126 34 206;
+    --c-purple-800: 107 33 168;
+    --c-purple-900: 88 28 135;
+    --c-gray-50: 249 250 251;
+    --c-gray-100: 243 244 246;
+    --c-gray-200: 229 231 235;
+    --c-gray-300: 209 213 219;
+    --c-gray-400: 156 163 175;
+    --c-gray-500: 107 114 128;
+    --c-gray-600: 75 85 99;
+    --c-gray-700: 55 65 81;
+    --c-gray-800: 31 41 55;
+    --c-gray-900: 17 24 39;
+    --c-indigo-50: 238 242 255;
+    --c-indigo-100: 224 231 255;
+    --c-indigo-200: 199 210 254;
+    --c-indigo-300: 165 180 252;
+    --c-indigo-400: 129 140 248;
+    --c-indigo-500: 99 102 241;
+    --c-indigo-600: 79 70 229;
+    --c-indigo-700: 67 56 202;
+    --c-indigo-800: 55 48 163;
+    --c-indigo-900: 49 46 129;
+    --c-sky-50: 240 249 255;
+    --c-sky-100: 224 242 254;
+    --c-sky-200: 186 230 253;
+    --c-sky-300: 125 211 252;
+    --c-sky-400: 56 189 248;
+    --c-sky-500: 14 165 233;
+    --c-sky-600: 2 132 199;
+    --c-sky-700: 3 105 161;
+    --c-sky-800: 7 89 133;
+    --c-sky-900: 12 74 110;
+    --c-orange-50: 255 247 237;
+    --c-orange-100: 255 237 213;
+    --c-orange-200: 254 215 170;
+    --c-orange-300: 253 186 116;
+    --c-orange-400: 251 146 60;
+    --c-orange-500: 249 115 22;
+    --c-orange-600: 234 88 12;
+    --c-orange-700: 194 65 12;
+    --c-orange-800: 154 52 18;
+    --c-orange-900: 124 45 18;
+    --c-teal-50: 240 253 250;
+    --c-teal-100: 204 251 241;
+    --c-teal-200: 153 246 228;
+    --c-teal-300: 94 234 212;
+    --c-teal-400: 45 212 191;
+    --c-teal-500: 20 184 166;
+    --c-teal-600: 13 148 136;
+    --c-teal-700: 15 118 110;
+    --c-teal-800: 17 94 89;
+    --c-teal-900: 19 78 74;
+    --c-violet-50: 245 243 255;
+    --c-violet-100: 237 233 254;
+    --c-violet-200: 221 214 254;
+    --c-violet-300: 196 181 253;
+    --c-violet-400: 167 139 250;
+    --c-violet-500: 139 92 246;
+    --c-violet-600: 124 58 237;
+    --c-violet-700: 109 40 217;
+    --c-violet-800: 91 33 182;
+    --c-violet-900: 76 29 149;
+
+    /* Structure */
+    --app-bg: 246 248 252;
+    --surface: 255 255 255;
+    --surface-elevated: 255 255 255;
+    --surface-muted: 241 245 249;
+    --surface-glass: 255 255 255;
+    --surface-glass-alpha: 0.85;
+
+    /* Lines */
+    --border: 226 232 240;
+    --border-muted: 241 245 249;
+    --border-strong: 203 213 225;
+
+    /* Type */
+    --text-primary: 15 23 42;
+    --text-secondary: 71 85 105;
+    --text-muted: 100 116 139;
+    --text-inverse: 255 255 255;
+
+    /* Brand */
+    --brand: 37 99 235;
+    --brand-hover: 29 78 216;
+    --brand-muted: 219 234 254;
+    --brand-contrast: 255 255 255;
+    --brand-fill: 37 99 235;
+    --brand-fill-hover: 29 78 216;
+    --brand-fill-active: 30 64 175;
+
+    /* Feedback */
+    --success: 5 150 105;
+    --warning: 217 119 6;
+    --danger: 220 38 38;
+    --info: 37 99 235;
+
+    /* Navigation */
+    --nav-bg: 255 255 255;
+    --nav-border: 226 232 240;
+    --nav-item-hover: 241 245 249;
+    --nav-item-active: 219 234 254;
+    --nav-text: 71 85 105;
+    --nav-text-active: 30 64 175;
+
+    /* Data tables */
+    --table-bg: 255 255 255;
+    --table-header: 248 250 252;
+    --table-row-hover: 246 249 253;
+    --table-border: 226 232 240;
+
+    /* Form controls */
+    --input-bg: 255 255 255;
+    --input-border: 203 213 225;
+    --focus-ring: 37 99 235;
+
+    /* Depth. Light UIs earn premium feel from soft, tightly-controlled shadow. */
+    --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.05);
+    --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+    --shadow-elevated: 0 10px 15px -3px rgb(15 23 42 / 0.08), 0 4px 6px -4px rgb(15 23 42 / 0.05);
+
+    --scrim: 15 23 42;
+    --scrim-alpha: 0.42;
+
+    /* Light mode stays flat and clean: no glow, only a crisper ring. */
+    --glow-brand: 0 0 0 1px rgb(37 99 235 / 0.2);
+    --glow-subtle: 0 0 0 1px rgb(37 99 235 / 0.12);
+    --hairline: 15 23 42;
+    --hairline-alpha: 0.04;
+  }
+
+  html {
+    background-color: rgb(var(--app-bg));
   }
 
   body {
-    @apply bg-white text-slate-800 antialiased;
+    @apply antialiased;
+    background-color: rgb(var(--app-bg));
+    color: rgb(var(--text-primary));
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* Theme flips are a deliberate, user-initiated change: give them a beat so
+       the switch reads as intentional rather than as a jarring repaint. */
+    transition: background-color var(--motion-normal) var(--ease-standard),
+      color var(--motion-normal) var(--ease-standard);
   }
 
-  /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-slate-300 hover:bg-slate-400;
+    background-color: rgb(var(--border-strong));
+    border-radius: 9999px;
   }
 
-  /* Focus visible ring */
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--text-muted));
+  }
+
+  * {
+    scrollbar-color: rgb(var(--border-strong)) transparent;
+  }
+
   *:focus-visible {
-    @apply outline-none ring-2 ring-brand-500/50 ring-offset-2 ring-offset-white;
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--app-bg)), 0 0 0 4px rgb(var(--focus-ring) / 0.65);
+    border-radius: 0.375rem;
   }
 
-  /* Selection */
   ::selection {
-    @apply bg-brand-100 text-brand-900;
+    background-color: rgb(var(--brand) / 0.28);
+    color: rgb(var(--text-primary));
   }
 }
 
-/* ─── Utility Classes ──────────────────────────────────────────────────── */
-
-@layer utilities {
-  /* Glass morphism — adapted for light mode */
-  .glass {
-    @apply bg-white/70 backdrop-blur-xl border border-slate-200/80;
-  }
-
-  .glass-card {
-    @apply rounded-xl bg-white/80 backdrop-blur-xl border border-slate-200/80 shadow-sm shadow-slate-200/50;
-  }
-
-  /* Chart container */
-  .chart-container {
-    @apply rounded-xl border border-slate-200/80 bg-white/80 p-5 backdrop-blur-sm shadow-sm;
-  }
-}
-
-/* ─── Component Overrides ──────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   Shared surfaces
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 @layer components {
-  /* Premium input style — light mode */
-  .input-premium {
-    @apply h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800
-    placeholder:text-slate-400 transition-all
-    focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/30;
+  /* Base panel. The inset hairline is what gives dark panels a machined edge;
+     in light it resolves to a near-invisible 4% line, so the same class reads
+     as a clean corporate card. */
+  .ds-surface {
+    background-color: rgb(var(--surface));
+    border: 1px solid rgb(var(--border));
+    box-shadow: var(--shadow-card);
+    border-radius: 0.75rem;
   }
 
-  /* Card with subtle hover */
-  .card-interactive {
-    @apply glass-card transition-all duration-300 hover:shadow-md hover:shadow-slate-200/80 hover:-translate-y-0.5 hover:border-slate-300;
+  .ds-surface-elevated {
+    background-color: rgb(var(--surface-elevated));
+    border: 1px solid rgb(var(--border-strong));
+    box-shadow: var(--shadow-elevated);
+    border-radius: 0.75rem;
+  }
+
+  .ds-surface-muted {
+    background-color: rgb(var(--surface-muted));
+    border: 1px solid rgb(var(--border-muted));
+    border-radius: 0.75rem;
+  }
+
+  /* Modal scrim. A single class rather than a utility because the alpha is
+     itself a token: dark needs a heavier veil to separate an elevated panel
+     from an already-dark ground. */
+  .ds-scrim {
+    background-color: rgb(var(--scrim) / var(--scrim-alpha));
+  }
+
+  /* Translucent panel used for headers and overlays. */
+  .ds-glass {
+    background-color: rgb(var(--surface-glass) / var(--surface-glass-alpha));
+    backdrop-filter: blur(16px);
+    border: 1px solid rgb(var(--border));
+  }
+
+  /* `glass-card` still has ~100 call sites across the product, so it is kept as
+     an alias — but it now resolves to tokens rather than to hard-coded white.
+     The bare `.glass` variant had no remaining call sites once the header moved
+     to `ds-glass`, and has been removed. */
+  .glass-card {
+    background-color: rgb(var(--surface-glass) / var(--surface-glass-alpha));
+    backdrop-filter: blur(16px);
+    border: 1px solid rgb(var(--border));
+    box-shadow: var(--shadow-card);
+    border-radius: 0.75rem;
+  }
+
+  .chart-container {
+    background-color: rgb(var(--surface));
+    border: 1px solid rgb(var(--border));
+    box-shadow: var(--shadow-card);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+  }
+
+  .input-premium {
+    height: 2.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(var(--input-border));
+    background-color: rgb(var(--input-bg));
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    font-size: 0.875rem;
+    color: rgb(var(--text-primary));
+    transition: border-color var(--motion-fast) var(--ease-standard),
+      box-shadow var(--motion-fast) var(--ease-standard);
+  }
+
+  .input-premium::placeholder {
+    color: rgb(var(--text-muted));
+  }
+
+  .input-premium:focus {
+    outline: none;
+    border-color: rgb(var(--brand));
+    box-shadow: 0 0 0 3px rgb(var(--focus-ring) / 0.22);
+  }
+
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Motion system
+
+   Entry, reveal and accent animation. Everything here is transform/opacity
+   only so it stays on the compositor, and everything collapses under
+   `prefers-reduced-motion`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer utilities {
+  .ds-page-enter {
+    animation: dsPageEnter var(--motion-slow) var(--ease-emphasized) both;
+  }
+
+  /* Reveal primitive. The element is pre-offset and becomes visible only when
+     `data-revealed` is set by the shared IntersectionObserver. */
+  .ds-reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity var(--motion-slow) var(--ease-emphasized),
+      transform var(--motion-slow) var(--ease-emphasized);
+    will-change: opacity, transform;
+  }
+
+  .ds-reveal[data-revealed="true"] {
+    opacity: 1;
+    transform: none;
+    will-change: auto;
+  }
+
+  /* Server-rendered / no-JS safety: if the observer never runs, content must
+     still be visible rather than permanently transparent. */
+  .no-js .ds-reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  .ds-glow {
+    box-shadow: var(--glow-brand);
+  }
+
+  .ds-glow-subtle {
+    box-shadow: var(--glow-subtle);
+  }
+
+  /* Brand edge used sparingly on the active nav item and primary metrics. */
+  .ds-brand-edge {
+    position: relative;
+  }
+
+  .ds-brand-edge::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    height: 60%;
+    width: 2px;
+    transform: translateY(-50%) scaleY(0);
+    transform-origin: center;
+    border-radius: 9999px;
+    background: rgb(var(--brand));
+    box-shadow: var(--glow-subtle);
+    transition: transform var(--motion-normal) var(--ease-emphasized);
+  }
+
+  .ds-brand-edge[data-active="true"]::before {
+    transform: translateY(-50%) scaleY(1);
+  }
+
+  .ds-press {
+    transition: transform var(--motion-fast) var(--ease-standard),
+      background-color var(--motion-fast) var(--ease-standard),
+      border-color var(--motion-fast) var(--ease-standard),
+      color var(--motion-fast) var(--ease-standard),
+      box-shadow var(--motion-fast) var(--ease-standard);
+  }
+
+  .ds-press:active {
+    transform: scale(0.97);
+  }
+
+  .ds-lift {
+    transition: transform var(--motion-normal) var(--ease-emphasized),
+      box-shadow var(--motion-normal) var(--ease-standard);
+  }
+
+  .ds-lift:hover {
+    transform: translateY(-2px);
+  }
+
+  .ds-overlay-enter {
+    animation: dsOverlayEnter var(--motion-normal) var(--ease-emphasized) both;
+  }
+
+  .ds-menu-enter {
+    animation: dsMenuEnter var(--motion-fast) var(--ease-emphasized) both;
+    transform-origin: top;
+  }
+
+  /* Dark-only ambient wash behind the primary metric band. It is a static
+     radial gradient, not an animated layer, so it costs nothing to composite. */
+  .ds-aurora {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .ds-aurora::after {
+    content: "";
+    position: absolute;
+    inset: -40% 10% auto 10%;
+    height: 220px;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(
+      60% 60% at 50% 0%,
+      rgb(var(--brand) / 0.16) 0%,
+      transparent 70%
+    );
+    transition: opacity var(--motion-slow) var(--ease-standard);
+  }
+
+  :root:not(.light) .ds-aurora::after {
+    opacity: 1;
+  }
+}
+
+@keyframes dsPageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dsOverlayEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dsMenuEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scaleY(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Reduced motion
+
+   Non-essential movement is removed outright rather than shortened. State
+   changes stay legible because colour and layout still change instantly.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ds-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .ds-page-enter,
+  .ds-overlay-enter,
+  .ds-menu-enter {
+    animation: none !important;
+  }
+
+  .ds-lift:hover,
+  .ds-press:active {
+    transform: none !important;
+  }
+
+  .ds-brand-edge[data-active="true"]::before {
+    transform: translateY(-50%) scaleY(1) !important;
+  }
+
+  .ds-aurora::after {
+    display: none !important;
   }
 }

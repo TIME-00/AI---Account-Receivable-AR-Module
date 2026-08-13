@@ -76,6 +76,10 @@ import {
   AUTOMATION_WORKER_SECRET_HEADER,
   validateAutomationWorker,
 } from "./automation/worker-auth.ts";
+import {
+  readAutomationServiceSource,
+  readInvoiceServiceSource,
+} from "./test-support/refactored-source.ts";
 
 function assert(
   condition: unknown,
@@ -994,9 +998,7 @@ Deno.test("Gate E persisted customer-resolution failures remain safely retryable
 });
 
 Deno.test("Gate E persisted extraction recovery revalidates financial identifiers before acceptance", async () => {
-  const service = await Deno.readTextFile(
-    new URL("./automation/service.ts", import.meta.url),
-  );
+  const service = await readAutomationServiceSource(import.meta.url);
   const recoveryStart = service.indexOf(
     "if (!customerResolutionFailureMayRecover(validationCodes))",
   );
@@ -1722,9 +1724,7 @@ Deno.test("OAuth completion rejects missing capability scope before secret write
 });
 
 Deno.test("OAuth callback state is atomically claimed before token exchange", async () => {
-  const service = await Deno.readTextFile(
-    new URL("./automation/service.ts", import.meta.url),
-  );
+  const service = await readAutomationServiceSource(import.meta.url);
   const claim = service.indexOf(
     '.is("consumed_at", null).select("id").maybeSingle()',
   );
@@ -3306,24 +3306,18 @@ Deno.test("Optional external references remain metadata while system numbers rem
     "GATE-INV-DRAFT-20260810-001",
   );
   const automation = await Deno.readTextFile(
-    new URL("./automation/service.ts", import.meta.url),
+    new URL("./automation/document-service.ts", import.meta.url),
   );
   const commandStart = automation.indexOf("async executeCommand(");
-  const allocationStart = automation.indexOf(
-    "private async proposeAndAllocateReceipt(",
-    commandStart,
-  );
-  const commandCreation = automation.slice(commandStart, allocationStart);
-  assert(commandStart >= 0 && allocationStart > commandStart);
+  const commandCreation = automation.slice(commandStart);
+  assert(commandStart >= 0);
   assert(!commandCreation.includes("critical_identifier_unverified"));
   assert(commandCreation.includes("reference_no: payload.reference_no"));
   assert(
     commandCreation.includes('postAtomically: mode === "straight_through"'),
   );
 
-  const invoiceService = await Deno.readTextFile(
-    new URL("./invoices/service.ts", import.meta.url),
-  );
+  const invoiceService = await readInvoiceServiceSource(import.meta.url);
   const receiptService = await Deno.readTextFile(
     new URL("./receipts/service.ts", import.meta.url),
   );
@@ -3908,8 +3902,8 @@ Deno.test("Gate E financial commands are DB-atomic, idempotent, and crash-reclai
           import.meta.url,
         ),
       ),
-      Deno.readTextFile(new URL("./automation/service.ts", import.meta.url)),
-      Deno.readTextFile(new URL("./invoices/service.ts", import.meta.url)),
+      readAutomationServiceSource(import.meta.url),
+      readInvoiceServiceSource(import.meta.url),
       Deno.readTextFile(new URL("./receipts/service.ts", import.meta.url)),
     ]);
   for (
@@ -3957,7 +3951,7 @@ Deno.test("Migration 034 reminders are Invoice-only, idempotent, and never infer
 
 Deno.test("Gate E source retains default-off providers, bounded worker, and no scheduler installation", async () => {
   const [service, config, migration] = await Promise.all([
-    Deno.readTextFile(new URL("./automation/service.ts", import.meta.url)),
+    readAutomationServiceSource(import.meta.url),
     Deno.readTextFile(
       new URL("../config.toml", import.meta.url),
     ),
@@ -3990,7 +3984,7 @@ Deno.test("Gate E source retains default-off providers, bounded worker, and no s
 
 Deno.test("Mailbox retries record exact duplicate no-ops and still advance persisted message lifecycle", async () => {
   const [service, migration] = await Promise.all([
-    Deno.readTextFile(new URL("./automation/service.ts", import.meta.url)),
+    readAutomationServiceSource(import.meta.url),
     Deno.readTextFile(
       new URL(
         "../../../database/034_gate_e_autonomous_ar_operations.sql",
@@ -4035,7 +4029,7 @@ Deno.test("Mailbox document processing resumes a durable bounded attachment back
         import.meta.url,
       ),
     ),
-    Deno.readTextFile(new URL("./automation/service.ts", import.meta.url)),
+    readAutomationServiceSource(import.meta.url),
   ]);
   assert(migration.includes(
     "processing_status TEXT NOT NULL DEFAULT 'pending'",
@@ -4064,9 +4058,7 @@ Deno.test("Mailbox document processing resumes a durable bounded attachment back
 });
 
 Deno.test("Exception collection derives tenant-scoped document monitoring context", async () => {
-  const service = await Deno.readTextFile(
-    new URL("./automation/service.ts", import.meta.url),
-  );
+  const service = await readAutomationServiceSource(import.meta.url);
   assert(service.includes('table === "automation_exceptions"'));
   assert(service.includes(
     '.select("id,original_file_name,processing_status")',
@@ -4081,7 +4073,7 @@ Deno.test("Exception collection derives tenant-scoped document monitoring contex
 
 Deno.test("Reminder delivery never retries an unconfirmed provider outcome", async () => {
   const [service, providers] = await Promise.all([
-    Deno.readTextFile(new URL("./automation/service.ts", import.meta.url)),
+    readAutomationServiceSource(import.meta.url),
     Deno.readTextFile(new URL("./automation/providers.ts", import.meta.url)),
   ]);
   assert(

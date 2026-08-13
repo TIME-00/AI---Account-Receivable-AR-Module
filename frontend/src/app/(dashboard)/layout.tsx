@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { ArHelpPanel } from "@/components/layout/ar-help-panel";
+import { usePathname } from "next/navigation";
 
 export default function DashboardLayout({
   children,
@@ -14,6 +15,7 @@ export default function DashboardLayout({
 }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
@@ -25,7 +27,7 @@ export default function DashboardLayout({
   // Show loading state while checking auth
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white">
+      <div className="flex h-screen items-center justify-center bg-app-bg">
         <div className="flex flex-col items-center gap-4">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
           <p className="text-sm text-slate-500">Loading...</p>
@@ -38,7 +40,7 @@ export default function DashboardLayout({
   if (!user) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-screen overflow-hidden bg-app-bg">
       {/* Sidebar */}
       <Sidebar onToggleHelp={() => setHelpOpen((v) => !v)} />
 
@@ -47,7 +49,10 @@ export default function DashboardLayout({
         <Header />
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto p-6">
+        {/* `key={pathname}` restarts the entry animation on every navigation,
+            so a route change reads as the content arriving rather than as an
+            instant swap. The shell itself never re-animates. */}
+        <main key={pathname} className="ds-page-enter flex-1 overflow-auto p-6">
           {children}
         </main>
       </div>

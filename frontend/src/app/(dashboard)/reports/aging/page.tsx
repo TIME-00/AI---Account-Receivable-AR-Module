@@ -234,7 +234,7 @@ function AgingReportContent() {
           the underlying native currencies must also be shown — and the base
           total must never read as the sum of them. */}
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-surface p-4">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             Outstanding by transaction currency
           </p>
@@ -244,7 +244,7 @@ function AgingReportContent() {
             <p className="mt-1 text-xs text-slate-400">No outstanding documents</p>
           )}
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-surface p-4">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             Company-base total
           </p>
@@ -301,7 +301,7 @@ function AgingReportContent() {
           <input
             type="text" placeholder="Filter customers on this page…" value={search} onChange={(e) => setSearch(e.target.value)}
             aria-label="Filter customers on this page"
-            className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-10 pr-4 text-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="h-10 w-full rounded-lg border border-slate-300 bg-surface pl-10 pr-4 text-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
         <p className="inline-flex items-start gap-1 text-[11px] text-slate-500">

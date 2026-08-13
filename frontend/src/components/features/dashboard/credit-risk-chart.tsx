@@ -11,7 +11,8 @@ import {
   YAxis,
 } from "recharts";
 import { Check, ShieldAlert } from "lucide-react";
-import { TOOLTIP_STYLE } from "./chart-tooltip";
+import { useTooltipStyle } from "./chart-tooltip";
+import { useChartTheme } from "@/lib/theme/chart-theme";
 import { cn } from "@/lib/utils";
 
 interface CreditRiskEntry {
@@ -37,6 +38,8 @@ export function CreditRiskChart({
   onButtonRef,
   activeRating = null,
 }: CreditRiskChartProps) {
+  const chart = useChartTheme();
+  const tooltipStyle = useTooltipStyle();
   const hasData = data.some((entry) => entry.count > 0);
   const interactive = typeof onSelectRating === "function";
 
@@ -75,20 +78,20 @@ export function CreditRiskChart({
             <BarChart data={data} barSize={30} layout="vertical">
               <CartesianGrid
                 strokeDasharray="3 3"
-                stroke="#e2e8f0"
+                stroke={chart.grid}
                 horizontal={false}
               />
               <XAxis
                 type="number"
                 allowDecimals={false}
-                tick={{ fill: "#64748b", fontSize: 11 }}
+                tick={{ fill: chart.axis, fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
               />
               <YAxis
                 type="category"
                 dataKey="rating"
-                tick={{ fill: "#64748b", fontSize: 12, fontWeight: 600 }}
+                tick={{ fill: chart.axisStrong, fontSize: 12, fontWeight: 600 }}
                 axisLine={false}
                 tickLine={false}
                 width={40}
@@ -98,7 +101,7 @@ export function CreditRiskChart({
                   value,
                   value === 1 ? "Customer" : "Customers",
                 ]}
-                contentStyle={TOOLTIP_STYLE}
+                contentStyle={tooltipStyle}
               />
               <Bar
                 dataKey="count"
@@ -139,7 +142,7 @@ export function CreditRiskChart({
                   "inline-flex touch-manipulation items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2",
                   isActive
                     ? "border-brand-300 bg-brand-50 text-brand-700"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                    : "border-slate-200 bg-surface text-slate-600 hover:bg-slate-50",
                 )}
               >
                 {isActive && <Check className="h-3 w-3" aria-hidden="true" />}

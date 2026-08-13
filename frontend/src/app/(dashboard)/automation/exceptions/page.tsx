@@ -160,7 +160,7 @@ export default function ExceptionQueuePage() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-surface">
             <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-500">
@@ -351,7 +351,7 @@ export default function ExceptionQueuePage() {
               type="button"
               onClick={submitNote}
               disabled={resolve.isPending || dismiss.isPending}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
             >
               Confirm
             </button>

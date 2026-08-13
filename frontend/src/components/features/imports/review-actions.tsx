@@ -351,7 +351,7 @@ function EditControls({
 
       {/* Customer edit: customer_code / customer_name only — never a raw UUID. */}
       {editMode === "customer" && (
-        <div className="flex max-w-full flex-col gap-1.5 rounded-md border border-slate-200 bg-white p-2">
+        <div className="flex max-w-full flex-col gap-1.5 rounded-md border border-slate-200 bg-surface p-2">
           <label className="flex flex-col gap-0.5 text-[10px] font-medium text-slate-500">
             Customer code
             <input
@@ -396,7 +396,7 @@ function EditControls({
 
       {/* Invoice reference edit. */}
       {editMode === "invoice" && (
-        <div className="flex max-w-full flex-col gap-1.5 rounded-md border border-slate-200 bg-white p-2">
+        <div className="flex max-w-full flex-col gap-1.5 rounded-md border border-slate-200 bg-surface p-2">
           <label className="flex flex-col gap-0.5 text-[10px] font-medium text-slate-500">
             Invoice reference
             <input

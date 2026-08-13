@@ -102,7 +102,7 @@ export default function ReceiptSummaryPage() {
         <MoneySummary summary={unappliedSummary} title="Unapplied" />
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="rounded-xl border border-slate-200 bg-surface p-4">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Total Receipts</p>
         <p className="mt-1 font-mono text-xl font-bold text-slate-900">{overall.total}</p>
       </div>

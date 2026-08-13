@@ -72,9 +72,9 @@ export function AutomationDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in" />
+        <Dialog.Overlay className="ds-overlay-enter fixed inset-0 z-50 ds-scrim" />
         <Dialog.Content
-          className={`fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-xl focus:outline-none`}
+          className={`fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-line-strong bg-surface-elevated p-5 shadow-elevated focus:outline-none ds-overlay-enter`}
           onCloseAutoFocus={(event) => {
             const opener = openerRef.current;
             if (opener && document.contains(opener) && typeof opener.focus === "function") {

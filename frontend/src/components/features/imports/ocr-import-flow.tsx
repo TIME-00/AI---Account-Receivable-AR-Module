@@ -188,7 +188,7 @@ export function OcrImportFlow({ importType = "invoice" }: { importType?: OcrImpo
               </div>
             </div>
             {isUploading && (
-              <div className="absolute inset-0 rounded-2xl bg-white/80 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-2xl bg-surface/80 flex items-center justify-center">
                 <Loader2 className="h-8 w-8 text-brand-500 animate-spin" />
                 <span className="ml-3 text-sm font-medium text-slate-600">Uploading & preparing review…</span>
               </div>

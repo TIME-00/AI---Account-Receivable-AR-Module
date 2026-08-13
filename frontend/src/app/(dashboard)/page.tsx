@@ -7,6 +7,8 @@ import { useAuthContext } from "@/hooks/use-auth-context";
 import { ApiError } from "@/hooks/use-api";
 import { useCompanyStore } from "@/stores/company-store";
 import { KpiCard } from "@/components/ui/kpi-card";
+import { Reveal } from "@/components/ui/reveal";
+import { RATING_COLORS } from "@/lib/theme/chart-theme";
 import { formatMoneySafe } from "@/lib/currency";
 import {
   DollarSign,
@@ -34,10 +36,6 @@ import type { CreditRating } from "@/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const RATING_COLORS: Record<string, string> = {
-  AAA: "#22c55e", AA: "#10b981", A: "#3b82f6",
-  B: "#f59e0b", C: "#f97316", D: "#ef4444",
-};
 const DASHBOARD_RATINGS = ["AAA", "AA", "A", "B", "C", "D"] as const;
 
 const SCOPE_LABELS: Record<string, string> = {
@@ -265,7 +263,7 @@ export default function DashboardPage() {
               </p>
               <button
                 onClick={() => refetchDashboard()}
-                className="mt-2 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
+                className="mt-2 inline-flex items-center gap-2 rounded-lg bg-accent-fill px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-fill-hover"
               >
                 <RefreshCw className="h-4 w-4" /> Retry
               </button>
@@ -281,7 +279,7 @@ export default function DashboardPage() {
       <DashboardHeader meta={meta} />
 
       {/* ─── Primary KPI Cards (base currency) ─────────────────────── */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="ds-aurora grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Total Outstanding AR"
           value={formatMoneySafe(totalOutstanding, currency)}
@@ -325,7 +323,7 @@ export default function DashboardPage() {
       />
 
       {/* ─── Invoice Status Counts ─────────────────────────────────── */}
-      <div className="glass-card p-4">
+      <Reveal className="glass-card p-4">
         <div className="mb-3 flex items-center gap-2">
           <Clock className="h-4 w-4 text-slate-400" />
           <h3 className="text-sm font-semibold text-slate-900">Invoice Status</h3>
@@ -336,16 +334,16 @@ export default function DashboardPage() {
           <StatusPill label="Overdue" value={statusCounts?.overdue_status} color="text-red-600" />
           <StatusPill label="Paid" value={statusCounts?.paid} color="text-emerald-600" />
         </div>
-      </div>
+      </Reveal>
 
       {/* ─── Charts Row 1: Aging + Composition ────────────────────── */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <Reveal className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <AgingChart data={agingChartData} isLoading={isLoading} currency={currency} />
         <CompositionChart data={donutData} currency={currency} isLoading={isLoading} />
-      </div>
+      </Reveal>
 
       {/* ─── Charts Row 2: Collection Trend + Credit Rating ───────── */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <Reveal className="grid grid-cols-1 gap-6 lg:grid-cols-2" delayMs={60}>
         <CollectionTrendChart data={trendData} currency={currency} isLoading={isLoading} />
         <CreditRiskChart
           data={creditRatingData}
@@ -357,7 +355,7 @@ export default function DashboardPage() {
           }}
           activeRating={selectedRating}
         />
-      </div>
+      </Reveal>
 
       <CreditRatingCustomerDialog
         open={selectedRating !== null}
@@ -383,11 +381,13 @@ export default function DashboardPage() {
       />
 
       {/* ─── Top Outstanding Customers ─────────────────────────────── */}
-      <TopCustomers
-        data={metrics?.top_outstanding_customers ?? []}
-        currency={currency}
-        isLoading={isLoading}
-      />
+      <Reveal>
+        <TopCustomers
+          data={metrics?.top_outstanding_customers ?? []}
+          currency={currency}
+          isLoading={isLoading}
+        />
+      </Reveal>
     </div>
   );
 }

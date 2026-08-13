@@ -111,13 +111,13 @@ export default function CustomerOutstandingPage() {
           { label: "Total Outstanding (company base)", value: formatMoneySafe(totalOutstanding, baseCurrency), color: "text-amber-600" },
           { label: "Total Overdue (company base)", value: formatMoneySafe(totalOverdue, baseCurrency), color: "text-red-600" },
         ].map((c) => (
-          <div key={c.label} className="rounded-xl border border-slate-200 bg-white p-4">
+          <div key={c.label} className="rounded-xl border border-slate-200 bg-surface p-4">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{c.label}</p>
             <p className={cn("mt-1 font-mono text-xl font-bold", c.color)}>{c.value}</p>
           </div>
         ))}
         {/* Native transaction-currency breakdown, straight from the backend */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-surface p-4">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             Outstanding by currency
           </p>
@@ -138,7 +138,7 @@ export default function CustomerOutstandingPage() {
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           type="text" placeholder="Search customer…" value={search} onChange={(e) => setSearch(e.target.value)}
-          className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-10 pr-4 text-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="h-10 w-full rounded-lg border border-slate-300 bg-surface pl-10 pr-4 text-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
 

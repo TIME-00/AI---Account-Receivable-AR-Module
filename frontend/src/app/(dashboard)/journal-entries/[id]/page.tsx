@@ -198,7 +198,7 @@ export default function JournalEntryDetailPage() {
       </div>
 
       {/* ── Lines ── */}
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-surface">
         <table className="w-full min-w-[880px] text-sm">
           <caption className="sr-only">
             Journal entry lines in line-number order, with debit and credit amounts.

@@ -81,7 +81,7 @@ export function ReceiptFormAmount({
                   value={field.value || ""}
                   onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                   className={cn(
-                    "h-10 w-full rounded-lg border bg-white pl-14 pr-3 text-right font-mono text-sm text-slate-800",
+                    "h-10 w-full rounded-lg border bg-surface pl-14 pr-3 text-right font-mono text-sm text-slate-800",
                     "focus:outline-none focus:ring-1 focus:ring-brand-500",
                     form.formState.errors.receipt_amount ? "border-red-500" : "border-slate-300"
                   )}
@@ -105,7 +105,7 @@ export function ReceiptFormAmount({
             render={({ field }) => (
               <select
                 {...field}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-surface px-3 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
                 {SUPPORTED_TRANSACTION_CURRENCY_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>

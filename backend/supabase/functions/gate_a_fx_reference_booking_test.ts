@@ -1,19 +1,20 @@
 import { ValidationError } from "./_shared/errors.ts";
-import {
-  DEFAULT_PAGE_SIZE,
-  MAX_PAGE_SIZE,
-} from "./_shared/constants.ts";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./_shared/constants.ts";
 import {
   calculateStaleState,
   FX_REFERENCE_STALE_AFTER_BUSINESS_DAYS,
 } from "./fx-rate-sync/validation.ts";
 import { validateCreateInvoice } from "./invoices/validators.ts";
 import { validateCreateReceipt } from "./receipts/validators.ts";
+import { readInvoiceServiceSource } from "./test-support/refactored-source.ts";
 
 const read = (path: string) =>
   Deno.readTextFile(new URL(path, import.meta.url));
 
-function assert(condition: unknown, message = "Assertion failed"): asserts condition {
+function assert(
+  condition: unknown,
+  message = "Assertion failed",
+): asserts condition {
   if (!condition) throw new Error(message);
 }
 
@@ -23,7 +24,9 @@ function assertEquals<T>(
   message = "Values differ",
 ): void {
   if (actual !== expected) {
-    throw new Error(`${message}. Expected ${String(expected)}, got ${String(actual)}`);
+    throw new Error(
+      `${message}. Expected ${String(expected)}, got ${String(actual)}`,
+    );
   }
 }
 
@@ -32,7 +35,10 @@ function assertIncludes(actual: string, expected: string): void {
 }
 
 function assertNotIncludes(actual: string, expected: string): void {
-  assert(!actual.includes(expected), `Expected source not to include: ${expected}`);
+  assert(
+    !actual.includes(expected),
+    `Expected source not to include: ${expected}`,
+  );
 }
 
 function expectValidationError(action: () => unknown): ValidationError {
@@ -58,20 +64,34 @@ Deno.test("Gate A migration installs one guarded forward contract without booked
   assertIncludes(migration, "COMMIT;");
   assertIncludes(migration, "SET LOCAL lock_timeout = '5s'");
   assertIncludes(migration, "SET LOCAL statement_timeout = '60s'");
-  assertIncludes(migration, "GATE_A_FX_REFERENCE: governed RPC baseline signature drift");
-  assertIncludes(migration, "reference-aware governed wrapper already exists or catalog drifted");
-  assertIncludes(migration, "expected exactly three unambiguous Invoice create signatures");
-  assertIncludes(migration, "expected exactly three unambiguous Receipt create signatures");
+  assertIncludes(
+    migration,
+    "GATE_A_FX_REFERENCE: governed RPC baseline signature drift",
+  );
+  assertIncludes(
+    migration,
+    "reference-aware governed wrapper already exists or catalog drifted",
+  );
+  assertIncludes(
+    migration,
+    "expected exactly three unambiguous Invoice create signatures",
+  );
+  assertIncludes(
+    migration,
+    "expected exactly three unambiguous Receipt create signatures",
+  );
   assertIncludes(migration, "pronargdefaults");
 
-  for (const prohibited of [
-    "LEGACY_UNVERIFIED",
-    "LegacyBackfilled",
-    "UPDATE public.fx_booking_rate_decisions",
-    "UPDATE public.journal_entries",
-    "UPDATE public.journal_lines",
-    "DELETE FROM public.",
-  ]) {
+  for (
+    const prohibited of [
+      "LEGACY_UNVERIFIED",
+      "LegacyBackfilled",
+      "UPDATE public.fx_booking_rate_decisions",
+      "UPDATE public.journal_entries",
+      "UPDATE public.journal_lines",
+      "DELETE FROM public.",
+    ]
+  ) {
     assertNotIncludes(migration, prohibited);
   }
 });
@@ -81,12 +101,14 @@ Deno.test("Gate A migration covers all four reference-aware governed wrappers an
     "../../../database/031_post_batch_9d_gate_a_governed_fx_reference_booking.sql",
   );
 
-  for (const signature of [
-    "fx_create_governed_invoice_draft",
-    "fx_create_governed_receipt_draft",
-    "fx_update_governed_invoice_fx",
-    "fx_update_governed_receipt_fx",
-  ]) {
+  for (
+    const signature of [
+      "fx_create_governed_invoice_draft",
+      "fx_create_governed_receipt_draft",
+      "fx_update_governed_invoice_fx",
+      "fx_update_governed_receipt_fx",
+    ]
+  ) {
     assertIncludes(migration, `FUNCTION public.${signature}(`);
   }
 
@@ -99,18 +121,33 @@ Deno.test("Gate A migration covers all four reference-aware governed wrappers an
   assertIncludes(migration, "p_import_origin,\n    p_lines,");
   assertIncludes(migration, "p_override_reason,\n    NULL\n  );");
   assertIncludes(migration, "p_fx_reference_rate_id,\n    p_override_reason,");
-  assertIncludes(migration, "WHEN p_fx_reference_rate_id IS NOT NULL THEN 'REFERENCE_SELECTED'");
+  assertIncludes(
+    migration,
+    "WHEN p_fx_reference_rate_id IS NOT NULL THEN 'REFERENCE_SELECTED'",
+  );
 
   // Compatibility signatures retain their existing owner/ACL identity through
   // CREATE OR REPLACE; exact reference-aware signatures are additive and
   // non-defaulted, so PostgreSQL cannot confuse old and new positional calls.
-  assertIncludes(migration, "CREATE OR REPLACE FUNCTION public.fx_create_governed_invoice_draft(");
-  assertIncludes(migration, "CREATE OR REPLACE FUNCTION public.fx_create_governed_receipt_draft(");
+  assertIncludes(
+    migration,
+    "CREATE OR REPLACE FUNCTION public.fx_create_governed_invoice_draft(",
+  );
+  assertIncludes(
+    migration,
+    "CREATE OR REPLACE FUNCTION public.fx_create_governed_receipt_draft(",
+  );
   assertIncludes(migration, "p_lines JSONB DEFAULT '[]'::jsonb");
   assertIncludes(migration, "p_explicit_rate_supplied BOOLEAN DEFAULT false");
   assertIncludes(migration, "p_override_reason TEXT DEFAULT NULL");
-  assertIncludes(migration, "Invoice overload defaults would permit ambiguous resolution");
-  assertIncludes(migration, "Receipt overload defaults would permit ambiguous resolution");
+  assertIncludes(
+    migration,
+    "Invoice overload defaults would permit ambiguous resolution",
+  );
+  assertIncludes(
+    migration,
+    "Receipt overload defaults would permit ambiguous resolution",
+  );
 });
 
 Deno.test("Gate A migration preserves security mode, owner, search path, and service-only execution", async () => {
@@ -120,14 +157,20 @@ Deno.test("Gate A migration preserves security mode, owner, search path, and ser
 
   assertIncludes(migration, "owner_role.rolname <> 'postgres'");
   assertIncludes(migration, "p.prosecdef IS DISTINCT FROM true");
-  assertIncludes(migration, "p.proconfig IS DISTINCT FROM ARRAY['search_path=public']::TEXT[]");
+  assertIncludes(
+    migration,
+    "p.proconfig IS DISTINCT FROM ARRAY['search_path=public']::TEXT[]",
+  );
   assertIncludes(migration, "OWNER TO postgres");
   assertIncludes(migration, "SECURITY DEFINER");
   assertIncludes(migration, "SET search_path = public");
   assertIncludes(migration, "SET search_path = ''");
   assertIncludes(migration, "FROM PUBLIC, anon, authenticated");
   assertIncludes(migration, "TO service_role");
-  assertIncludes(migration, "governed wrapper security/search_path postcondition failed");
+  assertIncludes(
+    migration,
+    "governed wrapper security/search_path postcondition failed",
+  );
 });
 
 Deno.test("Gate A reference validator is tenant, pair, direction, date, latest-active, and stale bound", async () => {
@@ -135,17 +178,19 @@ Deno.test("Gate A reference validator is tenant, pair, direction, date, latest-a
     "../../../database/031_post_batch_9d_gate_a_governed_fx_reference_booking.sql",
   );
 
-  for (const predicate of [
-    "r.id = p_fx_reference_rate_id",
-    "r.company_id = p_company_id",
-    "r.from_currency = p_from_currency",
-    "r.to_currency = p_to_currency",
-    "r.effective_date <= p_transaction_date",
-    "r.status = 'Active'",
-    "p_to_currency IS DISTINCT FROM v_company_base",
-    "v_latest_id IS DISTINCT FROM v_reference.id",
-    "(p_transaction_date - v_reference.effective_date) > 3",
-  ]) {
+  for (
+    const predicate of [
+      "r.id = p_fx_reference_rate_id",
+      "r.company_id = p_company_id",
+      "r.from_currency = p_from_currency",
+      "r.to_currency = p_to_currency",
+      "r.effective_date <= p_transaction_date",
+      "r.status = 'Active'",
+      "p_to_currency IS DISTINCT FROM v_company_base",
+      "v_latest_id IS DISTINCT FROM v_reference.id",
+      "(p_transaction_date - v_reference.effective_date) > 3",
+    ]
+  ) {
     assertIncludes(migration, predicate);
   }
 
@@ -153,7 +198,10 @@ Deno.test("Gate A reference validator is tenant, pair, direction, date, latest-a
   assertIncludes(migration, "r.fetched_at DESC");
   assertIncludes(migration, "r.created_at DESC");
   assertIncludes(migration, "r.id DESC");
-  assertIncludes(migration, "selected reference rate is stale; use governed manual override");
+  assertIncludes(
+    migration,
+    "selected reference rate is stale; use governed manual override",
+  );
 });
 
 Deno.test("Gate A SQL owns rate selection, NUMERIC base snapshots, parity, and manual governance", async () => {
@@ -167,7 +215,10 @@ Deno.test("Gate A SQL owns rate selection, NUMERIC base snapshots, parity, and m
     "../../../database/023_fx_booking_rate_rpcs_and_immutability.sql",
   );
 
-  assertIncludes(migration, "v_reference_rate := public.fx_require_bookable_reference_rate(");
+  assertIncludes(
+    migration,
+    "v_reference_rate := public.fx_require_bookable_reference_rate(",
+  );
   assertIncludes(migration, "to_jsonb(v_reference_rate)");
   assertIncludes(migration, "ROUND(");
   assertIncludes(migration, "* (v_invoice->>'exchange_rate')::NUMERIC");
@@ -213,28 +264,30 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
   assertEquals(receipt.fx_reference_rate_id, referenceId);
   assertEquals(receipt.exchange_rate, undefined);
 
-  for (const action of [
-    () =>
-      validateCreateInvoice({
-        doc_type: "Invoice",
-        invoice_date: "2026-07-24",
-        customer_id: customerId,
-        currency: "SGD",
-        fx_reference_rate_id: referenceId,
-        exchange_rate: 4.5,
-      }),
-    () =>
-      validateCreateReceipt({
-        receipt_date: "2026-07-24",
-        customer_id: customerId,
-        payment_method: "TT",
-        currency: "SGD",
-        fx_reference_rate_id: referenceId,
-        fx_override_reason: "manual",
-        receipt_amount: 12.34,
-        bank_account_id: bankAccountId,
-      }),
-  ]) {
+  for (
+    const action of [
+      () =>
+        validateCreateInvoice({
+          doc_type: "Invoice",
+          invoice_date: "2026-07-24",
+          customer_id: customerId,
+          currency: "SGD",
+          fx_reference_rate_id: referenceId,
+          exchange_rate: 4.5,
+        }),
+      () =>
+        validateCreateReceipt({
+          receipt_date: "2026-07-24",
+          customer_id: customerId,
+          payment_method: "TT",
+          currency: "SGD",
+          fx_reference_rate_id: referenceId,
+          fx_override_reason: "manual",
+          receipt_amount: 12.34,
+          bank_account_id: bankAccountId,
+        }),
+    ]
+  ) {
     const error = expectValidationError(action);
     assertEquals(
       error.message,
@@ -271,7 +324,7 @@ Deno.test("Gate A Invoice and Receipt validators accept reference ids and reject
 });
 
 Deno.test("Gate A Edge services use the exact reference-aware RPC parameters", async () => {
-  const invoiceService = await read("invoices/service.ts");
+  const invoiceService = await readInvoiceServiceSource(import.meta.url);
   const receiptService = await read("receipts/service.ts");
   const invoiceValidator = await read("invoices/validators.ts");
   const receiptValidator = await read("receipts/validators.ts");
@@ -285,9 +338,18 @@ Deno.test("Gate A Edge services use the exact reference-aware RPC parameters", a
   for (const source of [invoiceValidator, receiptValidator]) {
     assertIncludes(source, "fx_reference_rate_id cannot be combined");
   }
-  assertIncludes(invoiceService, "updatePayload.fx_reference_rate_id = reference.id");
-  assertIncludes(receiptService, "p_fx_reference_rate_id: selectedReferenceRateId");
-  assertIncludes(invoiceService, "p_fx_reference_rate_id: selectedReferenceRateId");
+  assertIncludes(
+    invoiceService,
+    "updatePayload.fx_reference_rate_id = reference.id",
+  );
+  assertIncludes(
+    receiptService,
+    "p_fx_reference_rate_id: selectedReferenceRateId",
+  );
+  assertIncludes(
+    invoiceService,
+    "p_fx_reference_rate_id: selectedReferenceRateId",
+  );
 });
 
 Deno.test("Gate A lookup and booking use one three-business-day stale basis and deterministic latest ordering", async () => {
@@ -299,7 +361,10 @@ Deno.test("Gate A lookup and booking use one three-business-day stale basis and 
   assertEquals(FX_REFERENCE_STALE_AFTER_BUSINESS_DAYS, 3);
   assertEquals(calculateStaleState("2026-07-21", "2026-07-24").is_stale, false);
   assertEquals(calculateStaleState("2026-07-20", "2026-07-24").is_stale, true);
-  assertIncludes(lookupService, ".order('effective_date', { ascending: false })");
+  assertIncludes(
+    lookupService,
+    ".order('effective_date', { ascending: false })",
+  );
   assertIncludes(lookupService, ".order('fetched_at', { ascending: false })");
   assertIncludes(lookupService, ".order('created_at', { ascending: false })");
   assertIncludes(lookupService, ".order('id', { ascending: false })");
@@ -311,13 +376,13 @@ Deno.test("Gate A pagination remains bounded at public 100 and internal RPC 200"
   const migration027 = await read(
     "../../../database/027_batch_9d_d_authoritative_monetary_aggregation.sql",
   );
-  const invoiceService = await read("invoices/service.ts");
+  const invoiceService = await readInvoiceServiceSource(import.meta.url);
   const receiptService = await read("receipts/service.ts");
 
   assertEquals(DEFAULT_PAGE_SIZE, 20);
   assertEquals(MAX_PAGE_SIZE, 100);
-  const internalMaxCount =
-    migration027.match(/p_page_size > 200/g)?.length ?? 0;
+  const internalMaxCount = migration027.match(/p_page_size > 200/g)?.length ??
+    0;
   assert(
     internalMaxCount >= 3,
     "All internal collection/report RPCs must retain the 200-row ceiling",

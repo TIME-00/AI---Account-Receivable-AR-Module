@@ -191,7 +191,7 @@ export default function CustomersPage() {
             placeholder="Search by name, code, or email…"
             value={search}
             onChange={(e) => applyFilter(() => setSearch(e.target.value))}
-            className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-10 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="h-10 w-full rounded-lg border border-slate-300 bg-surface pl-10 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
 

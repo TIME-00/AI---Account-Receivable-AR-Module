@@ -164,7 +164,7 @@ export default function InvoicesPage() {
             className={cn(
               "rounded-full px-3 py-1 text-xs font-medium transition-all",
               !statusFilter
-                ? "bg-brand-600 text-white shadow-sm"
+                ? "bg-accent-fill text-white shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             )}
           >
@@ -177,7 +177,7 @@ export default function InvoicesPage() {
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-medium transition-all",
                 statusFilter === s
-                  ? "bg-brand-600 text-white shadow-sm"
+                  ? "bg-accent-fill text-white shadow-sm"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               )}
             >
@@ -241,7 +241,7 @@ export default function InvoicesPage() {
             {!hasFilters && (
               <Link
                 href="/invoices/new"
-                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-brand-900/30 transition-all hover:bg-brand-500"
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-accent-fill px-4 py-2 text-sm font-medium text-white shadow-lg shadow-brand-900/30 transition-all hover:bg-accent-fill-hover"
               >
                 <Plus className="h-4 w-4" />
                 Create Your First Invoice

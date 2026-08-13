@@ -180,7 +180,7 @@ export function FxRateField({
             disabled={disabled}
             value={manualRate ?? ""}
             onChange={(e) => onManualRateChange(e.target.value === "" ? null : parseFloat(e.target.value))}
-            className="h-10 w-full rounded-lg border border-amber-300 bg-white px-3 text-right font-mono text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            className="h-10 w-full rounded-lg border border-amber-300 bg-surface px-3 text-right font-mono text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
             placeholder="0.0000"
           />
           <label htmlFor={overrideReasonId} className="text-[11px] font-medium text-amber-800">
@@ -196,7 +196,7 @@ export function FxRateField({
             rows={2}
             placeholder="Reason for the manual override (min 5 characters)"
             className={cn(
-              "w-full rounded-lg border bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1",
+              "w-full rounded-lg border bg-surface px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1",
               reasonValid || overrideReason === ""
                 ? "border-amber-300 focus:ring-amber-500"
                 : "border-red-400 focus:ring-red-500"
@@ -351,7 +351,7 @@ function RetryButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex w-fit items-center gap-1 rounded-md bg-white/70 px-2 py-0.5 text-[11px] font-medium ring-1 ring-current/20 hover:bg-white focus:outline-none focus-visible:ring-2"
+      className="inline-flex w-fit items-center gap-1 rounded-md bg-surface/70 px-2 py-0.5 text-[11px] font-medium ring-1 ring-current/20 hover:bg-surface focus:outline-none focus-visible:ring-2"
     >
       <RefreshCw className="h-3 w-3" aria-hidden="true" />
       Retry

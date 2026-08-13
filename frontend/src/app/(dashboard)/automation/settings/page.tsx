@@ -135,7 +135,7 @@ export default function AutomationSettingsPage() {
   return (
     <div className="space-y-6">
       {/* Operating mode — visual structure preserved. */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <section className="rounded-xl border border-slate-200 bg-surface p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-800">Operating Mode</h2>
           <AutomationBadge
@@ -189,7 +189,7 @@ export default function AutomationSettingsPage() {
       </section>
 
       {/* Reminder automation — high-level control, same visual language. */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <section className="rounded-xl border border-slate-200 bg-surface p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-800">
             Reminder Automation
@@ -250,7 +250,7 @@ export default function AutomationSettingsPage() {
       </section>
 
       {/* Capabilities — read-only, backend-derived (replaces Kill Switches). */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <section className="rounded-xl border border-slate-200 bg-surface p-5">
         <h2 className="text-sm font-semibold text-slate-800">Capabilities</h2>
         <p className="mt-1 text-xs text-slate-500">
           Capabilities are managed automatically based on the selected automation
@@ -301,7 +301,7 @@ export default function AutomationSettingsPage() {
               type="button"
               onClick={confirmModeChange}
               disabled={update.isPending}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
             >
               Confirm
             </button>
@@ -358,7 +358,7 @@ export default function AutomationSettingsPage() {
               type="button"
               onClick={confirmReminderChange}
               disabled={update.isPending}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
             >
               Confirm
             </button>

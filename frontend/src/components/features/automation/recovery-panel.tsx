@@ -223,7 +223,7 @@ export function RecoveryPanel({
                   {data.original_invoice_references.map((ref, i) => (
                     <li
                       key={`${ref}-${i}`}
-                      className="max-w-full break-all rounded border border-slate-300 bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-700"
+                      className="max-w-full break-all rounded border border-slate-300 bg-surface px-1.5 py-0.5 font-mono text-[11px] text-slate-700"
                     >
                       {ref}
                     </li>
@@ -433,7 +433,7 @@ export function RecoveryPanel({
                     title={!latest
                       ? "Record a governed correction or confirmation first."
                       : undefined}
-                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                    className="rounded-lg bg-accent-fill px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
                   >
                     {retry.isPending ? "Retrying…" : "Retry Matching"}
                   </button>

@@ -20,6 +20,7 @@ import {
 import { useState, useRef, useEffect } from "react";
 import type { GlobalSearchResult } from "@/types";
 import { NotificationDropdown } from "@/components/features/notifications/notification-dropdown";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const SEARCH_TYPE_ICON: Record<GlobalSearchResult["type"], typeof FileText> = {
   customer: Users,
@@ -71,7 +72,7 @@ export function Header() {
   };
 
   return (
-    <header className="relative z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 px-6 backdrop-blur-xl">
+    <header className="ds-glass relative z-30 flex h-16 items-center justify-between border-x-0 border-t-0 px-6">
       {/* Left: Global Search */}
       <div className="flex items-center gap-3">
         <div className="relative" ref={searchRef}>
@@ -82,11 +83,12 @@ export function Header() {
             onChange={(e) => setSearchQuery(e.target.value)}
             onFocus={() => setSearchFocused(true)}
             placeholder="Search invoices, customers, receipts..."
-            className="h-9 w-72 rounded-lg border border-slate-300 bg-white pl-9 pr-4 text-sm text-slate-700 placeholder:text-slate-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/30"
+            aria-label="Search invoices, customers and receipts"
+            className="input-premium w-72 pl-9 pr-4"
           />
 
           {showSearchDropdown && (
-            <div className="absolute left-0 top-full z-50 mt-1 w-96 animate-fade-in overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-200/50">
+            <div className="ds-menu-enter ds-surface-elevated absolute left-0 top-full z-50 mt-1 w-96 overflow-hidden py-1">
               {searchFetching ? (
                 <div className="flex items-center gap-2 px-3 py-3 text-sm text-slate-500">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -108,7 +110,7 @@ export function Header() {
                       <li key={`${r.type}-${r.id}`}>
                         <button
                           onClick={() => goTo(r.route)}
-                          className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-slate-50"
+                          className="ds-press flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-table-hover"
                         >
                           <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                           <div className="min-w-0">
@@ -135,7 +137,9 @@ export function Header() {
         <div className="relative" ref={companyMenuRef}>
           <button
             onClick={() => setShowCompanyMenu(!showCompanyMenu)}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition-all hover:border-slate-400 hover:bg-slate-50"
+            aria-haspopup="menu"
+            aria-expanded={showCompanyMenu}
+            className="ds-press flex items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-slate-700 hover:border-accent/50 hover:bg-nav-hover"
           >
             <Building2 className="h-4 w-4 text-brand-500" />
             <span className="max-w-[160px] truncate font-medium">{companyName}</span>
@@ -143,7 +147,7 @@ export function Header() {
           </button>
 
           {showCompanyMenu && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-64 animate-fade-in rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-200/50">
+            <div className="ds-menu-enter ds-surface-elevated absolute right-0 top-full z-50 mt-1 w-64 py-1">
               <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
                 Select Company
               </div>
@@ -156,10 +160,10 @@ export function Header() {
                       setShowCompanyMenu(false);
                     }}
                     className={cn(
-                      "flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors",
+                      "ds-press flex w-full items-center gap-2 px-3 py-2 text-sm",
                       c.id === companyId
-                        ? "bg-brand-50 text-brand-600"
-                        : "text-slate-700 hover:bg-slate-50"
+                        ? "bg-accent-muted text-brand-700"
+                        : "text-slate-700 hover:bg-table-hover"
                     )}
                   >
                     <Building2 className="h-3.5 w-3.5 shrink-0" />
@@ -181,6 +185,9 @@ export function Header() {
           )}
         </div>
 
+        {/* Appearance — available to every authenticated user, independent of AR role */}
+        <ThemeToggle className="hidden sm:flex" />
+
         {/* Notifications — self-contained Gate B dropdown (shared data contract) */}
         <NotificationDropdown />
 
@@ -188,9 +195,12 @@ export function Header() {
         <div className="relative" ref={userMenuRef}>
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-100"
+            aria-haspopup="menu"
+            aria-expanded={showUserMenu}
+            aria-label="Account menu"
+            className="ds-press flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-nav-hover"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-bold text-white">
+            <div className="ds-glow-subtle flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-bold text-white">
               {user?.email?.charAt(0).toUpperCase() ?? "U"}
             </div>
             <div className="hidden text-left md:block">
@@ -202,24 +212,29 @@ export function Header() {
           </button>
 
           {showUserMenu && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-48 animate-fade-in rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-200/50">
-              <div className="border-b border-slate-200 px-3 py-2">
+            <div className="ds-menu-enter ds-surface-elevated absolute right-0 top-full z-50 mt-1 w-56 py-1">
+              <div className="border-b border-line px-3 py-2">
                 <p className="truncate text-xs font-medium text-slate-700">{user?.email ?? "Signed in"}</p>
                 <p className="text-[10px] text-slate-400">{displayRole}</p>
+              </div>
+              {/* Same control, reachable on viewports where the header rail
+                  collapses the segmented toggle. */}
+              <div className="border-b border-line sm:hidden">
+                <ThemeToggle variant="menu" />
               </div>
               <button
                 onClick={() => {
                   setShowUserMenu(false);
                   router.push("/profile");
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                className="ds-press flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-table-hover"
               >
                 <User className="h-3.5 w-3.5" />
                 My Profile
               </button>
               <button
                 onClick={signOut}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-500 transition-colors hover:bg-slate-50"
+                className="ds-press flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-table-hover"
               >
                 <LogOut className="h-3.5 w-3.5" />
                 Sign Out

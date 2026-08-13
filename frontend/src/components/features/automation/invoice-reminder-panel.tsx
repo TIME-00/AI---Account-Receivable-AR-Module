@@ -52,7 +52,7 @@ function ReminderRow({ reminder }: { reminder: InvoiceReminder }) {
   const missingRecipientEmail = !reminder.recipient_email_snapshot;
 
   return (
-    <li className="rounded-lg border border-slate-100 bg-white p-3 text-xs">
+    <li className="rounded-lg border border-slate-100 bg-surface p-3 text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="font-medium text-slate-800">{stageLabel(reminder.stage_offset_days)}</p>

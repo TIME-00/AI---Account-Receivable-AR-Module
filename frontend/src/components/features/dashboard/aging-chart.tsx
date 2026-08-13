@@ -3,8 +3,7 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { ChartTooltip } from "./chart-tooltip";
 import { Clock } from "lucide-react";
-
-const AGING_COLORS = ["#22c55e", "#3b82f6", "#f59e0b", "#f97316", "#ef4444"];
+import { AGING_COLORS, useChartTheme } from "@/lib/theme/chart-theme";
 
 interface AgingBucket {
   name: string;
@@ -21,6 +20,7 @@ interface AgingChartProps {
 }
 
 export function AgingChart({ data, isLoading, currency }: AgingChartProps) {
+  const chart = useChartTheme();
   const hasData = data.some((bucket) => bucket.amount > 0 || bucket.count > 0);
 
   return (
@@ -50,9 +50,9 @@ export function AgingChart({ data, isLoading, currency }: AgingChartProps) {
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} barSize={36}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-              <XAxis dataKey="name" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} />
-              <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
+              <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
+              <XAxis dataKey="name" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={{ stroke: chart.grid }} tickLine={false} />
+              <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
               <Tooltip content={<ChartTooltip currency={currency} />} />
               <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
                 {data.map((entry, index) => (

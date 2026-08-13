@@ -44,7 +44,7 @@ export function ReceiptFilters({
             value={searchQuery}
             onChange={(e) => { onSearchChange(e.target.value); onResetPage(); }}
             placeholder="Search receipt no., customer, reference..."
-            className="h-9 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="h-9 w-full rounded-lg border border-slate-300 bg-surface pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
 
@@ -52,7 +52,7 @@ export function ReceiptFilters({
         <select
           value={customerFilter}
           onChange={(e) => { onCustomerFilterChange(e.target.value); onResetPage(); }}
-          className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="h-9 rounded-lg border border-slate-300 bg-surface px-3 text-sm text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
         >
           <option value="">All Customers</option>
           {customers.map((c) => (
@@ -67,7 +67,7 @@ export function ReceiptFilters({
             onClick={() => {
               onSearchChange(""); onCustomerFilterChange(""); onStatusFilterChange(""); onResetPage();
             }}
-            className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-surface px-3 text-xs text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-700"
           >
             <XCircle className="h-3 w-3" />
             Clear Filters
