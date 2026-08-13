@@ -1,8 +1,8 @@
 # Post-Gate-E UI Modernization and Codebase Hygiene
 
-Status: IMPLEMENTED / VALIDATED LOCALLY - PENDING CODEX FINAL REVIEW, MIGRATION AND DEPLOYMENT.
+Status: **CLOSED / PASS.**
 
-The backend foundation and the frontend modernization are both implemented and validated on a local workstation. Migration 045 has NOT been applied to Production, and the modernized UI is NOT Production-live.
+Implementation commit `d8b7a16128e9565b46914addf75e7d8463d257ad` is pushed to `main`. Migration 045 is applied once as `20260813122500_post_gate_e_user_ui_preferences`; rollback-only 045b passed against Production PostgreSQL with zero residue. The eight dependency-proven Edge bundles are ACTIVE at their recorded rollout versions, and Vercel deployment `dpl_CZnDofRMmSbvRnR2N7gXvY74PZwZ` is Production-live from the implementation commit.
 
 This is a presentation and maintainability change. Gate E and the closed mailbox, FX, and Journal/Audit capabilities remain unchanged.
 
@@ -83,7 +83,7 @@ This matters because of what the codebase already looked like. The product expre
 
 - **Structural (`slate`)** - dark uses a hand-tuned graphite ramp running the other way, from a `#0d1424` panel ground up to a cool near-white. `bg-slate-50` is consequently a dark surface in dark and a light surface in light; `text-slate-900` is near-white in dark and near-black in light.
 - **Chromatic (`red`, `amber`, `emerald`, `blue`, `purple`, `gray`, `indigo`, `sky`, `orange`, `teal`, `violet`, `green`)** - the tint steps (50-300) are re-blended into the dark ground so `bg-red-50` becomes a dark wash; steps 400/500 stay vivid so status dots and icons keep their identity; steps 600-900 flip to light shades so `text-red-700` stays legible on that wash. The product's `bg-red-50 text-red-700` status idiom therefore inverts correctly with no markup change.
-- **Brand** - `brand-600/700` are deliberately *not* part of the reversal. They are dual-role: the filled primary-button surface (carrying white text) and the accent-text colour on dark panels. A pure reversal satisfies the second role and destroys the first, dropping white-on-button contrast to about 2.3:1. Both steps are hand-tuned to a saturated azure clearing AA in both directions.
+- **Brand** - link/accent text keeps its themed brand ramp, while filled primary controls use the separate `--brand-fill`, `--brand-fill-hover`, and `--brand-fill-active` authority. This removes the former dual-role contrast conflict: white button text retains AA contrast without weakening luminous dark-theme accent text.
 
 On top of the ramps sits the semantic layer, defined identically in both themes: `--app-bg`, `--surface{,-elevated,-muted,-glass}`, `--border{,-muted,-strong}`, `--text-{primary,secondary,muted,inverse}`, `--brand{,-hover,-muted,-contrast}`, `--success/--warning/--danger/--info`, `--nav-*`, `--table-*`, `--input-*`, `--focus-ring`, `--scrim{,-alpha}`, `--shadow-{sm,card,elevated}`, `--glow-{brand,subtle}`, and the motion scale `--motion-{fast,normal,slow}` / `--ease-{standard,emphasized,exit}`.
 
@@ -156,3 +156,13 @@ This phase performs inventory only and no Production deletion. Posted, journaled
 ## Migration smoke
 
 `045b_post_gate_e_user_ui_preferences_smoke_tests.sql` is rollback-only and must never be entered in the migration ledger. It verifies the constrained default, idempotent saved preference, account isolation, grants/RLS, invalid-value rejection, and zero Invoice/Receipt/Journal/Automation-settings delta before ending with `ROLLBACK`.
+
+## Production closure evidence
+
+- Migration 045 catalog verification: owner `postgres`, RLS enabled, `dark | light` check present, default `dark`, direct `anon`/`authenticated` table reads denied, and `service_role` limited to SELECT/INSERT/UPDATE with no DELETE.
+- 045b executed on Production as reviewed and ended in `ROLLBACK`; the preference table remained at zero rows after smoke execution.
+- Refactor dependency analysis required and deployed `auth` v14, `automation` v23, `credit-notes` v21, `customers` v27, `debit-notes` v21, `imports` v36, `invoices` v39, and `reports` v30. All were ACTIVE after deployment.
+- Vercel deployment `dpl_CZnDofRMmSbvRnR2N7gXvY74PZwZ` completed from the exact implementation commit. The canonical application and representative routes returned HTTP 200; the public document shell renders `class="dark"` before hydration.
+- The stored Production browser-test session had expired and was redirected to Login. It was not forged, refreshed, or replaced, so live authenticated Light/Dark mutation and full-page visual inspection were not claimed. Server persistence, same-user reload, cross-user isolation, malformed/stale cache handling, both visual systems, motion and reduced-motion behavior remain covered by deterministic automated tests and the Production schema/API/deployment evidence.
+- Before/after financial and operational counts were identical: 22 Invoices, 14 Receipts, 15 allocations, 33 journal headers, 66 journal lines, 11 Customers, 9 Automation commands, 41 Automation exceptions, 2 reminders, and 2 delivery attempts. The Gmail history cursor hash was unchanged. A normal scheduler cycle advanced mailbox sync time, and the independent FX scheduler completed its normal 12:30 UTC run successfully; neither was caused by theme verification.
+- No Production financial/demo data was deleted. Candidate Draft cleanup remains a separate explicitly governed task.

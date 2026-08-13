@@ -1170,8 +1170,8 @@ Notable groupings:
 | 034–041 | Gate E: autonomous operations, OAuth vault, secure scheduler, critical-identifier authority, receipt-reference authority, capability profiles, exception recovery, retry-matching compatibility |
 | 042 | Post-Gate-E mailbox delivery onboarding |
 | **043** | **Post-Gate-E FX/currency freshness authority — APPLIED / VERIFIED.** Prospective transaction-currency triggers, business-day freshness and the in-place FX scheduler cadence update. `043b` passed inside `BEGIN ... ROLLBACK` and is not a ledger entry |
-| **044** | **Post-Gate-E Journal/Audit read viewers — IMPLEMENTED LOCALLY, NOT APPLIED.** Read-only `journal_read_*` / `audit_read_*` RPCs, one cursor index, no DML. `044b` is rollback-only and must never be registered as a ledger entry |
-| **045** | **Post-Gate-E account UI preference — IMPLEMENTED LOCALLY, NOT APPLIED.** Adds `public.user_ui_preferences` (`user_id` PK, `theme_preference` constrained to `dark`/`light`, default `dark`). RLS owner-only as defence in depth; `PUBLIC`/`anon`/`authenticated` table privileges revoked; `service_role` granted SELECT/INSERT/UPDATE only, never DELETE. No financial DML and no `company_id`. `045b` is rollback-only and must never be registered as a ledger entry |
+| **044** | **Post-Gate-E Journal/Audit read viewers — APPLIED / VERIFIED.** Ledger `20260812032930_post_gate_e_journal_audit_read_viewers`; read-only `journal_read_*` / `audit_read_*` RPCs, one cursor index, no DML. `044b` passed as a rollback-only Production smoke and is not a ledger entry |
+| **045** | **Post-Gate-E account UI preference — APPLIED / VERIFIED.** Ledger `20260813122500_post_gate_e_user_ui_preferences`; adds `public.user_ui_preferences` (`user_id` PK, `theme_preference` constrained to `dark`/`light`, default `dark`). RLS owner-only as defence in depth; `PUBLIC`/`anon`/`authenticated` table privileges revoked; `service_role` granted SELECT/INSERT/UPDATE only, never DELETE. No financial DML and no `company_id`. `045b` passed as a rollback-only Production smoke and is not a ledger entry |
 
 ---
 
@@ -5348,15 +5348,16 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | **Post-Gate-E** (mailbox Delivery UX consolidation, Migration 042) | **CLOSED / PASS** — committed, migrated, deployed and safely verified without reconnecting the healthy mailbox |
 | **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **CLOSED / PASS.** Migration 043 is applied and verified, the reviewed Edge/frontend code is deployed, the three-run UTC cadence is live, and a governed Production FX sync succeeded without financial mutation |
 | **Post-Gate-E Journal & Audit read viewers** (Migration 044) | **CLOSED / PASS.** Migration 044 is applied and verified; 044b passed as a rollback-only Production smoke; both read Edge Functions are ACTIVE at v1; the frontend viewers are deployed and the rollout caused zero financial/audit-source mutation |
-| **Post-Gate-E UI modernization + codebase hygiene** (Migration 045) | **IMPLEMENTED / VALIDATED LOCALLY - PENDING CODEX FINAL REVIEW, MIGRATION AND DEPLOYMENT.** Account-level dark/light theme authority, a semantic frontend Design System, a motion and scroll-reveal system, and the backend cohesion refactor. Migration 045 is **NOT** applied to Production and the modernized UI is **NOT** Production-live. Presentation-only: no financial, role, Gmail, FX, Automation or Journal/Audit behaviour changes |
+| **Post-Gate-E UI modernization + codebase hygiene** (Migration 045) | **CLOSED / PASS.** Account-level Dark/Light authority, semantic frontend Design System, motion/reduced-motion system, and backend cohesion refactor are Production-live from `d8b7a16128e9565b46914addf75e7d8463d257ad`. Migration 045 and rollback smoke are verified, with zero financial delta. Presentation-only: no financial, role, Gmail, FX, Automation or Journal/Audit authority changed |
 
 ### 51.2 Deployment state
 
 | Component | State at checkpoint |
 |---|---|
 | Frontend | Deployed to Vercel Production from the reviewed commit; canonical URL returned HTTP 200 |
-| Edge Functions | All 19 deployed; task runtimes ACTIVE: `automation` v22, `invoices` v38, `receipts` v31, `imports` v35, `fx-rate-sync` v11, `fx-rates` v11, **`journal-entries` v1** and **`audit-trail` v1** |
-| Database migrations | `001`–`044` applied to Production. `041` is `20260811033608 gate_e_retry_matching_runtime_compatibility`; `042` is `20260811065053 post_gate_e_mailbox_delivery_onboarding`; `043` is `20260811200301 post_gate_e_fx_currency_freshness_authority`; **`044` is `20260812032930 post_gate_e_journal_audit_read_viewers`**. Rollback-only smoke files are deliberately not migration-ledger entries |
+| Edge Functions | All 19 deployed; modernization dependency graph runtimes ACTIVE: `auth` v14, `automation` v23, `credit-notes` v21, `customers` v27, `debit-notes` v21, `imports` v36, `invoices` v39 and `reports` v30. Preserved runtimes include `receipts` v31, `fx-rate-sync` v11, `fx-rates` v11, `journal-entries` v1 and `audit-trail` v1 |
+| Database migrations | `001`–`045` applied to Production. `041` is `20260811033608 gate_e_retry_matching_runtime_compatibility`; `042` is `20260811065053 post_gate_e_mailbox_delivery_onboarding`; `043` is `20260811200301 post_gate_e_fx_currency_freshness_authority`; `044` is `20260812032930 post_gate_e_journal_audit_read_viewers`; **`045` is `20260813122500 post_gate_e_user_ui_preferences`**. Rollback-only smoke files are deliberately not migration-ledger entries |
+| **Migration 045 + 045b** (UI preference authority) | **Applied / verified** — 045 is installed once; 045b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue and no financial/settings mutation |
 | **Migration 044 + 044b** (Journal/Audit read viewers) | **Applied / verified** — 044 is installed once; 044b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue and no source-row mutation |
 | **Migration 043 + 043b** (Post-Gate-E FX/currency) | **Applied / verified** — 043 is installed once; 043b passed against real Production PostgreSQL inside `BEGIN ... ROLLBACK` with zero persistent residue and no historical financial DML |
 | **Migration 042 + 042b** (Post-Gate-E Delivery UX) | **Applied / verified** — 042 is installed once; 042b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue |
@@ -5458,7 +5459,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 | **Implemented, deployed, safely verified** | Post-Gate-E mailbox Delivery UX consolidation — Migration 042/042b and the one-action Enable-delivery frontend flow. The healthy Production mailbox remained enabled and was not reconnected |
 | **Implemented, deployed, safely verified** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, live 07:30 / 12:30 / 17:30 UTC cadence). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
 | **Implemented, deployed, safely verified** | Post-Gate-E Journal Entries and Audit Trail read viewers — Migration 044 / rollback-only 044b, `journal-entries` v1, `audit-trail` v1, and the two frontend viewers. Read-side only: no financial write path, no audit-source rewrite and no synthetic backfill |
-| **Implemented and validated locally, NOT deployed** | Post-Gate-E UI modernization and codebase hygiene — Migration 045 / rollback-only 045b, `GET`/`PATCH /auth/ui-preferences`, the semantic frontend Design System with dark default and an explicit light choice, the motion and scroll-reveal system, and the backend cohesion refactor. Migration 045 has not been applied to Production and the modernized UI is not Production-live |
+| **Implemented, deployed, safely verified** | Post-Gate-E UI modernization and codebase hygiene — Migration 045 / rollback-only 045b, `GET`/`PATCH /auth/ui-preferences`, semantic Design System with Dark default and explicit Light choice, cross-user-safe account cache, motion/reduced motion, and backend cohesion refactor. Vercel deployment `dpl_CZnDofRMmSbvRnR2N7gXvY74PZwZ` is live; the rollout caused zero financial delta |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 
@@ -5805,8 +5806,8 @@ Accounts Receivable (AR) module/
 
 ## 56A. Presentation layer: theme, Design System and motion
 
-> **Status: IMPLEMENTED / VALIDATED LOCALLY - PENDING CODEX FINAL REVIEW, MIGRATION AND
-> DEPLOYMENT.** Migration 045 is not applied to Production and this UI is not
+> **Status: CLOSED / PASS.** Migration 045 is applied and verified, rollback-only
+> 045b passed with zero residue, and the reviewed Edge/frontend implementation is
 > Production-live. Nothing in this section changes financial, role, Gmail, FX,
 > Automation or Journal/Audit behaviour.
 
