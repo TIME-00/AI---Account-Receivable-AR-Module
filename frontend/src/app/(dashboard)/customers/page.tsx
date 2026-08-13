@@ -11,7 +11,11 @@ import {
 } from "@/components/features/customers/customer-exposure-cell";
 import { formatMoneySafe } from "@/lib/currency";
 import { totalPagesFrom } from "@/hooks/use-invoices";
-import { CUSTOMER_STATUSES, CREDIT_RATINGS } from "@/types";
+import { FilterChipGroup } from "@/components/ui/filter-chip-group";
+import {
+  RATING_FILTER_OPTIONS,
+  STATUS_FILTER_OPTIONS,
+} from "@/lib/customer-filters";
 
 // ─── Status / Rating badge helpers ──────────────────────────────────────────
 
@@ -195,43 +199,22 @@ export default function CustomersPage() {
           />
         </div>
 
-        {/* Status chips */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-slate-500 mr-1">Status:</span>
-          {["All", ...CUSTOMER_STATUSES].map((s) => (
-            <button
-              key={s}
-              onClick={() => applyFilter(() => setStatusFilter(s))}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                statusFilter === s
-                  ? "bg-blue-600 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              )}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+        {/* Status and Rating share one filter-chip authority, so the two
+            groups cannot drift apart visually or behaviourally. The emitted
+            filter values are unchanged. */}
+        <FilterChipGroup
+          label="Status"
+          options={STATUS_FILTER_OPTIONS}
+          value={statusFilter}
+          onChange={(next) => applyFilter(() => setStatusFilter(next))}
+        />
 
-        {/* Rating chips */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-slate-500 mr-1">Rating:</span>
-          {["All", ...CREDIT_RATINGS].map((r) => (
-            <button
-              key={r}
-              onClick={() => applyFilter(() => setRatingFilter(r))}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                ratingFilter === r
-                  ? "bg-blue-600 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              )}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
+        <FilterChipGroup
+          label="Rating"
+          options={RATING_FILTER_OPTIONS}
+          value={ratingFilter}
+          onChange={(next) => applyFilter(() => setRatingFilter(next))}
+        />
       </div>
 
       {/* Table. `aria-busy` + the dimming are paired with the announced status

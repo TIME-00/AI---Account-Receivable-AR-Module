@@ -79,22 +79,19 @@ export default function ReportsPage() {
         })}
       </div>
 
-      {/* Export Notice */}
-      <div className="glass-card flex items-center justify-between p-4">
-        <div className="flex items-center gap-3">
-          <BarChart3 className="h-5 w-5 text-slate-400" />
-          <div>
-            <p className="text-sm font-medium text-slate-700">Export Reports</p>
-            <p className="text-xs text-slate-400">PDF and Excel export will be available in a future sprint.</p>
-          </div>
+      {/* Export availability.
+          Export is implemented and live, but it is offered per report via the
+          Export control on each report page — there is no global one-click
+          export here. The copy says exactly that rather than promising a
+          capability this page does not have. */}
+      <div className="glass-card flex items-center gap-3 p-4">
+        <BarChart3 className="h-5 w-5 shrink-0 text-slate-400" />
+        <div>
+          <p className="text-sm font-medium text-slate-700">Export Reports</p>
+          <p className="text-xs text-slate-500">
+            PDF and Excel exports are available within each report.
+          </p>
         </div>
-        <button
-          disabled
-          className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-medium text-slate-400 cursor-not-allowed"
-          title="Coming Soon"
-        >
-          Coming Soon
-        </button>
       </div>
     </div>
   );

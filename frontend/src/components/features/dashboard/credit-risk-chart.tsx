@@ -11,7 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { Check, ShieldAlert } from "lucide-react";
-import { useTooltipStyle } from "./chart-tooltip";
+import { ChartTooltip } from "./chart-tooltip";
 import { useChartTheme } from "@/lib/theme/chart-theme";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +39,6 @@ export function CreditRiskChart({
   activeRating = null,
 }: CreditRiskChartProps) {
   const chart = useChartTheme();
-  const tooltipStyle = useTooltipStyle();
   const hasData = data.some((entry) => entry.count > 0);
   const interactive = typeof onSelectRating === "function";
 
@@ -97,11 +96,15 @@ export function CreditRiskChart({
                 width={40}
               />
               <Tooltip
-                formatter={(value: number) => [
-                  value,
-                  value === 1 ? "Customer" : "Customers",
-                ]}
-                contentStyle={tooltipStyle}
+                cursor={{ fill: chart.cursor }}
+                content={
+                  <ChartTooltip
+                    formatValue={(value) => String(value)}
+                    formatCaption={(value) =>
+                      value === 1 ? "Customer" : "Customers"
+                    }
+                  />
+                }
               />
               <Bar
                 dataKey="count"

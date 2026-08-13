@@ -223,6 +223,16 @@ const config: Config = {
           warning: "rgb(var(--warning) / <alpha-value>)",
           danger: "rgb(var(--danger) / <alpha-value>)",
           info: "rgb(var(--info) / <alpha-value>)",
+          "danger-fill": "rgb(var(--danger-fill) / <alpha-value>)",
+          "danger-fill-hover": "rgb(var(--danger-fill-hover) / <alpha-value>)",
+          "danger-fill-active": "rgb(var(--danger-fill-active) / <alpha-value>)",
+        },
+        chip: {
+          bg: "rgb(var(--chip-bg) / <alpha-value>)",
+          hover: "rgb(var(--chip-bg-hover) / <alpha-value>)",
+          border: "rgb(var(--chip-border) / <alpha-value>)",
+          "border-hover": "rgb(var(--chip-border-hover) / <alpha-value>)",
+          text: "rgb(var(--chip-text) / <alpha-value>)",
         },
         nav: {
           bg: "rgb(var(--nav-bg) / <alpha-value>)",

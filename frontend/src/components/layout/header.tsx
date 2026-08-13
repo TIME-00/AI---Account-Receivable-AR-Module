@@ -21,6 +21,7 @@ import { useState, useRef, useEffect } from "react";
 import type { GlobalSearchResult } from "@/types";
 import { NotificationDropdown } from "@/components/features/notifications/notification-dropdown";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { COMPOSABLE_FOCUS_RING } from "@/lib/focus-styles";
 
 const SEARCH_TYPE_ICON: Record<GlobalSearchResult["type"], typeof FileText> = {
   customer: Users,
@@ -198,9 +199,12 @@ export function Header() {
             aria-haspopup="menu"
             aria-expanded={showUserMenu}
             aria-label="Account menu"
-            className="ds-press flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-nav-hover"
+            className={cn(
+              "ds-press flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-nav-hover",
+              COMPOSABLE_FOCUS_RING,
+            )}
           >
-            <div className="ds-glow-subtle flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-bold text-white">
+            <div className="ds-glow-subtle flex h-8 w-8 items-center justify-center rounded-full bg-accent-fill text-xs font-bold text-white">
               {user?.email?.charAt(0).toUpperCase() ?? "U"}
             </div>
             <div className="hidden text-left md:block">

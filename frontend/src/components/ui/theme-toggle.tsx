@@ -4,6 +4,7 @@ import { Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/providers/theme-provider";
 import { UI_THEMES, type UiTheme } from "@/lib/theme/contract";
+import { COMPOSABLE_FOCUS_RING } from "@/lib/focus-styles";
 
 const OPTIONS: Array<{ value: UiTheme; label: string; Icon: typeof Moon }> = [
   { value: "dark", label: "Dark", Icon: Moon },
@@ -49,6 +50,7 @@ export function ThemeToggle({ className, variant = "segmented" }: ThemeTogglePro
                 aria-label={`${label} theme`}
                 className={cn(
                   "ds-press flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium",
+                  COMPOSABLE_FOCUS_RING,
                   isActive
                     ? "border-accent/40 bg-accent-muted text-nav-text-active shadow-glow-subtle"
                     : "border-line bg-surface-muted text-slate-500 hover:border-line-strong hover:text-slate-700",
@@ -86,6 +88,7 @@ export function ThemeToggle({ className, variant = "segmented" }: ThemeTogglePro
             title={`${label} theme`}
             className={cn(
               "ds-press relative flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium",
+              COMPOSABLE_FOCUS_RING,
               isActive
                 ? "bg-surface text-slate-800 shadow-card"
                 : "text-slate-500 hover:text-slate-700",

@@ -2,7 +2,7 @@
 
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from "recharts";
 import { formatMoneySafe } from "@/lib/currency";
-import { useTooltipStyle } from "./chart-tooltip";
+import { ChartTooltip } from "./chart-tooltip";
 import { DONUT_COLORS } from "@/lib/theme/chart-theme";
 
 interface CompositionChartProps {
@@ -13,7 +13,6 @@ interface CompositionChartProps {
 }
 
 export function CompositionChart({ data, currency, isLoading }: CompositionChartProps) {
-  const tooltipStyle = useTooltipStyle();
   return (
     <div className="chart-container">
       <div className="mb-4">
@@ -41,8 +40,11 @@ export function CompositionChart({ data, currency, isLoading }: CompositionChart
                 ))}
               </Pie>
               <Tooltip
-                formatter={(value: number) => [formatMoneySafe(value, currency), ""]}
-                contentStyle={tooltipStyle}
+                content={
+                  <ChartTooltip
+                    formatValue={(value) => formatMoneySafe(value, currency)}
+                  />
+                }
               />
               <Legend
                 verticalAlign="bottom"

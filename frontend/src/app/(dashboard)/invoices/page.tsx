@@ -24,6 +24,7 @@ import {
   AlertCircle, Filter, X, Upload,
 } from "lucide-react";
 import { INVOICE_STATUSES } from "@/types";
+import { COMPOSABLE_FOCUS_RING } from "@/lib/focus-styles";
 
 const PAGE_SIZE = 15;
 
@@ -163,6 +164,7 @@ export default function InvoicesPage() {
             onClick={() => { setStatusFilter(""); setPage(1); }}
             className={cn(
               "rounded-full px-3 py-1 text-xs font-medium transition-all",
+              COMPOSABLE_FOCUS_RING,
               !statusFilter
                 ? "bg-accent-fill text-white shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -176,6 +178,7 @@ export default function InvoicesPage() {
               onClick={() => { setStatusFilter(statusFilter === s ? "" : s); setPage(1); }}
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-medium transition-all",
+                COMPOSABLE_FOCUS_RING,
                 statusFilter === s
                   ? "bg-accent-fill text-white shadow-sm"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"

@@ -25,6 +25,7 @@ import { OcrImportFlow } from "@/components/features/imports/ocr-import-flow";
 import { ImportGovernanceCell } from "@/components/features/imports/import-governance-cell";
 import { cn, formatDate } from "@/lib/utils";
 import { SUPPORTED_TRANSACTION_CURRENCIES } from "@/lib/currency";
+import { COMPOSABLE_FOCUS_RING } from "@/lib/focus-styles";
 import {
   Upload, FileText, ChevronRight, CheckCircle2,
   XCircle, AlertTriangle, Loader2, ArrowLeft, RotateCcw,
@@ -193,6 +194,7 @@ export default function InvoiceImportPage() {
           onClick={() => setMode("csv")}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            COMPOSABLE_FOCUS_RING,
             mode === "csv" ? "bg-surface text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
           )}
         >
@@ -204,6 +206,7 @@ export default function InvoiceImportPage() {
           onClick={() => setMode("ocr")}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            COMPOSABLE_FOCUS_RING,
             mode === "ocr" ? "bg-surface text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
           )}
         >

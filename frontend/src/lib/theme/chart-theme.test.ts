@@ -101,6 +101,34 @@ describe("no chart hard-codes theme chrome any more", () => {
   it("no longer exports a fixed tooltip style constant", () => {
     const tooltip = readFileSync(path.join(CHARTS, "chart-tooltip.tsx"), "utf8");
     expect(tooltip).not.toContain("export const TOOLTIP_STYLE");
-    expect(tooltip).toContain("useTooltipStyle");
+    // Superseded assertion: the shared `useTooltipStyle` hook returned a
+    // `contentStyle` object, which Recharts applies ONLY to the tooltip's outer
+    // wrapper. That could never colour the value text, which is why dark
+    // tooltips rendered black numbers. The tooltip now renders its own content,
+    // so the correct property to assert is that it reads the chart-theme
+    // authority directly.
+    expect(tooltip).toContain("useChartTheme");
+  });
+
+  it("renders tooltip content itself instead of relying on Recharts defaults", () => {
+    // `DefaultTooltipContent` styles each item with `entry.color || '#000'`.
+    // Any chart still passing `contentStyle` would be back on that code path.
+    const offenders = chartFiles
+      .filter((f) => readFileSync(f, "utf8").includes("contentStyle="))
+      .map((f) => path.basename(f));
+    expect(offenders).toEqual([]);
+  });
+
+  it("routes every chart tooltip through the one shared component", () => {
+    const withTooltip = chartFiles.filter((f) =>
+      readFileSync(f, "utf8").includes("<Tooltip"),
+    );
+    expect(withTooltip.length).toBeGreaterThan(0);
+    for (const f of withTooltip) {
+      const source = readFileSync(f, "utf8");
+      expect(source, `${path.basename(f)} must use the shared tooltip`).toMatch(
+        /content=\{\s*<ChartTooltip/,
+      );
+    }
   });
 });

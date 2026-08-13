@@ -2,7 +2,7 @@
 
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { formatMoneySafe } from "@/lib/currency";
-import { useTooltipStyle } from "./chart-tooltip";
+import { ChartTooltip } from "./chart-tooltip";
 import { TREND_COLOR, TREND_COLOR_ACTIVE, useChartTheme } from "@/lib/theme/chart-theme";
 import { TrendingUp } from "lucide-react";
 
@@ -22,7 +22,6 @@ interface CollectionTrendChartProps {
 
 export function CollectionTrendChart({ data, currency, isLoading = false }: CollectionTrendChartProps) {
   const chart = useChartTheme();
-  const tooltipStyle = useTooltipStyle();
   const hasData = data.some((point) => point.collected > 0);
 
   return (
@@ -57,8 +56,13 @@ export function CollectionTrendChart({ data, currency, isLoading = false }: Coll
               <XAxis dataKey="label" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={{ stroke: chart.grid }} tickLine={false} />
               <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
               <Tooltip
-                formatter={(value: number) => [formatMoneySafe(value, currency), "Collected"]}
-                contentStyle={tooltipStyle}
+                cursor={{ stroke: chart.grid, strokeWidth: 1 }}
+                content={
+                  <ChartTooltip
+                    formatValue={(value) => formatMoneySafe(value, currency)}
+                    formatCaption={() => "Collected"}
+                  />
+                }
               />
               <Area type="monotone" dataKey="collected" stroke={TREND_COLOR} strokeWidth={2} fill="url(#collectionGradient)" dot={{ fill: TREND_COLOR, r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: TREND_COLOR_ACTIVE }} />
             </AreaChart>

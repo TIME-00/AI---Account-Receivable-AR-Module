@@ -205,6 +205,24 @@
     --danger: 248 113 113;
     --info: 96 165 250;
 
+    /* Destructive fill. Same dual-role problem as --brand-fill: `--danger` is
+       tuned to read as text on a dark panel, so using it as a button surface
+       would put white type on a pale pink. This is the surface variant. */
+    --danger-fill: 200 44 44;
+    --danger-fill-hover: 178 36 36;
+    --danger-fill-active: 155 30 30;
+
+    /* Filter chips / segmented choices.
+       Unselected chips must sit ABOVE the panel they filter, otherwise the
+       inactive options recede into the background and the group becomes hard
+       to scan. In dark that means lifting them; in light it means settling
+       them slightly below white. One token pair expresses both. */
+    --chip-bg: 22 32 54;
+    --chip-bg-hover: 31 44 72;
+    --chip-border: 44 58 88;
+    --chip-border-hover: 64 82 120;
+    --chip-text: 199 209 227;
+
     /* Navigation */
     --nav-bg: 9 14 26;
     --nav-border: 26 36 58;
@@ -428,6 +446,16 @@
     --warning: 217 119 6;
     --danger: 220 38 38;
     --info: 37 99 235;
+
+    --danger-fill: 220 38 38;
+    --danger-fill-hover: 185 28 28;
+    --danger-fill-active: 153 27 27;
+
+    --chip-bg: 248 250 252;
+    --chip-bg-hover: 241 245 249;
+    --chip-border: 226 232 240;
+    --chip-border-hover: 203 213 225;
+    --chip-text: 51 65 85;
 
     /* Navigation */
     --nav-bg: 255 255 255;

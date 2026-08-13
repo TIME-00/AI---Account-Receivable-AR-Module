@@ -53,7 +53,10 @@ export function AgingChart({ data, isLoading, currency }: AgingChartProps) {
               <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
               <XAxis dataKey="name" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={{ stroke: chart.grid }} tickLine={false} />
               <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<ChartTooltip currency={currency} />} />
+              <Tooltip
+                cursor={{ fill: chart.cursor }}
+                content={<ChartTooltip currency={currency} />}
+              />
               <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
                 {data.map((entry, index) => (
                   <Cell key={index} fill={entry.fill} opacity={0.85} />

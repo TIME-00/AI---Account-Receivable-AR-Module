@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/auth-provider";
 import { Zap, Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { COMPOSABLE_FOCUS_RING } from "@/lib/focus-styles";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -66,7 +68,7 @@ export default function LoginPage() {
       <div className="ds-page-enter relative z-10 w-full max-w-md px-6">
         {/* Logo */}
         <div className="mb-8 flex flex-col items-center">
-          <div className="ds-glow mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700">
+          <div className="ds-glow mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-fill">
             <Zap className="h-7 w-7 text-white" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
@@ -154,7 +156,10 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="ds-press flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-brand-600 to-brand-700 text-sm font-semibold text-white shadow-card hover:from-brand-500 hover:to-brand-600 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-50"
+              className={cn(
+                "ds-press flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent-fill text-sm font-semibold text-white shadow-card hover:bg-accent-fill-hover active:bg-accent-fill-active disabled:cursor-not-allowed disabled:opacity-50",
+                COMPOSABLE_FOCUS_RING,
+              )}
             >
               {isLoading ? (
                 <>
