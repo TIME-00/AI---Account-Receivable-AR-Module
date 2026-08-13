@@ -1,13 +1,16 @@
 # Post-Modernization AR Copilot
 
-Backend: **IMPLEMENTED / VALIDATED LOCALLY**
+Backend: **CLOSED / PASS — PRODUCTION v1 ACTIVE**
 
-Frontend: **IMPLEMENTED / VALIDATED LOCALLY**
+Frontend: **CLOSED / PASS — PRODUCTION READY**
 
-Production: **PENDING CODEX FINAL REVIEW / DEPLOYMENT**
+Production: **CLOSED / PASS**
 
-Neither half is deployed. Every statement below describes local behaviour proven
-by the local test suites; nothing here is a claim about Production.
+The reviewed implementation commit `3381d34aff0f94a5c5fa54e80b8d9fa0c8423eea`
+is deployed. Supabase `ar-copilot` v1 is ACTIVE with bundle SHA-256
+`f2c55b4c8d3ab31dbaabbd3e7d8addca671482365635fbad44fc9714356db2fa`, and Vercel
+deployment `dpl_3nQqV4c8Sn3CrgKvyvdPJhG16Yci` is READY on the canonical Production
+URL. No database migration was required.
 
 ## 1. Purpose and authority boundary
 
@@ -360,16 +363,28 @@ all four were corrected; the measured values are pinned in
 Desktop is a right-side panel; below `lg` it becomes a full-height sheet over a
 scrim, so the AR tables are never squeezed into an unusable width.
 
-## 11. Deployment plan
+## 11. Production closure
 
-Both the Codex backend phase and the Claude frontend phase are local only. Nothing
-has been committed, pushed, deployed, or migrated, and Production Copilot has not
-been invoked. A later reviewed rollout must:
+The final rollout completed on 2026-08-14:
 
-1. deploy the `ar-copilot` Edge Function with the existing `OPENAI_API_KEY` and optional server-only model override;
-2. deploy the Claude frontend integration;
-3. verify authenticated knowledge and live read flows without creating or mutating financial records;
-4. verify AR Clerk assigned-customer denial, System Admin financial denial, and cross-company not-found behavior;
-5. confirm zero financial, Gmail, Automation, Reminder, FX, Journal, and Audit mutation delta.
+1. The dependency gate was remediated narrowly by overriding transitive
+   `nanoid` 3.3.17 to the compatible patched 3.3.18 release. Package-lock-only,
+   installed-tree, and production-only npm audits each returned zero vulnerabilities.
+2. The reviewed implementation was committed and pushed as
+   `3381d34aff0f94a5c5fa54e80b8d9fa0c8423eea`.
+3. `ar-copilot` v1 was deployed ACTIVE with the existing `OPENAI_API_KEY`. No
+   Copilot- or document-specific model override is configured, so the reviewed
+   server fallback is `gpt-5.6-luna`. Secret values were neither read nor printed.
+4. Vercel deployment `dpl_3nQqV4c8Sn3CrgKvyvdPJhG16Yci` reached READY and the
+   canonical application URL returned HTTP 200.
+5. Live negative probes proved that a well-formed anonymous chat request receives
+   HTTP 401 and unsupported routes fail closed. The repository's saved Finance
+   browser session had expired and redirected to Login, so no authenticated
+   Production Copilot answer is claimed. Deterministic authenticated suites cover
+   system knowledge, live-tool requirements, entity context, evidence/links,
+   role/tenant denial, privacy, provider failures, and zero-write behavior.
+6. Read-only Production table statistics remained unchanged across the rollout;
+   no Copilot conversation was submitted and no financial, Gmail, Automation,
+   Reminder, FX, Journal, Audit, or report state was mutated by this task.
 
-There is no database migration to apply for this foundation.
+There is no database migration or server-side chat-history table for this feature.

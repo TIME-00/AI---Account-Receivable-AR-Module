@@ -104,7 +104,7 @@ enterprise ERP context, branded internally as *TSH Synergy ERP — AR Module*
 It is built as three cooperating layers:
 
 - a **Next.js 15 / React 19 / TypeScript** browser application deployed on **Vercel**;
-- a set of **17 Supabase Edge Functions** written in TypeScript for the **Deno** runtime,
+- a set of **20 Supabase Edge Functions** written in TypeScript for the **Deno** runtime,
   which form the only sanctioned API boundary;
 - a **PostgreSQL 17** database on **Supabase**, which holds all financial state and
   which — through `SECURITY DEFINER` RPCs, CHECK constraints, triggers and
@@ -319,7 +319,7 @@ flowchart TB
 
   subgraph Supabase["Supabase Project"]
     AUTH["Supabase Auth (JWT)"]
-    EDGE["17 Edge Functions (Deno)<br/>automation, invoices, receipts, allocations,<br/>customers, reports, imports, notifications"]
+    EDGE["20 Edge Functions (Deno)<br/>automation, invoices, receipts, allocations,<br/>customers, reports, imports, notifications,<br/>journal/audit viewers, AR Copilot"]
     DB[("PostgreSQL 17<br/>RLS, CHECK, triggers,<br/>SECURITY DEFINER RPCs")]
     ST["Storage bucket: ar-imports"]
     VAULT["Supabase Vault<br/>OAuth token bundles, worker secret"]
@@ -682,9 +682,9 @@ uses a nested `layout.tsx` that renders role-filtered sub-tabs.
   opened from the sidebar. It combines the read-only AI assistant (*Ask Copilot*)
   with the preserved deterministic **Workflow Guide**, and replaces the former
   `ar-help-panel.tsx`. The shell wraps its children in `CopilotEntityProvider` so a
-  detail screen can tell the Copilot which record it is showing. Status at the end
-  of the Claude phase: implemented and validated locally; pending Codex final review
-  and deployment. See `docs/architecture/POST_MODERNIZATION_AR_COPILOT.md`.
+  detail screen can tell the Copilot which record it is showing. The reviewed
+  frontend and read-only Edge service are Production-live. See
+  `docs/architecture/POST_MODERNIZATION_AR_COPILOT.md`.
 
 ### 7.4 Components
 
@@ -810,7 +810,7 @@ Four independent reasons, all visible in code:
 
 ### 8.1 Edge Function inventory
 
-17 deployable entry points under `backend/supabase/functions/`:
+20 deployable entry points under `backend/supabase/functions/`:
 
 | Function | Purpose |
 |---|---|
@@ -833,6 +833,7 @@ Four independent reasons, all visible in code:
 | `automation` | The complete Gate E surface (~40 routes) |
 | `journal-entries` | **Post-Gate-E read viewer** — `GET /journal-entries`, `GET /journal-entries/:id`. Read-only; no write route exists. **Production v1 ACTIVE** |
 | `audit-trail` | **Post-Gate-E read viewer** — `GET /audit-trail`, `GET /audit-trail/:eventId`. Read-only. **Production v1 ACTIVE** |
+| `ar-copilot` | **Post-modernization read-only AR assistant** — `POST /ar-copilot/chat`; authenticated company/role authority, allow-listed read tools, minimized evidence and safe internal links. No financial write tool. **Production v1 ACTIVE** |
 
 `journal-entries/service.ts` remains a shared write-side service consumed by other
 functions. The new `journal-entries/index.ts` + `read-service.ts` add a separate
@@ -1570,6 +1571,46 @@ decision/supersession tables from Migrations 017–026 and 031).
   "Company-base total excludes *X* documents without verified booked FX." The
   objective of this work is to stop correctly governed **new** MYR/SGD documents from
   ever entering that state — not to repair the six.
+
+### 11.24 AR Copilot (read-only)
+
+> **Lifecycle: CLOSED / PASS.** Implementation commit
+> `3381d34aff0f94a5c5fa54e80b8d9fa0c8423eea` is pushed; Supabase
+> `ar-copilot` v1 is ACTIVE (bundle SHA-256
+> `f2c55b4c8d3ab31dbaabbd3e7d8addca671482365635fbad44fc9714356db2fa`);
+> Vercel deployment `dpl_3nQqV4c8Sn3CrgKvyvdPJhG16Yci` is READY and the
+> canonical URL returns HTTP 200. No migration was required.
+
+AR Copilot combines a curated, version-controlled guide with 16 narrow read tools.
+The model cannot execute SQL, call arbitrary RPCs or HTTP endpoints, or mutate a
+financial record. JWT identity, active company and the complete role set are resolved
+server-side. AR Clerk reads remain assigned-customer scoped; AR Supervisor has no
+Audit tool; System Admin receives system guidance but no operational finance data.
+Every operational query includes current-company authority, including linked
+invoice/receipt/allocation lookups.
+
+Only allow-listed DTO fields needed for the question reach OpenAI. Customer contact,
+address, registration and bank data; raw Gmail/OCR/attachment content; command or
+provider payloads; tokens, keys, Vault values, stack traces and SQL errors are excluded.
+Retrieved business strings are labelled untrusted data and cannot define tools,
+permissions or links. Responses render as text; evidence and destinations are rebuilt
+from authorized tool results and an internal route allow-list. Conversations stay in
+browser memory for the current session and are not persisted by the AR application;
+OpenAI requests use `store: false`.
+
+The final supply-chain gate updated only the existing `nanoid` override from 3.3.17
+to patched 3.3.18 (GHSA-2v37-7h3g-55p8); all three npm audit modes report zero
+vulnerabilities. The configured Production secret names prove `OPENAI_API_KEY` is
+available; no model override is present, so the effective reviewed fallback is
+`gpt-5.6-luna`.
+
+Live negative probes returned HTTP 401 for a well-formed anonymous request and failed
+closed for unsupported routes. The saved Finance Playwright session had expired and
+redirected to Login; it was not read, modified or renewed, so this checkpoint does not
+claim an authenticated Production conversation. Authenticated knowledge, live-tool,
+entity-context, tenant/role, safe-link, privacy, provider-failure and zero-write flows
+are instead covered deterministically. Read-only Production statistics remained
+unchanged, and no Copilot prompt was submitted during rollout.
 
 ---
 
@@ -3286,7 +3327,7 @@ same ground for the manual import path.
 ### 27.15 Dependency security
 
 - `package.json` `overrides` pin `brace-expansion 5.0.9`, `js-yaml 4.3.1`,
-  `nanoid 3.3.17`, `undici 7.29.0`, `postcss` to the top-level version,
+  `nanoid 3.3.18`, `undici 7.29.0`, `postcss` to the top-level version,
   `next → sharp 0.35.0`, `exceljs → uuid 11.1.1`.
 - SheetJS is **vendored** at 0.20.3 with `SHA256SUMS` and `PROVENANCE.md` after the
   Batch 8F2 XLSX parser remediation.
@@ -4226,7 +4267,7 @@ macro-gate deployment**, commit `2f7199c6720e3086064fc38e0d63722da9f254cf`
 | Gate E scheduler contract | 26 / 26 |
 | Focused backend | 205 / 205 |
 | Full backend | 468 / 468 |
-| Edge entrypoints checked | all 17 |
+| Edge entrypoints checked | all 17 at this Gate E checkpoint |
 | Deno check / fmt / lint | pass |
 | Focused frontend | 165 / 165 |
 | Full frontend | 65 files, 1 000 / 1 000 |
@@ -5297,7 +5338,7 @@ documented remediation:
 "overrides": {
   "brace-expansion": "5.0.9",
   "js-yaml": "4.3.1",
-  "nanoid": "3.3.17",
+  "nanoid": "3.3.18",
   "postcss": "$postcss",
   "undici": "7.29.0",
   "next": { "sharp": "0.35.0" },
@@ -5354,13 +5395,14 @@ license-documented and self-hosted rather than fetched from a CDN at runtime.
 | **Post-Gate-E FX reference freshness + currency scope + base availability** (Migration 043) | **CLOSED / PASS.** Migration 043 is applied and verified, the reviewed Edge/frontend code is deployed, the three-run UTC cadence is live, and a governed Production FX sync succeeded without financial mutation |
 | **Post-Gate-E Journal & Audit read viewers** (Migration 044) | **CLOSED / PASS.** Migration 044 is applied and verified; 044b passed as a rollback-only Production smoke; both read Edge Functions are ACTIVE at v1; the frontend viewers are deployed and the rollout caused zero financial/audit-source mutation |
 | **Post-Gate-E UI modernization + codebase hygiene** (Migration 045) | **CLOSED / PASS.** Account-level Dark/Light authority, semantic frontend Design System, motion/reduced-motion system, and backend cohesion refactor are Production-live from `d8b7a16128e9565b46914addf75e7d8463d257ad`. Migration 045 and rollback smoke are verified, with zero financial delta. Presentation-only: no financial, role, Gmail, FX, Automation or Journal/Audit authority changed |
+| **Post-modernization AR Copilot** | **CLOSED / PASS.** Read-only `ar-copilot` v1 and the integrated Vercel frontend are Production-live from `3381d34aff0f94a5c5fa54e80b8d9fa0c8423eea`; dependency audits are zero; no migration or financial mutation occurred. Authenticated live-browser conversation evidence is limited by the expired saved session and is not claimed |
 
 ### 51.2 Deployment state
 
 | Component | State at checkpoint |
 |---|---|
 | Frontend | Deployed to Vercel Production from the reviewed commit; canonical URL returned HTTP 200 |
-| Edge Functions | All 19 deployed; modernization dependency graph runtimes ACTIVE: `auth` v14, `automation` v23, `credit-notes` v21, `customers` v27, `debit-notes` v21, `imports` v36, `invoices` v39 and `reports` v30. Preserved runtimes include `receipts` v31, `fx-rate-sync` v11, `fx-rates` v11, `journal-entries` v1 and `audit-trail` v1 |
+| Edge Functions | All 20 deployed. `ar-copilot` v1 is ACTIVE; modernization dependency graph runtimes remain ACTIVE: `auth` v14, `automation` v23, `credit-notes` v21, `customers` v27, `debit-notes` v21, `imports` v36, `invoices` v39 and `reports` v30. Preserved runtimes include `receipts` v31, `fx-rate-sync` v11, `fx-rates` v11, `journal-entries` v1 and `audit-trail` v1 |
 | Database migrations | `001`–`045` applied to Production. `041` is `20260811033608 gate_e_retry_matching_runtime_compatibility`; `042` is `20260811065053 post_gate_e_mailbox_delivery_onboarding`; `043` is `20260811200301 post_gate_e_fx_currency_freshness_authority`; `044` is `20260812032930 post_gate_e_journal_audit_read_viewers`; **`045` is `20260813122500 post_gate_e_user_ui_preferences`**. Rollback-only smoke files are deliberately not migration-ledger entries |
 | **Migration 045 + 045b** (UI preference authority) | **Applied / verified** — 045 is installed once; 045b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue and no financial/settings mutation |
 | **Migration 044 + 044b** (Journal/Audit read viewers) | **Applied / verified** — 044 is installed once; 044b passed against real Production PostgreSQL inside `BEGIN … ROLLBACK` with zero persistent residue and no source-row mutation |
@@ -5465,6 +5507,7 @@ candidate `GATE-INV-DRAFT-20260810-001`, Receipt candidate
 | **Implemented, deployed, safely verified** | Post-Gate-E FX reference freshness + `MYR`/`SGD` new-transaction currency scope + base-availability UX (Migration 043 / 043b, business-day freshness, live 07:30 / 12:30 / 17:30 UTC cadence). Six legacy `LEGACY_UNVERIFIED` records remain intentionally *Base amount unavailable* and were **not** backfilled |
 | **Implemented, deployed, safely verified** | Post-Gate-E Journal Entries and Audit Trail read viewers — Migration 044 / rollback-only 044b, `journal-entries` v1, `audit-trail` v1, and the two frontend viewers. Read-side only: no financial write path, no audit-source rewrite and no synthetic backfill |
 | **Implemented, deployed, safely verified** | Post-Gate-E UI modernization and codebase hygiene — Migration 045 / rollback-only 045b, `GET`/`PATCH /auth/ui-preferences`, semantic Design System with Dark default and explicit Light choice, cross-user-safe account cache, motion/reduced motion, and backend cohesion refactor. Vercel deployment `dpl_CZnDofRMmSbvRnR2N7gXvY74PZwZ` is live; the rollout caused zero financial delta |
+| **Implemented, deployed, safely verified** | Post-modernization AR Copilot — 16 allow-listed read tools, role/tenant/customer scope, minimized OpenAI context, prompt-injection boundary, session-only chat, safe evidence/deep links, `ar-copilot` v1 and Vercel deployment `dpl_3nQqV4c8Sn3CrgKvyvdPJhG16Yci`. No migration and zero task-caused business-data delta; authenticated browser chat was not claimed because the saved session had expired |
 | **Closed** | Gate E as a whole (**CLOSED / PASS**) |
 | **Not implemented** | Automated tax mapping, write-off workflow, bank-statement reconciliation, customer-facing dunning, CI pipeline |
 
@@ -5953,7 +5996,7 @@ and the discrepancy was recorded explicitly (Section 51.4).
 
 ### 58.2 Directly verified from code or migrations
 
-Architecture and layering; all 17 Edge Function entry points and their route tables;
+Architecture and layering; all 20 Edge Function entry points and their route tables;
 the complete Gate E route set; role hierarchy and every role check quoted; RLS
 statements and grant/revoke patterns; the full `automation_settings` constraint set and
 capability derivation in both TypeScript and SQL; the OpenAI endpoint, default model,
