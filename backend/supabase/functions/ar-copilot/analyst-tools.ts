@@ -3,7 +3,10 @@ import { AuthorizationError, ValidationError } from "../_shared/errors.ts";
 import { validateUUID } from "../_shared/validators.ts";
 import type { CopilotToolOutcome } from "./contract.ts";
 import type { CopilotAnalystServiceContract } from "./analyst-service.ts";
-import { parseAnalystReportPlan } from "./analyst-contract.ts";
+import {
+  type AnalystReportPlan,
+  parseAnalystReportPlan,
+} from "./analyst-contract.ts";
 
 export const ANALYST_TOOL_NAMES = [
   "get_ar_priority_analysis",
@@ -108,7 +111,7 @@ export const ANALYST_TOOL_DEFINITIONS = [
     type: "function",
     name: "run_ar_report",
     description:
-      "Execute a strictly allow-listed AR report plan. Never accepts SQL, table names, arbitrary columns, or unbounded rows.",
+      "Execute a strictly allow-listed AR report plan. Never accepts SQL, table names, arbitrary columns, or unbounded rows. Compatibility: aging uses aging_bucket with invoice_count/outstanding_amount and only as_of_date (pie requires only outstanding_amount); collections uses period with receipt_count/collection_amount, no date range, and limit is the month count (line is supported); customer_outstanding uses customer with outstanding_amount/overdue_amount and optional credit_rating; overdue_exposure uses customer with invoice_count/overdue_amount/outstanding_amount; invoice_summary and receipt_summary use document, optional date range, and their own metrics/filters. Use null for inapplicable period fields and sort.",
     parameters: objectSchema({
       report: {
         type: "string",
@@ -146,11 +149,8 @@ export const ANALYST_TOOL_DEFINITIONS = [
           type: "string",
           enum: [
             "customer",
-            "status",
             "aging_bucket",
-            "currency",
             "period",
-            "credit_rating",
             "document",
           ],
         },
@@ -362,9 +362,21 @@ export class AnalystToolExecutor {
         exact(args, ["limit"]);
         operational(auth);
         return await this.service.getDailyBrief(auth, limit(args, 8));
-      case "run_ar_report":
+      case "run_ar_report": {
         operational(auth);
-        return await this.service.runReport(auth, parseAnalystReportPlan(args));
+        let plan: AnalystReportPlan;
+        try {
+          plan = parseAnalystReportPlan(args);
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            throw new ValidationError("Analyst report plan is invalid.", {
+              category: "invalid_report_plan",
+            });
+          }
+          throw error;
+        }
+        return await this.service.runReport(auth, plan);
+      }
       case "analyze_automation_document":
         exact(args, ["document_id"]);
         automation(auth);

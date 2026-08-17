@@ -1,4 +1,5 @@
 import type { AuthContext } from "./_shared/auth.ts";
+import type { SupabaseClient } from "supabase";
 import {
   AuthorizationError,
   BusinessError,
@@ -21,6 +22,7 @@ import {
 import {
   assertChartPreservesReport,
   buildChartSpec,
+  buildChartSpecIfSupported,
   buildCollectionHealthAnalysis,
   buildDailyBrief,
   buildExposureMovementAnalysis,
@@ -29,6 +31,7 @@ import {
   recoveryCandidates,
   sortReportRows,
 } from "./ar-copilot/analyst-engine.ts";
+import { SupabaseAnalystReportSources } from "./ar-copilot/analyst-report-service.ts";
 import {
   type CopilotAnalystServiceContract,
   selectSafeDocumentFields,
@@ -667,6 +670,14 @@ Deno.test("pie chart requires one part-to-whole aging metric", async () => {
   );
 });
 
+Deno.test("unsupported chart presentation preserves the authoritative report", () => {
+  const chart = buildChartSpecIfSupported(
+    reportPlan({ chart_type: "line" }),
+    reportResult(),
+  );
+  assertEquals(chart, null);
+});
+
 Deno.test("valid aging composition permits a pie", () => {
   assertEquals(
     buildChartSpec(reportPlan({ chart_type: "pie" }), reportResult())
@@ -887,6 +898,56 @@ Deno.test("combined Copilot registry preserves all analyst tools", () => {
   assertEquals(ANALYST_TOOL_DEFINITIONS.length, ANALYST_TOOL_NAMES.length);
 });
 
+Deno.test("report tool exposes only dimensions accepted by the deterministic parser", () => {
+  const definition = ANALYST_TOOL_DEFINITIONS.find((item) =>
+    item.name === "run_ar_report"
+  );
+  const parameters = definition?.parameters as {
+    properties?: {
+      dimensions?: { items?: { enum?: string[] } };
+    };
+  };
+  assertEquals(parameters.properties?.dimensions?.items?.enum, [
+    "customer",
+    "aging_bucket",
+    "period",
+    "document",
+  ]);
+});
+
+Deno.test("analyst dashboard reports retain the trusted dashboard RPC client", async () => {
+  let trustedCalls = 0;
+  let userCalls = 0;
+  const trustedDashboard = dashboard();
+  trustedDashboard.meta.trend_months = 2;
+  const ratings = ["AAA", "AA", "A", "B", "C", "D"] as const;
+  trustedDashboard.credit_rating_distribution = ratings.map((rating) => ({
+    rating,
+    customer_count: 0,
+    outstanding_base: 0,
+  }));
+  trustedDashboard.customer_credit_rating_distribution.rows = ratings.map(
+    (rating) => ({ rating, customer_count: 0 }),
+  );
+  const trusted = {
+    rpc: () => {
+      trustedCalls += 1;
+      return Promise.resolve({ data: trustedDashboard, error: null });
+    },
+  } as unknown as SupabaseClient;
+  const user = {
+    rpc: () => {
+      userCalls += 1;
+      return Promise.resolve({ data: null, error: { code: "42501" } });
+    },
+  } as unknown as SupabaseClient;
+  const result = await new SupabaseAnalystReportSources(trusted, user)
+    .getDashboard(auth(["Finance Manager"]), "2026-08-14", 6);
+  assertEquals(result.meta.base_currency, "MYR");
+  assertEquals(trustedCalls, 1);
+  assertEquals(userCalls, 0);
+});
+
 class FakeAnalyst implements CopilotAnalystServiceContract {
   calls: Array<{ name: string; auth: AuthContext; args: unknown[] }> = [];
   result(
@@ -1015,6 +1076,29 @@ Deno.test("AR Clerk cannot analyze Automation documents", async () => {
   );
 });
 
+Deno.test("invalid report plans are tagged for one content-free correction", async () => {
+  const error = await rejects(() =>
+    new AnalystToolExecutor(new FakeAnalyst()).execute(
+      auth(["Finance Manager"]),
+      "run_ar_report",
+      JSON.stringify({
+        ...reportPlan({
+          report: "collections",
+          metrics: ["collection_amount"],
+          dimensions: ["period"],
+        }),
+        period: {
+          date_from: "2026-01-01",
+          date_to: "2026-06-30",
+          as_of_date: null,
+        },
+      }),
+    )
+  );
+  assert(error instanceof ValidationError);
+  assertEquals(error.details, { category: "invalid_report_plan" });
+});
+
 Deno.test("analyst tool arguments reject extra tenant authority", async () => {
   await rejects(() =>
     new AnalystToolExecutor(new FakeAnalyst()).execute(
@@ -1134,6 +1218,72 @@ Deno.test("live-tool gate failures expose content-free phase metadata", async ()
   const serialized = JSON.stringify(error.details);
   assert(!serialized.includes("Explain AR concepts"));
   assert(!serialized.includes("months"));
+});
+
+Deno.test("one invalid report plan can be corrected without losing evidence authority", async () => {
+  const invalid = JSON.stringify({
+    ...reportPlan({
+      report: "collections",
+      metrics: ["collection_amount"],
+      dimensions: ["period"],
+    }),
+    period: {
+      date_from: "2026-01-01",
+      date_to: "2026-06-30",
+      as_of_date: null,
+    },
+  });
+  const valid = JSON.stringify(reportPlan({
+    report: "collections",
+    metrics: ["collection_amount"],
+    dimensions: ["period"],
+    period: { date_from: null, date_to: null, as_of_date: "2026-08-14" },
+    chart_type: "line",
+    limit: 6,
+  }));
+  const model = new ScriptedModel([
+    {
+      type: "tool_calls",
+      calls: [{
+        call_id: "call-invalid-report",
+        name: "run_ar_report",
+        arguments: invalid,
+      }],
+    },
+    {
+      type: "tool_calls",
+      calls: [{
+        call_id: "call-valid-report",
+        name: "run_ar_report",
+        arguments: valid,
+      }],
+    },
+    { type: "answer", answer: "The requested report is ready." },
+  ]);
+  const analyst = new FakeAnalyst();
+  const result = await new CopilotService({
+    model,
+    reads: {} as CopilotReadServiceContract,
+    analytics: analyst,
+    recordTelemetry: () => {},
+    recordPhaseTelemetry: () => {},
+  }).chat(auth(["Finance Manager"]), {
+    messages: [{
+      role: "user",
+      content: "Show me a report of collections for six months.",
+    }],
+    context: { page: "dashboard", entity_type: null, entity_id: null },
+  });
+  assertEquals(result.status.tool_names, ["run_ar_report"]);
+  assertEquals(result.status.tool_call_count, 2);
+  assertEquals(analyst.calls.length, 1);
+  const correction = model.inputs[1].find((item) =>
+    "type" in item && item.type === "function_call_output"
+  );
+  assert(correction && "output" in correction);
+  assert(typeof correction.output === "string");
+  assert(correction.output.includes("INVALID_REPORT_PLAN"));
+  assert(!correction.output.includes("2026-01-01"));
 });
 
 Deno.test("structured analytical amount reaches model unchanged", async () => {

@@ -27,7 +27,7 @@ import {
 } from "./analyst-contract.ts";
 import {
   assertChartPreservesReport,
-  buildChartSpec,
+  buildChartSpecIfSupported,
   buildCollectionHealthAnalysis,
   buildDailyBrief,
   buildExposureMovementAnalysis,
@@ -535,7 +535,7 @@ export class CopilotAnalystService implements CopilotAnalystServiceContract {
   ): Promise<CopilotToolOutcome> {
     requireOperationalReadRole(auth);
     const report = await this.#analystReports.runReport(auth, plan);
-    const chart = buildChartSpec(plan, report);
+    const chart = buildChartSpecIfSupported(plan, report);
     if (chart) assertChartPreservesReport(chart, report);
     const evidenceItems = report.rows.flatMap((row) =>
       typeof row.document_id === "string"

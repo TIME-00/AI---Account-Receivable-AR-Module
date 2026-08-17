@@ -148,6 +148,21 @@ function toolOutput(outcome: CopilotToolOutcome): string {
   return JSON.stringify({ data: outcome.data });
 }
 
+function invalidReportPlanOutput(): string {
+  return JSON.stringify({
+    error: {
+      code: "INVALID_REPORT_PLAN",
+      retryable: true,
+      message:
+        "Retry run_ar_report with a report-compatible plan using only the report-specific metrics, dimensions, filters, period fields, sort, and chart rules in its tool description.",
+    },
+  });
+}
+
+function isInvalidReportPlan(error: ValidationError): boolean {
+  return error.details.category === "invalid_report_plan";
+}
+
 function contextInput(
   request: CopilotChatRequest,
   outcome: CopilotToolOutcome | null,
@@ -306,7 +321,8 @@ export class CopilotService {
         }
         const executed: Array<{
           call: typeof turn.calls[number];
-          outcome: CopilotToolOutcome;
+          outcome: CopilotToolOutcome | null;
+          output: string;
         }> = [];
         for (const call of turn.calls) {
           if (isLiveDataTool(call.name) && !allowsLiveTools) {
@@ -337,6 +353,19 @@ export class CopilotService {
               throw error;
             }
             if (error instanceof ValidationError) {
+              if (
+                call.name === "run_ar_report" && isInvalidReportPlan(error)
+              ) {
+                calls += 1;
+                analyticalCalls += 1;
+                toolNames.push(call.name);
+                executed.push({
+                  call,
+                  outcome: null,
+                  output: invalidReportPlanOutput(),
+                });
+                continue;
+              }
               throw responseUnverified("tool_execution", round, {
                 toolName: call.name,
                 errorCategory: "validation_failure",
@@ -366,7 +395,7 @@ export class CopilotService {
               businessDate: this.#businessDate,
             }),
           );
-          executed.push({ call, outcome });
+          executed.push({ call, outcome, output: toolOutput(outcome) });
         }
         for (const { call } of executed) {
           input.push(
@@ -378,11 +407,11 @@ export class CopilotService {
             },
           );
         }
-        for (const { call, outcome } of executed) {
+        for (const { call, output } of executed) {
           input.push({
             type: "function_call_output",
             call_id: call.call_id,
-            output: toolOutput(outcome),
+            output,
           });
         }
       }

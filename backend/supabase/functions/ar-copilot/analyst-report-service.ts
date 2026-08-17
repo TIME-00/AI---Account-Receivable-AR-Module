@@ -210,7 +210,10 @@ export class SupabaseAnalystReportSources implements AnalystReportSources {
     private readonly trusted: SupabaseClient,
     user: SupabaseClient,
   ) {
-    this.#reports = new ReportService(user, user);
+    // Dashboard authority is service-role-only, while customer/document rows
+    // remain bound to the authenticated user client. Keep the same split used
+    // by the established reports Edge entrypoint.
+    this.#reports = new ReportService(trusted, user);
   }
 
   getDashboard(

@@ -475,6 +475,24 @@ export function buildChartSpec(
   };
 }
 
+/**
+ * A requested visualization is presentation, not financial authority. When a
+ * valid authoritative report cannot legally support that chart shape (for
+ * example an incomplete aging partition), retain the report and omit the
+ * chart instead of turning an evidence limitation into an infrastructure 5xx.
+ */
+export function buildChartSpecIfSupported(
+  plan: AnalystReportPlan,
+  report: AnalystReportResult,
+): AnalystChartSpec | null {
+  try {
+    return buildChartSpec(plan, report);
+  } catch (error) {
+    if (error instanceof ValidationError) return null;
+    throw error;
+  }
+}
+
 export function assertChartPreservesReport(
   chart: AnalystChartSpec,
   report: AnalystReportResult,
