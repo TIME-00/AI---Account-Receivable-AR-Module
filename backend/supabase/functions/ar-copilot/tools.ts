@@ -5,8 +5,16 @@ import type { CopilotEntityType, CopilotToolOutcome } from "./contract.ts";
 import { validateContextEntityId } from "./contract.ts";
 import { searchSystemGuide } from "./knowledge.ts";
 import type { CopilotReadServiceContract } from "./read-service.ts";
+import type { CopilotAnalystServiceContract } from "./analyst-service.ts";
+import {
+  ANALYST_TOOL_DEFINITIONS,
+  ANALYST_TOOL_NAMES,
+  AnalystToolExecutor,
+  type AnalystToolName,
+} from "./analyst-tools.ts";
+import { multilingualIntentSignals } from "./language.ts";
 
-export const COPILOT_TOOL_NAMES = [
+const BASE_COPILOT_TOOL_NAMES = [
   "search_system_guide",
   "get_ar_summary",
   "list_overdue_invoices",
@@ -23,6 +31,11 @@ export const COPILOT_TOOL_NAMES = [
   "get_journal_entry",
   "get_audit_event",
   "list_entity_audit_events",
+] as const;
+
+export const COPILOT_TOOL_NAMES = [
+  ...BASE_COPILOT_TOOL_NAMES,
+  ...ANALYST_TOOL_NAMES,
 ] as const;
 
 export type CopilotToolName = typeof COPILOT_TOOL_NAMES[number];
@@ -45,7 +58,7 @@ function objectSchema(
   return { type: "object", additionalProperties: false, properties, required };
 }
 
-export const COPILOT_TOOL_DEFINITIONS: readonly CopilotToolDefinition[] = [
+const BASE_COPILOT_TOOL_DEFINITIONS: readonly CopilotToolDefinition[] = [
   {
     type: "function",
     name: "search_system_guide",
@@ -199,6 +212,11 @@ export const COPILOT_TOOL_DEFINITIONS: readonly CopilotToolDefinition[] = [
   },
 ] as const;
 
+export const COPILOT_TOOL_DEFINITIONS = [
+  ...BASE_COPILOT_TOOL_DEFINITIONS,
+  ...ANALYST_TOOL_DEFINITIONS,
+] as const;
+
 type Args = Record<string, unknown>;
 
 function parseArgsJson(value: string): Args {
@@ -326,7 +344,14 @@ export function assertToolOutcomeSafe(outcome: CopilotToolOutcome): void {
 }
 
 export class CopilotToolRegistry {
-  constructor(private readonly reads: CopilotReadServiceContract) {}
+  readonly #analyst: AnalystToolExecutor | null;
+
+  constructor(
+    private readonly reads: CopilotReadServiceContract,
+    analyst?: CopilotAnalystServiceContract,
+  ) {
+    this.#analyst = analyst ? new AnalystToolExecutor(analyst) : null;
+  }
 
   async execute(
     auth: AuthContext,
@@ -336,8 +361,20 @@ export class CopilotToolRegistry {
     if (!COPILOT_TOOL_NAMES.includes(name as CopilotToolName)) {
       throw new ValidationError("Copilot requested an unsupported tool.");
     }
+    if (ANALYST_TOOL_NAMES.includes(name as AnalystToolName)) {
+      if (!this.#analyst) {
+        throw new ValidationError("Copilot analyst tools are unavailable.");
+      }
+      const outcome = await this.#analyst.execute(
+        auth,
+        name as AnalystToolName,
+        argumentsJson,
+      );
+      assertToolOutcomeSafe(outcome);
+      return outcome;
+    }
     const args = parseArgsJson(argumentsJson);
-    let result: CopilotToolOutcome;
+    let result: CopilotToolOutcome | null = null;
     switch (name as CopilotToolName) {
       case "search_system_guide": {
         exactArgs(args, ["query"]);
@@ -472,6 +509,7 @@ export class CopilotToolRegistry {
         break;
       }
     }
+    if (!result) throw new ValidationError("Copilot tool is unsupported.");
     assertToolOutcomeSafe(result);
     return result;
   }
@@ -487,10 +525,32 @@ export type CopilotQuestionIntent =
   | "live_data"
   | "write_action";
 
+const ENGLISH_LIVE_CLAIM =
+  /\b(current|today|now|right now|latest|balance|outstanding|overdue|unapplied|unallocated|still open|audit activity|daily brief|focus on|need attention|largest (?:ar )?risks?|driving (?:our )?overdue|collection (?:health|underperforming)|aging movement|increase[ds]?|movement|compared|compare|previous period|last month|this month|which customers|which customer|which invoices|which receipts|which documents|which (?:automation )?exceptions|how much|how many|what happened|why (?:is|was|did)|this customer|this invoice|this receipt|this document|this journal|this record|my customer|our customer|received any allocation|show (?:me )?(?:a )?report|chart|highest|largest|top\s+\d+)\b/i;
+
+const ENGLISH_DEFINITION_OR_HOW_TO =
+  /^(?:how (?:do|can|should) i\b|how (?:does|is)\b|what happens when\b|what does .{1,80}\bmean\b|what is (?:invoice\s+)?post(?:ing)?\b|can you explain(?:\s+how)?\b)/i;
+
+const EXPLICIT_READ_REQUEST =
+  /^(?:which|show me|list|find)\b.{0,160}\b(?:customers?|invoices?|receipts?|documents?|exceptions?|allocations?)\b/i;
+
+const ENGLISH_WRITE_REQUEST =
+  /^(?:please\s+)?(?:post|cancel|allocate|reverse|send|change|delete|create)\s+(?:(?:this|that|the|my)\s+)?(?:invoice|receipt|allocation|reminder|customer|document|credit note|debit note)\b|^(?:can|could|would|will) you\s+(?:please\s+)?(?:post|cancel|allocate|reverse|send|change|delete|create)\s+(?:(?:this|that|the|my)\s+)?(?:invoice|receipt|allocation|reminder|customer|document|credit note|debit note)\b/i;
+
+export function questionHasLiveClaimSignals(question: string): boolean {
+  const multilingual = multilingualIntentSignals(question);
+  if (multilingual.definition || multilingual.write) return false;
+  return multilingual.live || ENGLISH_LIVE_CLAIM.test(question);
+}
+
 export function classifyCopilotQuestion(
   question: string,
 ): CopilotQuestionIntent {
   const lower = question.trim().toLowerCase();
+  const multilingual = multilingualIntentSignals(question);
+  if (multilingual.definition || ENGLISH_DEFINITION_OR_HOW_TO.test(lower)) {
+    return "system_knowledge";
+  }
   if (
     /^(?:hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening))[!.?\s]*$/
       .test(
@@ -501,26 +561,18 @@ export function classifyCopilotQuestion(
         lower,
       )
   ) return "casual_general";
-  if (
-    /^(?:please\s+)?(?:post|cancel|allocate|reverse|send|change|delete|create)\b/
-      .test(
-        lower,
-      ) ||
-    /^(?:can|could|would|will) you\s+(?:please\s+)?(?:post|cancel|allocate|reverse|send|change|delete|create)\b/
-      .test(
-        lower,
-      )
-  ) return "write_action";
+  if (EXPLICIT_READ_REQUEST.test(lower)) return "live_data";
+  if (multilingual.write || ENGLISH_WRITE_REQUEST.test(lower)) {
+    return "write_action";
+  }
+  if (multilingual.live) return "live_data";
   if (
     /^\s*what (?:is|does|are)\b/.test(lower) &&
     !/\b(my|our|this|current|today|now)\b/.test(lower)
   ) {
     return "system_knowledge";
   }
-  return /\b(current|today|now|latest|balance|outstanding|overdue|unapplied|unallocated|still open|audit activity|which customers|which invoices|which documents|which (?:automation )?exceptions|how much|how many|what happened|why (?:is|was|did)|this customer|this invoice|this receipt|this document|this journal|this record|my customer|our customer|received any allocation)\b/
-      .test(lower)
-    ? "live_data"
-    : "system_knowledge";
+  return questionHasLiveClaimSignals(lower) ? "live_data" : "system_knowledge";
 }
 
 export function questionRequiresLiveData(question: string): boolean {

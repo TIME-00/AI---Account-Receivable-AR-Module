@@ -163,8 +163,13 @@ export class CopilotReadService implements CopilotReadServiceContract {
   readonly #reports: ReportService;
   readonly #journals: JournalReadService;
   readonly #audit: AuditReadService;
+  readonly #businessDate: string;
 
-  constructor(adminClient: SupabaseClient, userClient: SupabaseClient) {
+  constructor(
+    adminClient: SupabaseClient,
+    userClient: SupabaseClient,
+    businessDate: string,
+  ) {
     this.#admin = adminClient;
     this.#user = userClient;
     this.#customers = new CustomerService(adminClient);
@@ -173,13 +178,14 @@ export class CopilotReadService implements CopilotReadServiceContract {
     this.#reports = new ReportService(adminClient, userClient);
     this.#journals = new JournalReadService(adminClient);
     this.#audit = new AuditReadService(adminClient);
+    this.#businessDate = businessDate;
   }
 
   async getArSummary(auth: AuthContext): Promise<CopilotToolOutcome> {
     const summary = await this.#reports.getAgingSummary(auth);
     return {
       data: {
-        as_of_date: new Date().toISOString().slice(0, 10),
+        as_of_date: this.#businessDate,
         base_currency: summary.base_currency,
         total_customers: summary.total_customers,
         total_outstanding_base: decimal(
@@ -228,7 +234,18 @@ export class CopilotReadService implements CopilotReadServiceContract {
       evidence("invoice", row.id, row.invoice_no, row.invoice_no)
     );
     return {
-      data: rows,
+      data: {
+        rows,
+        total_count: result.total,
+        coverage: {
+          status: result.total <= rows.length
+            ? "complete"
+            : "bounded_incomplete",
+          source_total: result.total,
+          returned_rows: rows.length,
+          top_n_complete: null,
+        },
+      },
       evidence: items,
       links: items.map((item) =>
         trustedEntityLink("invoice", item.id, "View invoice")

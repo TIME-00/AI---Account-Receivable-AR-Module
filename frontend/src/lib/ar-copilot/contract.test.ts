@@ -78,7 +78,14 @@ describe("strict success parsing", () => {
     // deliberately absent from the value the UI receives, so no component can
     // render them even by accident.
     const result = parse(successPayload()) as unknown as Record<string, unknown>;
-    expect(Object.keys(result).sort()).toEqual(["answer", "evidence", "links"]);
+    // `artifacts` joined this shape with the Gate 1 analytical contract; it is
+    // an empty array on every v2 path. `status` is still dropped entirely.
+    expect(Object.keys(result).sort()).toEqual([
+      "answer",
+      "artifacts",
+      "evidence",
+      "links",
+    ]);
     expect(result.status).toBeUndefined();
   });
 

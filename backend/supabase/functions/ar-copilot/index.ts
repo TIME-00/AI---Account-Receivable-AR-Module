@@ -2,10 +2,13 @@ import { handleCORS, jsonResponse } from "../_shared/cors.ts";
 import { extractCompanyId, getAuthContext } from "../_shared/auth.ts";
 import type { AuthContext } from "../_shared/auth.ts";
 import { getAdminClient, getUserClient } from "../_shared/db.ts";
+import { dateInTimeZone } from "../_shared/business-time.ts";
 import { errorResponse } from "../_shared/errors.ts";
+import { SupabaseExportRepository } from "../reports/export-repository.ts";
 import { parseCopilotChatRequest, readBoundedJsonBody } from "./contract.ts";
 import { createOpenAICopilotProvider } from "./openai.ts";
 import { CopilotReadService } from "./read-service.ts";
+import { CopilotAnalystService } from "./analyst-service.ts";
 import { CopilotService } from "./service.ts";
 import type { CopilotChatResponse } from "./contract.ts";
 
@@ -18,7 +21,7 @@ export interface ArCopilotHandlerDependencies {
   ): Promise<CopilotChatResponse>;
 }
 
-function productionChat(
+async function productionChat(
   req: Request,
   auth: AuthContext,
   request: ReturnType<typeof parseCopilotChatRequest>,
@@ -27,16 +30,24 @@ function productionChat(
   if (!authorization) {
     throw new Error("Authenticated request lost authorization context.");
   }
-  const reads = new CopilotReadService(
-    getAdminClient(),
-    getUserClient(authorization),
+  const admin = getAdminClient();
+  const user = getUserClient(authorization);
+  const company = await new SupabaseExportRepository(user).getCompany(auth);
+  const businessDate = dateInTimeZone(new Date(), company.timezone);
+  const reads = new CopilotReadService(admin, user, businessDate);
+  const analytics = new CopilotAnalystService(
+    admin,
+    user,
+    reads,
+    businessDate,
   );
   const model = createOpenAICopilotProvider({
     apiKey: Deno.env.get("OPENAI_API_KEY"),
     model: Deno.env.get("OPENAI_COPILOT_MODEL") ??
       Deno.env.get("OPENAI_DOCUMENT_MODEL"),
   });
-  return new CopilotService({ model, reads }).chat(auth, request);
+  return await new CopilotService({ model, reads, analytics, businessDate })
+    .chat(auth, request);
 }
 
 const productionDependencies: ArCopilotHandlerDependencies = {

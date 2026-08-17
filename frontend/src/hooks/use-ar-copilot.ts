@@ -13,6 +13,7 @@ import {
   COPILOT_MAX_MESSAGE_CHARS,
   isConversationExhausted,
   parseCopilotChatResponse,
+  type CopilotArtifact,
   type CopilotContextHint,
   type CopilotEvidence,
   type CopilotLink,
@@ -34,6 +35,11 @@ export interface CopilotAssistantTurn {
   answer: string;
   evidence: CopilotEvidence[];
   links: CopilotLink[];
+  /**
+   * Strict-parsed Gate 1 analytical payloads. Empty for every Copilot v2
+   * answer, so existing turns render unchanged.
+   */
+  artifacts: CopilotArtifact[];
 }
 
 export interface CopilotErrorTurn {
@@ -226,6 +232,7 @@ export function useArCopilot(
               answer: parsed.answer,
               evidence: parsed.evidence,
               links: parsed.links,
+              artifacts: parsed.artifacts,
             },
           ]);
         } catch (error) {

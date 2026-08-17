@@ -36,6 +36,7 @@ import {
   VaultOAuthSecretStore,
 } from "./oauth.ts";
 import { tokenExpiryIsCurrent } from "./authority.ts";
+import { dateInTimeZone as sharedDateInTimeZone } from "../_shared/business-time.ts";
 
 export {
   assertAutomaticAllocationCommandEligible,
@@ -237,19 +238,7 @@ export function emptyScheduledCycleResult(): Row {
 
 export function dateInTimeZone(now: Date, timeZone: string): string {
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(now);
-    const value = Object.fromEntries(
-      parts.filter((part) => part.type !== "literal").map((part) => [
-        part.type,
-        part.value,
-      ]),
-    );
-    return `${value.year}-${value.month}-${value.day}`;
+    return sharedDateInTimeZone(now, timeZone);
   } catch {
     throw new BusinessError(
       "AUTOMATION_TIMEZONE_INVALID",

@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, Sparkles } from "lucide-react";
+import { CopilotArtifactList } from "./copilot-artifacts";
 import { CopilotEvidenceList } from "./copilot-evidence";
 import { CopilotLinkList } from "./copilot-links";
 import type {
@@ -52,6 +53,10 @@ function AssistantMessage({ turn }: { turn: CopilotAssistantTurn }) {
         <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-content">
           {turn.answer}
         </p>
+        {/* Narrative answer first, then the structured Gate 1 payloads, then
+            sources and navigation — the existing order is unchanged for the
+            v2 paths, which carry no artifacts. */}
+        <CopilotArtifactList artifacts={turn.artifacts} />
         <CopilotEvidenceList evidence={turn.evidence} />
         <CopilotLinkList links={turn.links} />
       </div>

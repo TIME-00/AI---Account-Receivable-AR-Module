@@ -150,9 +150,26 @@ export const SYSTEM_GUIDE: readonly SystemGuideEntry[] = [
 ] as const;
 
 function searchTerms(query: string): string[] {
-  return query.toLowerCase().match(/[a-z0-9]+/g)?.filter((term) =>
-    term.length > 1
-  ) ?? [];
+  const terms =
+    query.toLowerCase().match(/[a-z0-9]+/g)?.filter((term) =>
+      term.length > 1
+    ) ?? [];
+  const aliases: string[] = [];
+  if (
+    /\u672a\u5206\u914d|\u672a\u6838\u9500|apa\s+maksud\s+unapplied/i.test(
+      query,
+    )
+  ) {
+    aliases.push("unapplied", "receipt", "cash");
+  }
+  if (
+    /\u5206\u914d|allocation\s+(?:\u662f\u4ec0\u4e48|\u4ec0\u4e48\u610f\u601d)|apa\s+maksud\s+allocation/i
+      .test(query)
+  ) {
+    aliases.push("allocation");
+  }
+  if (/straight-through/i.test(query)) aliases.push("straight-through");
+  return [...new Set([...terms, ...aliases])];
 }
 
 export function searchSystemGuide(query: string): SystemGuideEntry[] {

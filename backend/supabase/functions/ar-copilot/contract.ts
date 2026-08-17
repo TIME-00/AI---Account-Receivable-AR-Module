@@ -8,6 +8,7 @@ export const COPILOT_MAX_REQUEST_BYTES = 24 * 1024;
 export const COPILOT_MAX_ANSWER_CHARS = 4_000;
 export const COPILOT_MAX_TOOL_ROUNDS = 4;
 export const COPILOT_MAX_TOOL_CALLS = 8;
+export const COPILOT_MAX_ANALYTICAL_TOOL_CALLS = 4;
 
 export const COPILOT_PAGES = [
   "dashboard",
@@ -96,6 +97,8 @@ export interface CopilotChatResponse {
   answer: string;
   evidence: CopilotEvidence[];
   links: CopilotLink[];
+  /** Gate 1 analytical payloads. Omitted for the existing v2 question paths. */
+  artifacts?: CopilotArtifact[];
   status: {
     request_id: string;
     provider: "openai";
@@ -109,7 +112,19 @@ export interface CopilotToolOutcome {
   data: Record<string, unknown> | Array<Record<string, unknown>>;
   evidence: CopilotEvidence[];
   links: CopilotLink[];
+  artifacts?: CopilotArtifact[];
 }
+
+export type CopilotArtifact =
+  | { kind: "analysis"; analysis: Record<string, unknown> }
+  | { kind: "daily_brief"; daily_brief: Record<string, unknown> }
+  | {
+    kind: "report";
+    report: Record<string, unknown>;
+    chart: Record<string, unknown> | null;
+  }
+  | { kind: "document_analysis"; document_analysis: Record<string, unknown> }
+  | { kind: "recovery_plan"; recovery_plan: Record<string, unknown> };
 
 const AUDIT_EVENT_ID =
   /^[a-z][a-z0-9_]{1,40}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

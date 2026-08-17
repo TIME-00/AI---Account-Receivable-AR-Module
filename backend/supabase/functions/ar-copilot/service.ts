@@ -6,6 +6,7 @@ import {
   ValidationError,
 } from "../_shared/errors.ts";
 import type {
+  CopilotArtifact,
   CopilotChatRequest,
   CopilotChatResponse,
   CopilotEvidence,
@@ -13,6 +14,7 @@ import type {
   CopilotToolOutcome,
 } from "./contract.ts";
 import {
+  COPILOT_MAX_ANALYTICAL_TOOL_CALLS,
   COPILOT_MAX_TOOL_CALLS,
   COPILOT_MAX_TOOL_ROUNDS,
   validateCopilotAnswer,
@@ -20,6 +22,15 @@ import {
 import type { CopilotModelInputItem, CopilotModelProvider } from "./openai.ts";
 import { UNTRUSTED_CONTEXT_NOTICE } from "./policy.ts";
 import type { CopilotReadServiceContract } from "./read-service.ts";
+import type { CopilotAnalystServiceContract } from "./analyst-service.ts";
+import { ANALYST_TOOL_NAMES, type AnalystToolName } from "./analyst-tools.ts";
+import { languageInstruction, selectCopilotLanguage } from "./language.ts";
+import {
+  liveEvidenceGrantsFromOutcome,
+  questionMayNeedLiveEvidence,
+  validatedContextGrant,
+  verifyFinalAnswerLiveEvidence,
+} from "./live-evidence.ts";
 import {
   CopilotToolRegistry,
   isLiveDataTool,
@@ -52,6 +63,8 @@ export interface CopilotPhaseTelemetry {
 export interface CopilotServiceDependencies {
   model: CopilotModelProvider;
   reads: CopilotReadServiceContract;
+  analytics?: CopilotAnalystServiceContract;
+  businessDate?: string | null;
   requestId?: () => string;
   now?: () => number;
   recordTelemetry?: (event: CopilotTelemetry) => void;
@@ -76,6 +89,33 @@ function uniqueLinks(items: CopilotLink[]): CopilotLink[] {
   return [...found.values()];
 }
 
+function uniqueArtifacts(items: CopilotArtifact[]): CopilotArtifact[] {
+  const found = new Map<string, CopilotArtifact>();
+  for (const item of items) {
+    const body = item.kind === "analysis"
+      ? item.analysis
+      : item.kind === "daily_brief"
+      ? item.daily_brief
+      : item.kind === "report"
+      ? item.report
+      : item.kind === "document_analysis"
+      ? item.document_analysis
+      : item.recovery_plan;
+    const discriminator = item.kind === "analysis"
+      ? body.analysis_type
+      : item.kind === "report"
+      ? body.report_type
+      : item.kind === "document_analysis"
+      ? body.document_id
+      : item.kind === "recovery_plan"
+      ? body.exception_id
+      : body.as_of;
+    const key = `${item.kind}:${String(discriminator ?? "default")}`;
+    if (!found.has(key) && found.size < 4) found.set(key, item);
+  }
+  return [...found.values()];
+}
+
 function errorCategory(error: unknown): string {
   if (error instanceof AuthorizationError) return "forbidden";
   if (error instanceof NotFoundError) return "context_not_found";
@@ -91,10 +131,13 @@ function toolOutput(outcome: CopilotToolOutcome): string {
 function contextInput(
   request: CopilotChatRequest,
   outcome: CopilotToolOutcome | null,
+  language: ReturnType<typeof selectCopilotLanguage>,
 ): CopilotModelInputItem {
   return {
     role: "user",
-    content: `${UNTRUSTED_CONTEXT_NOTICE}\n<untrusted_page_context>\n${
+    content: `${
+      languageInstruction(language)
+    }\n${UNTRUSTED_CONTEXT_NOTICE}\n<untrusted_page_context>\n${
       JSON.stringify({
         page: request.context.page,
         entity: outcome?.data ?? null,
@@ -120,11 +163,16 @@ export class CopilotService {
   readonly #now: () => number;
   readonly #recordTelemetry: (event: CopilotTelemetry) => void;
   readonly #recordPhaseTelemetry: (event: CopilotPhaseTelemetry) => void;
+  readonly #businessDate: string | null;
 
   constructor(dependencies: CopilotServiceDependencies) {
     this.#model = dependencies.model;
     this.#reads = dependencies.reads;
-    this.#tools = new CopilotToolRegistry(dependencies.reads);
+    this.#tools = new CopilotToolRegistry(
+      dependencies.reads,
+      dependencies.analytics,
+    );
+    this.#businessDate = dependencies.businessDate ?? null;
     this.#requestId = dependencies.requestId ?? (() => crypto.randomUUID());
     this.#now = dependencies.now ?? (() => Date.now());
     this.#recordTelemetry = dependencies.recordTelemetry ??
@@ -147,6 +195,7 @@ export class CopilotService {
     const started = this.#now();
     const toolNames: string[] = [];
     let calls = 0;
+    let analyticalCalls = 0;
     let success = false;
     let failure: unknown = null;
     try {
@@ -160,11 +209,22 @@ export class CopilotService {
       }
       const evidence: CopilotEvidence[] = [...(context?.evidence ?? [])];
       const links: CopilotLink[] = [...(context?.links ?? [])];
+      const artifacts: CopilotArtifact[] = [...(context?.artifacts ?? [])];
+      const liveEvidenceGrants = validatedContextGrant(
+        request.context,
+        context,
+      );
       const input = conversationInput(request);
-      input.push(contextInput(request, context));
       const question = request.messages.at(-1)?.content ?? "";
+      const language = selectCopilotLanguage(question, request.messages);
+      input.push(contextInput(request, context, language));
       const requiresLiveData = questionRequiresLiveData(question);
-      const allowsLiveTools = requiresLiveData || context !== null;
+      const independentLiveSignal = questionMayNeedLiveEvidence(
+        question,
+        request.context,
+      );
+      const allowsLiveTools = requiresLiveData || independentLiveSignal ||
+        context !== null;
 
       for (let round = 0; round <= COPILOT_MAX_TOOL_ROUNDS; round += 1) {
         const turn = await this.#model.turn(input, {
@@ -173,16 +233,23 @@ export class CopilotService {
           round,
         });
         if (turn.type === "answer") {
-          const hasLiveEvidence = context !== null ||
-            toolNames.some(isLiveDataTool);
-          const answer = requiresLiveData && !hasLiveEvidence
-            ? "I cannot verify the current company information from system guidance alone. Please ask again so I can check the authorized live records."
-            : validateCopilotAnswer(turn.answer);
+          const candidate = validateCopilotAnswer(turn.answer);
+          const verification = verifyFinalAnswerLiveEvidence({
+            question,
+            answer: candidate,
+            context: request.context,
+            grants: liveEvidenceGrants,
+          });
+          const answer = verification.allowed
+            ? candidate
+            : "I cannot verify that without checking the authorized live AR records.";
           success = true;
+          const structured = uniqueArtifacts(artifacts);
           return {
             answer,
             evidence: uniqueEvidence(evidence),
             links: uniqueLinks(links),
+            ...(structured.length > 0 ? { artifacts: structured } : {}),
             status: {
               request_id: requestId,
               provider: this.#model.provider,
@@ -203,6 +270,19 @@ export class CopilotService {
           throw new BusinessError(
             "COPILOT_LIMIT_EXCEEDED",
             "The assistant reached its read-tool limit.",
+            429,
+          );
+        }
+        const roundAnalyticalCalls = turn.calls.filter((call) =>
+          ANALYST_TOOL_NAMES.includes(call.name as AnalystToolName)
+        ).length;
+        if (
+          analyticalCalls + roundAnalyticalCalls >
+            COPILOT_MAX_ANALYTICAL_TOOL_CALLS
+        ) {
+          throw new BusinessError(
+            "COPILOT_LIMIT_EXCEEDED",
+            "The assistant reached its analytical-tool limit.",
             429,
           );
         }
@@ -236,7 +316,9 @@ export class CopilotService {
               latency_ms: Math.max(0, this.#now() - toolStarted),
               error_category: errorCategory(error),
             });
-            if (error instanceof AuthorizationError) throw error;
+            if (error instanceof AuthorizationError) {
+              throw error;
+            }
             if (error instanceof ValidationError) {
               throw new BusinessError(
                 "COPILOT_RESPONSE_UNVERIFIED",
@@ -247,6 +329,9 @@ export class CopilotService {
             throw error;
           }
           calls += 1;
+          if (ANALYST_TOOL_NAMES.includes(call.name as AnalystToolName)) {
+            analyticalCalls += 1;
+          }
           toolNames.push(call.name);
           this.#recordPhaseTelemetry({
             request_id: requestId,
@@ -259,6 +344,12 @@ export class CopilotService {
           });
           evidence.push(...outcome.evidence);
           links.push(...outcome.links);
+          artifacts.push(...(outcome.artifacts ?? []));
+          liveEvidenceGrants.push(
+            ...liveEvidenceGrantsFromOutcome(call.name, outcome, {
+              businessDate: this.#businessDate,
+            }),
+          );
           executed.push({ call, outcome });
         }
         for (const { call } of executed) {

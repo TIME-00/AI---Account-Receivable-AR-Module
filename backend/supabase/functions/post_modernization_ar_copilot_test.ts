@@ -147,6 +147,7 @@ class FakeReads implements CopilotReadServiceContract {
   calls: Array<{ name: string; auth: AuthContext; args: unknown[] }> = [];
   contextFailure: Error | null = null;
   customerName = "Safe Customer";
+  openExceptions: Array<Record<string, unknown>> = [];
 
   private result(
     name: string,
@@ -160,7 +161,13 @@ class FakeReads implements CopilotReadServiceContract {
 
   getArSummary(a: AuthContext) {
     return this.result("getArSummary", a, {
-      data: { total_outstanding: "500.00" },
+      data: {
+        as_of_date: "2026-08-15",
+        base_currency: "MYR",
+        total_outstanding: "500.00",
+        total_outstanding_base: "500.00",
+        total_overdue_base: "125.00",
+      },
       evidence: [{
         kind: "ar_summary",
         id: `ar-summary:${a.companyId}`,
@@ -171,7 +178,21 @@ class FakeReads implements CopilotReadServiceContract {
     });
   }
   listOverdueInvoices(a: AuthContext, limit: number) {
-    return this.result("listOverdueInvoices", a, outcome(), limit);
+    const row = outcome();
+    return this.result("listOverdueInvoices", a, {
+      data: {
+        rows: [row.data],
+        total_count: 1,
+        coverage: {
+          status: "complete",
+          source_total: 1,
+          returned_rows: 1,
+          top_n_complete: null,
+        },
+      },
+      evidence: row.evidence,
+      links: row.links,
+    }, limit);
   }
   getCustomerSummary(a: AuthContext, id: string) {
     if (id === OTHER_COMPANY) {
@@ -248,8 +269,13 @@ class FakeReads implements CopilotReadServiceContract {
   }
   listOpenAutomationExceptions(a: AuthContext, limit: number) {
     return this.result("listOpenAutomationExceptions", a, {
-      data: [],
-      evidence: [],
+      data: this.openExceptions,
+      evidence: this.openExceptions.map((item) => ({
+        kind: "automation_exception" as const,
+        id: String(item.id),
+        label: "Automation exception",
+        number: null,
+      })),
       links: [],
     }, limit);
   }
@@ -635,7 +661,7 @@ Deno.test("Copilot handler derives company from validated request context", asyn
 });
 
 Deno.test("Tool registry contains only narrow read tools and no generic escape hatch", () => {
-  assertEquals(COPILOT_TOOL_NAMES.length, 16);
+  assertEquals(COPILOT_TOOL_NAMES.length, 26);
   const names = COPILOT_TOOL_NAMES.join(" ");
   for (
     const forbidden of [
@@ -951,9 +977,13 @@ Deno.test("Valid tool call executes and returns only authorized evidence and lin
     reads,
     requestId: () => "req-1",
     now: () => 100,
-  }).chat(finance, request("Why is this invoice open?"));
+  }).chat(
+    finance,
+    request("Why is this invoice open?", { type: "invoice", id: INVOICE }),
+  );
   assertEquals(result.evidence[0].id, INVOICE);
   assertEquals(result.links[0].href, `/invoices/${INVOICE}`);
+  assert(!result.answer.includes("cannot verify"));
   assert(!JSON.stringify(result).includes("customer_name"));
 });
 
@@ -1110,6 +1140,287 @@ Deno.test("Validated entity context counts as live evidence without an unnecessa
   );
   assert(!result.answer.includes("cannot verify"));
   assert(result.evidence.some((item) => item.id === INVOICE));
+});
+
+Deno.test("B5 R2 service suppresses a missed live paraphrase without evidence", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer: "Currently, your company has 7 overdue invoices.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("Give me an AR snapshot."));
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+  assertEquals(result.evidence, []);
+});
+
+Deno.test("B5 R2 service permits the same paraphrase after company evidence", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "tool_calls",
+      calls: [{
+        call_id: "summary_b5",
+        name: "get_ar_summary",
+        arguments: "{}",
+      }],
+    }, {
+      type: "answer",
+      answer: "Currently, your company has MYR 500.00 outstanding.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("Give me an AR snapshot."));
+  assertEquals(
+    result.answer,
+    "Currently, your company has MYR 500.00 outstanding.",
+  );
+  assertEquals(result.status.tool_names, ["get_ar_summary"]);
+});
+
+Deno.test("R2 service rejects a category-correct but factually false overdue amount", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "tool_calls",
+      calls: [{
+        call_id: "summary_wrong_money",
+        name: "get_ar_summary",
+        arguments: "{}",
+      }],
+    }, {
+      type: "answer",
+      answer: "Your company currently has MYR 500,000 overdue.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("How much is overdue now?"));
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+});
+
+Deno.test("R2 service permits the exact overdue amount from the summary DTO", async () => {
+  const answer = "Your company currently has MYR 125.00 overdue.";
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "tool_calls",
+      calls: [{
+        call_id: "summary_exact_money",
+        name: "get_ar_summary",
+        arguments: "{}",
+      }],
+    }, { type: "answer", answer }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("How much is overdue now?"));
+  assertEquals(result.answer, answer);
+});
+
+Deno.test("B5 R2 service permits a conceptual definition without live evidence", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer: "Overdue means an amount remains unpaid after its due date.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("What is overdue?"));
+  assertEquals(
+    result.answer,
+    "Overdue means an amount remains unpaid after its due date.",
+  );
+});
+
+Deno.test("B5 R2 Invoice context cannot authorize an unrelated company total", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer: "There are 7 overdue invoices in the authorized scope.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(
+    finance,
+    request("How many overdue invoices are there right now?", {
+      type: "invoice",
+      id: INVOICE,
+    }),
+  );
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+  assert(result.evidence.some((item) => item.id === INVOICE));
+});
+
+Deno.test("B5 R2 final-answer claim detection is independent of question classification", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer: "Currently, your company has MYR 999.00 outstanding.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("Tell me something useful."));
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+});
+
+for (
+  const answer of [
+    "Outstanding stands at MYR 999.00.",
+    "Overdue exposure is MYR 500.00.",
+    "Seven invoices remain unpaid.",
+    "Collections reached MYR 10,000 this month.",
+    "Total AR sits at MYR 1,250,000.",
+    "Unapplied cash amounts to SGD 42,000.",
+    "There are several accounts needing attention.",
+  ]
+) {
+  Deno.test(`B5 R2-A service suppresses claim-shaped unsupported answer: ${answer}`, async () => {
+    const result = await new CopilotService({
+      model: new ScriptedModel([{ type: "answer", answer }]),
+      reads: new FakeReads(),
+      recordTelemetry: () => undefined,
+    }).chat(finance, request("Give me an AR snapshot."));
+    assertEquals(
+      result.answer,
+      "I cannot verify that without checking the authorized live AR records.",
+    );
+  });
+}
+
+Deno.test("B5 R2-B service requires company evidence in a mixed entity/company answer", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer:
+        "This invoice still has an outstanding balance. Your company currently has 7 overdue invoices.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(
+    finance,
+    request("Why is this invoice still open?", {
+      type: "invoice",
+      id: INVOICE,
+    }),
+  );
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+});
+
+Deno.test("B5 R2-B service permits a mixed answer only after exact entity and overdue evidence", async () => {
+  const answer =
+    "This invoice still has an outstanding balance. Your company currently has MYR 125.00 overdue.";
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "tool_calls",
+      calls: [{
+        call_id: "mixed_scope",
+        name: "get_ar_summary",
+        arguments: "{}",
+      }],
+    }, { type: "answer", answer }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(
+    finance,
+    request("Why is this invoice still open?", {
+      type: "invoice",
+      id: INVOICE,
+    }),
+  );
+  assertEquals(result.answer, answer);
+  assertEquals(result.status.tool_names, ["get_ar_summary"]);
+});
+
+Deno.test("B5 R2-C service does not bind unresolved entity wording to a model-selected ID", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "tool_calls",
+      calls: [{
+        call_id: "unresolved_invoice",
+        name: "get_invoice",
+        arguments: JSON.stringify({ invoice_id: INVOICE }),
+      }],
+    }, {
+      type: "answer",
+      answer: "This invoice still has an outstanding balance.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("Why is this invoice still open?"));
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+});
+
+Deno.test("B5 R2-D service rejects an overdue claim after exception-only evidence", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "tool_calls",
+      calls: [{
+        call_id: "exceptions_wrong_fact",
+        name: "list_open_automation_exceptions",
+        arguments: JSON.stringify({ limit: 20 }),
+      }],
+    }, {
+      type: "answer",
+      answer: "Your company currently has MYR 500,000 overdue.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("Which automation exceptions are still open?"));
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+});
+
+Deno.test("B5 R2-D service permits the workflow fact supported by exception evidence", async () => {
+  const answer = "There is at least one open automation exception.";
+  const reads = new FakeReads();
+  reads.openExceptions = [{
+    id: "70000000-0000-4000-8000-000000000007",
+    reason_code: "provider_unavailable",
+  }];
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "tool_calls",
+      calls: [{
+        call_id: "exceptions_supported_fact",
+        name: "list_open_automation_exceptions",
+        arguments: JSON.stringify({ limit: 20 }),
+      }],
+    }, { type: "answer", answer }]),
+    reads,
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("Which automation exceptions are still open?"));
+  assertEquals(result.answer, answer);
+});
+
+Deno.test("B5 R2 read-only action refusal is not mistaken for a live claim", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer:
+        "I am read-only and cannot send the reminder. Open the reminder screen to review it.",
+    }]),
+    reads: new FakeReads(),
+    recordTelemetry: () => undefined,
+  }).chat(finance, request("Send the reminder now."));
+  assert(result.answer.includes("read-only"));
+  assertEquals(result.status.tool_call_count, 0);
 });
 
 Deno.test("Entity context is independently validated before OpenAI receives it", async () => {

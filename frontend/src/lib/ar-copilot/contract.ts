@@ -18,6 +18,12 @@
 // ============================================================================
 
 import { z } from "zod";
+import {
+  type CopilotArtifact,
+  copilotArtifactsSchema,
+} from "./artifacts";
+
+export type { CopilotArtifact } from "./artifacts";
 
 // ─── Bounds (mirrors ar-copilot/contract.ts) ────────────────────────────────
 
@@ -128,6 +134,11 @@ export interface CopilotChatResponse {
   answer: string;
   evidence: CopilotEvidence[];
   links: CopilotLink[];
+  /**
+   * Gate 1 analytical payloads. Absent on every existing Copilot v2 path, so a
+   * v2 response parses to an empty array and renders exactly as before.
+   */
+  artifacts: CopilotArtifact[];
 }
 
 // ─── ID shapes ──────────────────────────────────────────────────────────────
@@ -209,6 +220,10 @@ const chatResponseSchema = z.object({
   answer: z.string().min(1).max(COPILOT_MAX_ANSWER_CHARS),
   evidence: z.array(evidenceSchema).max(COPILOT_MAX_EVIDENCE),
   links: z.array(linkSchema).max(COPILOT_MAX_LINKS),
+  // Optional exactly as the backend types it: omitted on the v2 question
+  // paths, present only for Gate 1 analytical answers. The union itself is
+  // strict and closed — see `lib/ar-copilot/artifacts.ts`.
+  artifacts: copilotArtifactsSchema.optional(),
   status: statusSchema,
 }).strict();
 
@@ -226,6 +241,11 @@ export class CopilotContractError extends Error {
  * entity type, a non-conforming identifier, or an oversized answer. Links whose
  * `href` is not a safe internal application route are dropped here — a rejected
  * destination must never reach a component that could render it as clickable.
+ *
+ * An `artifacts` array is accepted only when EVERY entry matches the closed
+ * Gate 1 union. One unknown kind, one unknown nested field, or one malformed
+ * value rejects the entire response rather than the single artifact: a
+ * partially-understood analytical payload must never be rendered.
  */
 export function parseCopilotChatResponse(
   value: unknown,
@@ -233,11 +253,12 @@ export function parseCopilotChatResponse(
 ): CopilotChatResponse {
   const parsed = chatResponseSchema.safeParse(value);
   if (!parsed.success) throw new CopilotContractError();
-  const { answer, evidence, links } = parsed.data;
+  const { answer, evidence, links, artifacts } = parsed.data;
   return {
     answer,
     evidence,
     links: links.filter((link) => isSafeHref(link)),
+    artifacts: artifacts ?? [],
   };
 }
 
