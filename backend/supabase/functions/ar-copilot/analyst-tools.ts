@@ -125,7 +125,6 @@ export const ANALYST_TOOL_DEFINITIONS = [
         type: "array",
         minItems: 1,
         maxItems: 3,
-        uniqueItems: true,
         items: {
           type: "string",
           enum: [
@@ -143,7 +142,6 @@ export const ANALYST_TOOL_DEFINITIONS = [
         type: "array",
         minItems: 1,
         maxItems: 2,
-        uniqueItems: true,
         items: {
           type: "string",
           enum: [

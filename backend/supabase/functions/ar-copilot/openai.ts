@@ -208,6 +208,7 @@ const OPENAI_ERROR_MAX_BYTES = 16 * 1024;
 async function readProviderErrorCategory(response: Response): Promise<string> {
   let code = "";
   let type = "";
+  let parameter = "";
   try {
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > OPENAI_ERROR_MAX_BYTES) {
@@ -238,6 +239,9 @@ async function readProviderErrorCategory(response: Response): Promise<string> {
         const error = record(payload?.error);
         code = typeof error?.code === "string" ? error.code.toLowerCase() : "";
         type = typeof error?.type === "string" ? error.type.toLowerCase() : "";
+        parameter = typeof error?.param === "string"
+          ? error.param.toLowerCase()
+          : "";
       }
     }
   } catch {
@@ -252,6 +256,12 @@ async function readProviderErrorCategory(response: Response): Promise<string> {
     response.status === 400 &&
     (code.includes("model_not_found") || code.includes("invalid_model"))
   ) return "invalid_model";
+  if (
+    response.status === 400 &&
+    (code === "invalid_function_parameters" ||
+      (type === "invalid_request_error" &&
+        /^(?:tools|tool_choice)(?:\[|\.|$)/.test(parameter)))
+  ) return "invalid_tool_schema";
   if (response.status === 400) return "invalid_request";
   if (response.status === 401) return "provider_authentication";
   if (response.status === 403) return "provider_permission";
