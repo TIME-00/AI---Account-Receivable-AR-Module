@@ -24,7 +24,11 @@ import { UNTRUSTED_CONTEXT_NOTICE } from "./policy.ts";
 import type { CopilotReadServiceContract } from "./read-service.ts";
 import type { CopilotAnalystServiceContract } from "./analyst-service.ts";
 import { ANALYST_TOOL_NAMES, type AnalystToolName } from "./analyst-tools.ts";
-import { languageInstruction, selectCopilotLanguage } from "./language.ts";
+import {
+  type CopilotLanguage,
+  languageInstruction,
+  selectCopilotLanguage,
+} from "./language.ts";
 import {
   liveEvidenceGrantsFromOutcome,
   questionMayNeedLiveEvidence,
@@ -114,6 +118,14 @@ function uniqueArtifacts(items: CopilotArtifact[]): CopilotArtifact[] {
     if (!found.has(key) && found.size < 4) found.set(key, item);
   }
   return [...found.values()];
+}
+
+function verifiedArtifactFraming(language: CopilotLanguage): string {
+  return language === "zh-CN"
+    ? "我已核对获授权的实时应收记录。以下结构化结果显示了当前可用的证据。"
+    : language === "ms"
+    ? "Saya telah menyemak rekod AR langsung yang dibenarkan. Hasil berstruktur di bawah menunjukkan bukti yang tersedia."
+    : "Based on the authorized live AR records, the structured result below shows the available evidence.";
 }
 
 function errorCategory(error: unknown): string {
@@ -275,11 +287,13 @@ export class CopilotService {
             context: request.context,
             grants: liveEvidenceGrants,
           });
+          const structured = uniqueArtifacts(artifacts);
           const answer = verification.allowed
             ? candidate
+            : structured.length > 0
+            ? verifiedArtifactFraming(language)
             : "I cannot verify that without checking the authorized live AR records.";
           success = true;
-          const structured = uniqueArtifacts(artifacts);
           return {
             answer,
             evidence: uniqueEvidence(evidence),

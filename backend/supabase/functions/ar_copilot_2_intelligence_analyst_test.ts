@@ -1010,6 +1010,45 @@ class FakeAnalyst implements CopilotAnalystServiceContract {
   }
 }
 
+class DailyBriefArtifactAnalyst extends FakeAnalyst {
+  override getDailyBrief(
+    a: AuthContext,
+    limit: number,
+  ): Promise<CopilotToolOutcome> {
+    this.calls.push({ name: "brief", auth: a, args: [limit] });
+    const brief = {
+      as_of: "2026-08-17",
+      generation: "on_demand",
+      items: [{
+        id: `customer:${CUSTOMER}:2026-08-17`,
+        type: "overdue_exposure",
+        severity: "attention",
+        title: "Authorized priority item",
+        reason_codes: ["OVERDUE_EXPOSURE"],
+        facts: { currency: "MYR", amount: "8200.00" },
+        entity_refs: [{
+          entity_type: "customer",
+          entity_id: CUSTOMER,
+          label: "Authorized priority item",
+        }],
+        recommended_next_screen: `/customers/${CUSTOMER}`,
+        evidence_type: "DETERMINISTIC_RULE",
+      }],
+    };
+    return Promise.resolve({
+      data: brief,
+      evidence: [{
+        kind: "customer",
+        id: CUSTOMER,
+        label: "Authorized priority item",
+        number: "CUST-1",
+      }],
+      links: [],
+      artifacts: [{ kind: "daily_brief", daily_brief: brief }],
+    });
+  }
+}
+
 Deno.test("System Admin receives no financial analysis", async () => {
   await rejects(
     () =>
@@ -1150,6 +1189,104 @@ Deno.test("analytical artifact is optional and returned only after analytical to
   });
   assertEquals(result.artifacts?.[0].kind, "analysis");
   assertEquals(result.status.tool_names, ["get_ar_priority_analysis"]);
+});
+
+Deno.test("verified Daily Brief artifact cannot inherit the no-live-evidence fallback", async () => {
+  const model = new ScriptedModel([
+    {
+      type: "tool_calls",
+      calls: [{
+        call_id: "brief-consistency",
+        name: "get_daily_brief",
+        arguments: '{"limit":8}',
+      }],
+    },
+    {
+      type: "answer",
+      answer: "Your company currently has MYR 999,999 overdue.",
+    },
+  ]);
+  const result = await new CopilotService({
+    model,
+    reads: {} as CopilotReadServiceContract,
+    analytics: new DailyBriefArtifactAnalyst(),
+    recordTelemetry: () => {},
+    recordPhaseTelemetry: () => {},
+  }).chat(auth(["Finance Manager"]), {
+    messages: [{ role: "user", content: "Give me today's AR brief." }],
+    context: { page: "dashboard", entity_type: null, entity_id: null },
+  });
+  assertEquals(
+    result.answer,
+    "Based on the authorized live AR records, the structured result below shows the available evidence.",
+  );
+  assertEquals(result.artifacts?.[0].kind, "daily_brief");
+  assertEquals(
+    result.artifacts?.[0].kind === "daily_brief"
+      ? result.artifacts[0].daily_brief
+      : null,
+    (await new DailyBriefArtifactAnalyst().getDailyBrief(
+      auth(["Finance Manager"]),
+      8,
+    )).data,
+  );
+});
+
+Deno.test("verified priority artifact cannot inherit the no-live-evidence fallback", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([
+      {
+        type: "tool_calls",
+        calls: [{
+          call_id: "priority-consistency",
+          name: "get_ar_priority_analysis",
+          arguments: '{"limit":5}',
+        }],
+      },
+      {
+        type: "answer",
+        answer: "There are 999 customers requiring attention.",
+      },
+    ]),
+    reads: {} as CopilotReadServiceContract,
+    analytics: new FakeAnalyst(),
+    recordTelemetry: () => {},
+    recordPhaseTelemetry: () => {},
+  }).chat(auth(["Finance Manager"]), {
+    messages: [{
+      role: "user",
+      content: "Which customers need attention today?",
+    }],
+    context: { page: "dashboard", entity_type: null, entity_id: null },
+  });
+  assertEquals(
+    result.answer,
+    "Based on the authorized live AR records, the structured result below shows the available evidence.",
+  );
+  assertEquals(result.artifacts?.[0].kind, "analysis");
+});
+
+Deno.test("no-artifact live claim still receives the fail-closed fallback", async () => {
+  const result = await new CopilotService({
+    model: new ScriptedModel([{
+      type: "answer",
+      answer: "There are 999 customers requiring attention.",
+    }]),
+    reads: {} as CopilotReadServiceContract,
+    recordTelemetry: () => {},
+    recordPhaseTelemetry: () => {},
+  }).chat(auth(["Finance Manager"]), {
+    messages: [{
+      role: "user",
+      content: "Which customers need attention today?",
+    }],
+    context: { page: "dashboard", entity_type: null, entity_id: null },
+  });
+  assertEquals(
+    result.answer,
+    "I cannot verify that without checking the authorized live AR records.",
+  );
+  assertEquals(result.artifacts, undefined);
 });
 
 Deno.test("different analytical findings remain independently available", async () => {
