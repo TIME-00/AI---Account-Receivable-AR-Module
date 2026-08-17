@@ -1,4 +1,4 @@
-import { ValidationError } from "./_shared/errors.ts";
+import { BusinessError, ValidationError } from "./_shared/errors.ts";
 import { parseAnalystReportPlan } from "./ar-copilot/analyst-contract.ts";
 import {
   ANALYST_TOOL_DEFINITIONS,
@@ -404,4 +404,36 @@ Deno.test("function-call response and correlated tool output remain Responses-co
   });
   assertEquals(bodies[1].input, secondInput);
   assertEquals(bodies[1].store, false);
+});
+
+Deno.test("invalid provider responses expose content-free phase metadata only", async () => {
+  const provider = new OpenAICopilotProvider({
+    apiKey: "unit-test-openai-key-never-production",
+    maxAttempts: 1,
+    recordDiagnostic: () => undefined,
+    fetcher: () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ output: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+  });
+  const error = await assertRejects(() =>
+    provider.turn([{ role: "user", content: "private customer prompt" }], {
+      requestId: "content-free-diagnostic-test",
+      phase: "post_tool_openai",
+      round: 1,
+    })
+  );
+  assert(error instanceof BusinessError);
+  assertEquals(error.details, {
+    phase: "post_tool_openai",
+    round: 1,
+    error_category: "invalid_provider_response",
+  });
+  const serialized = JSON.stringify(error.details);
+  assert(!serialized.includes("private"));
+  assert(!serialized.includes("prompt"));
+  assert(!serialized.includes("unit-test-openai-key"));
 });

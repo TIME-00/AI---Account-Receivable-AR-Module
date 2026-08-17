@@ -75,11 +75,14 @@ function providerUnavailable(
   return new BusinessError("COPILOT_UNAVAILABLE", message, 503);
 }
 
-function providerInvalid(): BusinessError {
+function providerInvalid(
+  details: Record<string, unknown> = {},
+): BusinessError {
   return new BusinessError(
     "COPILOT_RESPONSE_UNVERIFIED",
     "The requested information could not be verified.",
     502,
+    details,
   );
 }
 
@@ -373,7 +376,11 @@ export class OpenAICopilotProvider implements CopilotModelProvider {
         ) {
           await response.body?.cancel();
           diagnose(response.status, "invalid_content_type");
-          throw providerInvalid();
+          throw providerInvalid({
+            phase,
+            round,
+            error_category: "invalid_content_type",
+          });
         }
         try {
           const turn = parseTurn(await readBoundedJson(response));
@@ -381,6 +388,16 @@ export class OpenAICopilotProvider implements CopilotModelProvider {
           return turn;
         } catch (error) {
           diagnose(response.status, "invalid_response");
+          if (
+            error instanceof BusinessError &&
+            error.code === "COPILOT_RESPONSE_UNVERIFIED"
+          ) {
+            error.details = {
+              phase,
+              round,
+              error_category: "invalid_provider_response",
+            };
+          }
           throw error;
         }
       } catch (error) {

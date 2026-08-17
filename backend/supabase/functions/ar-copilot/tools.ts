@@ -526,7 +526,7 @@ export type CopilotQuestionIntent =
   | "write_action";
 
 const ENGLISH_LIVE_CLAIM =
-  /\b(current|today|now|right now|latest|balance|outstanding|overdue|unapplied|unallocated|still open|audit activity|daily brief|focus on|need attention|largest (?:ar )?risks?|driving (?:our )?overdue|collection (?:health|underperforming)|aging movement|increase[ds]?|movement|compared|compare|previous period|last month|this month|which customers|which customer|which invoices|which receipts|which documents|which (?:automation )?exceptions|how much|how many|what happened|why (?:is|was|did)|this customer|this invoice|this receipt|this document|this journal|this record|my customer|our customer|received any allocation|show (?:me )?(?:a )?report|chart|highest|largest|top\s+\d+)\b/i;
+  /\b(current|today|now|right now|latest|balance|outstanding|overdue|unapplied|unallocated|still open|audit activity|daily brief|focus on|need attention|largest (?:ar )?risks?|driving (?:our )?overdue|collections? (?:health|performance|performing|trend|underperforming)|aging movement|increase[ds]?|movement|compared|compare|previous period|last month|this month|which customers|which customer|which invoices|which receipts|which documents|which (?:automation )?exceptions|how much|how many|what happened|why (?:is|was|did)|this customer|this invoice|this receipt|this (?:automation )?document|this journal|this record|my customer|our customer|received any allocation|show (?:me )?(?:a )?report|chart|highest|largest|top\s+\d+)\b/i;
 
 const ENGLISH_DEFINITION_OR_HOW_TO =
   /^(?:how (?:do|can|should) i\b|how (?:does|is)\b|what happens when\b|what does .{1,80}\bmean\b|what is (?:invoice\s+)?post(?:ing)?\b|can you explain(?:\s+how)?\b)/i;

@@ -1,5 +1,9 @@
 import type { AuthContext } from "./_shared/auth.ts";
-import { AuthorizationError, ValidationError } from "./_shared/errors.ts";
+import {
+  AuthorizationError,
+  BusinessError,
+  ValidationError,
+} from "./_shared/errors.ts";
 import type { LiveDashboardMetrics } from "./reports/dashboard-types.ts";
 import type { CopilotToolOutcome } from "./ar-copilot/contract.ts";
 import {
@@ -79,12 +83,12 @@ function assertEquals(actual: unknown, expected: unknown): void {
 async function rejects(
   callback: () => unknown | Promise<unknown>,
   expected: new (...args: never[]) => Error = ValidationError,
-): Promise<void> {
+): Promise<Error> {
   try {
     await callback();
   } catch (error) {
     assert(error instanceof expected, `Expected ${expected.name}`);
-    return;
+    return error as Error;
   }
   throw new Error("Expected rejection");
 }
@@ -1100,6 +1104,38 @@ Deno.test("different analytical findings remain independently available", async 
   assertEquals(result.status.tool_call_count, 2);
 });
 
+Deno.test("live-tool gate failures expose content-free phase metadata", async () => {
+  const model = new ScriptedModel([{
+    type: "tool_calls",
+    calls: [{
+      call_id: "call-content-free",
+      name: "get_collection_health_analysis",
+      arguments: '{"months":6}',
+    }],
+  }]);
+  const error = await rejects(() =>
+    new CopilotService({
+      model,
+      reads: {} as CopilotReadServiceContract,
+      analytics: new FakeAnalyst(),
+      recordTelemetry: () => {},
+      recordPhaseTelemetry: () => {},
+    }).chat(auth(["Finance Manager"]), {
+      messages: [{ role: "user", content: "Explain AR concepts." }],
+      context: { page: "dashboard", entity_type: null, entity_id: null },
+    }), BusinessError);
+  assert(error instanceof BusinessError);
+  assertEquals(error.details, {
+    phase: "tool_authorization",
+    round: 0,
+    tool_name: "get_collection_health_analysis",
+    error_category: "live_tool_not_authorized_for_question",
+  });
+  const serialized = JSON.stringify(error.details);
+  assert(!serialized.includes("Explain AR concepts"));
+  assert(!serialized.includes("months"));
+});
+
 Deno.test("structured analytical amount reaches model unchanged", async () => {
   const model = new ScriptedModel([
     {
@@ -1216,6 +1252,8 @@ for (
     ["How many overdue invoices are there right now?", "live_data"],
     ["Why is this invoice still open?", "live_data"],
     ["Why is this receipt still unapplied?", "live_data"],
+    ["How are collections performing?", "live_data"],
+    ["Analyze this automation document.", "live_data"],
   ] as const
 ) {
   Deno.test(`v2 intent remains compatible: ${question}`, () =>

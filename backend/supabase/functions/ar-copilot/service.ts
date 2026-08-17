@@ -124,6 +124,26 @@ function errorCategory(error: unknown): string {
   return "internal";
 }
 
+function responseUnverified(
+  phase: string,
+  round: number,
+  options: { toolName?: string; errorCategory?: string } = {},
+): BusinessError {
+  return new BusinessError(
+    "COPILOT_RESPONSE_UNVERIFIED",
+    "The requested information could not be verified.",
+    502,
+    {
+      phase,
+      round,
+      ...(options.toolName ? { tool_name: options.toolName } : {}),
+      ...(options.errorCategory
+        ? { error_category: options.errorCategory }
+        : {}),
+    },
+  );
+}
+
 function toolOutput(outcome: CopilotToolOutcome): string {
   return JSON.stringify({ data: outcome.data });
 }
@@ -260,11 +280,9 @@ export class CopilotService {
           };
         }
         if (round === COPILOT_MAX_TOOL_ROUNDS || turn.calls.length === 0) {
-          throw new BusinessError(
-            "COPILOT_RESPONSE_UNVERIFIED",
-            "The requested information could not be verified.",
-            502,
-          );
+          throw responseUnverified("tool_loop", round, {
+            errorCategory: "no_final_answer",
+          });
         }
         if (calls + turn.calls.length > COPILOT_MAX_TOOL_CALLS) {
           throw new BusinessError(
@@ -292,11 +310,10 @@ export class CopilotService {
         }> = [];
         for (const call of turn.calls) {
           if (isLiveDataTool(call.name) && !allowsLiveTools) {
-            throw new BusinessError(
-              "COPILOT_RESPONSE_UNVERIFIED",
-              "The requested information could not be verified.",
-              502,
-            );
+            throw responseUnverified("tool_authorization", round, {
+              toolName: call.name,
+              errorCategory: "live_tool_not_authorized_for_question",
+            });
           }
           const toolStarted = this.#now();
           let outcome: CopilotToolOutcome;
@@ -320,11 +337,10 @@ export class CopilotService {
               throw error;
             }
             if (error instanceof ValidationError) {
-              throw new BusinessError(
-                "COPILOT_RESPONSE_UNVERIFIED",
-                "The requested information could not be verified.",
-                502,
-              );
+              throw responseUnverified("tool_execution", round, {
+                toolName: call.name,
+                errorCategory: "validation_failure",
+              });
             }
             throw error;
           }
@@ -370,11 +386,9 @@ export class CopilotService {
           });
         }
       }
-      throw new BusinessError(
-        "COPILOT_RESPONSE_UNVERIFIED",
-        "The requested information could not be verified.",
-        502,
-      );
+      throw responseUnverified("tool_loop", COPILOT_MAX_TOOL_ROUNDS, {
+        errorCategory: "round_limit",
+      });
     } catch (error) {
       failure = error;
       throw error;
